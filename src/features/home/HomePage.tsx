@@ -1,13 +1,15 @@
-import { Plus, Users, WalletCards, BookOpenCheck } from "lucide-react";
+import { useState } from "react";
+import { BookOpenCheck, FolderOpen, Users, WalletCards } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/common/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   academicYears,
+  type ClassOverview,
   getClassOverviewsByYear,
-  getHomeSummary,
 } from "@/data/mockData";
 import { ClassCard } from "@/features/home/components/ClassCard";
+import { CreateClassDialog } from "@/features/home/components/CreateClassDialog";
 import { YearSelector } from "@/features/home/components/YearSelector";
 
 type HomePageProps = {
@@ -23,8 +25,16 @@ const summaryCards = [
 ] as const;
 
 export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePageProps) {
-  const classOverviews = getClassOverviewsByYear(selectedYearId);
-  const summary = getHomeSummary(selectedYearId);
+  const [createdClasses, setCreatedClasses] = useState<ClassOverview[]>([]);
+  const classOverviews = [
+    ...getClassOverviewsByYear(selectedYearId),
+    ...createdClasses.filter((classItem) => classItem.academicYearId === selectedYearId),
+  ];
+  const summary = {
+    totalClasses: classOverviews.length,
+    totalStudents: classOverviews.reduce((total, classItem) => total + classItem.studentCount, 0),
+    unpaidThisMonth: classOverviews.reduce((total, classItem) => total + classItem.unpaidCount, 0),
+  };
 
   return (
     <div className="min-h-full min-w-0 space-y-4 pb-4">
@@ -37,10 +47,10 @@ export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePage
         </div>
         <div className="flex min-w-0 flex-col items-stretch gap-3 sm:items-end">
           <YearSelector years={academicYears} value={selectedYearId} onChange={onYearChange} />
-          <Button className="h-10 w-full gap-2 sm:w-auto">
-            <Plus className="size-4" />
-            <span className="hidden sm:inline">Tạo lớp mới</span>
-          </Button>
+          <CreateClassDialog
+            academicYearId={selectedYearId}
+            onCreate={(classItem) => setCreatedClasses((current) => [...current, classItem])}
+          />
         </div>
       </section>
 
@@ -71,11 +81,25 @@ export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePage
             Bấm vào lớp để xem chi tiết.
           </p>
         </div>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
-          {classOverviews.map((classItem) => (
-            <ClassCard key={classItem.id} classItem={classItem} onOpen={onOpenClass} />
-          ))}
-        </div>
+        {classOverviews.length > 0 ? (
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
+            {classOverviews.map((classItem) => (
+              <ClassCard key={classItem.id} classItem={classItem} onOpen={onOpenClass} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={FolderOpen}
+            title="Chưa có lớp học trong năm này"
+            description="Thầy có thể tạo lớp mẫu để xem trước cách danh sách lớp sẽ hiển thị."
+            action={
+              <CreateClassDialog
+                academicYearId={selectedYearId}
+                onCreate={(classItem) => setCreatedClasses((current) => [...current, classItem])}
+              />
+            }
+          />
+        )}
       </section>
     </div>
   );

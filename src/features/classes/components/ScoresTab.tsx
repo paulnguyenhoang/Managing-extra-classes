@@ -1,4 +1,5 @@
-import { Download, Plus } from "lucide-react";
+import { useState } from "react";
+import { Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,22 +11,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getScoreColumnsByClassId, getScoreRowsByClassId } from "@/data/mockData";
+import { AddScoreColumnDialog } from "@/features/classes/components/AddScoreColumnDialog";
+import type { ScoreColumn } from "@/types/score";
 
 type ScoresTabProps = {
   classId: string;
 };
 
 export function ScoresTab({ classId }: ScoresTabProps) {
-  const columns = getScoreColumnsByClassId(classId);
+  const [extraColumns, setExtraColumns] = useState<ScoreColumn[]>([]);
+  const columns = [...getScoreColumnsByClassId(classId), ...extraColumns];
   const rows = getScoreRowsByClassId(classId);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
-        <Button className="gap-2">
-          <Plus className="size-4" />
-          <span className="hidden sm:inline">Thêm cột điểm</span>
-        </Button>
+        <AddScoreColumnDialog
+          classId={classId}
+          onAdd={(column) => setExtraColumns((current) => [...current, column])}
+        />
         <Button variant="outline" className="gap-2">
           <Download className="size-4" />
           <span className="hidden sm:inline">Xuất bảng điểm</span>

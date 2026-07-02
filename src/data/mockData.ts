@@ -11,6 +11,8 @@ import type { Student } from "@/types/student";
 
 export const currentPaymentMonth = "2026-07";
 
+export const paymentMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
+
 export const academicYears: AcademicYear[] = [
   {
     id: "2025-2026",
@@ -24,6 +26,13 @@ export const academicYears: AcademicYear[] = [
     label: "Năm học 2024 - 2025",
     startsAt: "2024-08-01",
     endsAt: "2025-05-31",
+    isCurrent: false,
+  },
+  {
+    id: "2026-2027",
+    label: "Năm học 2026 - 2027",
+    startsAt: "2026-08-01",
+    endsAt: "2027-05-31",
     isCurrent: false,
   },
 ];
@@ -183,8 +192,10 @@ export const payments: Payment[] = [
     studentId: "s4",
     classId: "van-9a",
     month: currentPaymentMonth,
-    status: "unpaid",
-    amount: 700000,
+    status: "waived",
+    amount: 350000,
+    paidAt: "2026-07-05",
+    note: "Giảm còn 350.000 đ",
   },
   {
     id: "p5",
@@ -200,8 +211,9 @@ export const payments: Payment[] = [
     studentId: "s6",
     classId: "van-8a",
     month: currentPaymentMonth,
-    status: "unpaid",
-    amount: 600000,
+    status: "waived",
+    amount: 0,
+    note: "Miễn giảm tháng này",
   },
   {
     id: "p7",
@@ -221,6 +233,95 @@ export const payments: Payment[] = [
     amount: 550000,
     paidAt: "2026-07-04",
   },
+  {
+    id: "p9",
+    studentId: "s1",
+    classId: "van-9a",
+    month: "2026-06",
+    status: "paid",
+    amount: 700000,
+    paidAt: "2026-06-03",
+  },
+  {
+    id: "p10",
+    studentId: "s2",
+    classId: "van-9a",
+    month: "2026-06",
+    status: "paid",
+    amount: 700000,
+    paidAt: "2026-06-04",
+  },
+  {
+    id: "p11",
+    studentId: "s3",
+    classId: "van-9a",
+    month: "2026-06",
+    status: "waived",
+    amount: 300000,
+    paidAt: "2026-06-05",
+    note: "Giảm còn 300.000 đ",
+  },
+  {
+    id: "p12",
+    studentId: "s4",
+    classId: "van-9a",
+    month: "2026-06",
+    status: "unpaid",
+    amount: 0,
+    note: "Hẹn đóng cuối tuần",
+  },
+  {
+    id: "p13",
+    studentId: "s1",
+    classId: "van-9a",
+    month: "2026-05",
+    status: "paid",
+    amount: 700000,
+    paidAt: "2026-05-03",
+  },
+  {
+    id: "p14",
+    studentId: "s2",
+    classId: "van-9a",
+    month: "2026-05",
+    status: "waived",
+    amount: 0,
+    note: "Con người quen, miễn học phí",
+  },
+  {
+    id: "p15",
+    studentId: "s3",
+    classId: "van-9a",
+    month: "2026-05",
+    status: "paid",
+    amount: 700000,
+    paidAt: "2026-05-02",
+  },
+  {
+    id: "p16",
+    studentId: "s4",
+    classId: "van-9a",
+    month: "2026-05",
+    status: "paid",
+    amount: 700000,
+    paidAt: "2026-05-06",
+  },
+  {
+    id: "p17",
+    studentId: "s1",
+    classId: "van-9a",
+    month: "2026-08",
+    status: "unpaid",
+    amount: 0,
+  },
+  {
+    id: "p18",
+    studentId: "s2",
+    classId: "van-9a",
+    month: "2026-08",
+    status: "unpaid",
+    amount: 0,
+  },
 ];
 
 export const attendanceSessions: AttendanceSession[] = [
@@ -234,7 +335,7 @@ export const attendanceSessions: AttendanceSession[] = [
 
 export const attendanceRecords: AttendanceRecord[] = [
   { id: "ar1", sessionId: "a1", studentId: "s1", status: "present" },
-  { id: "ar2", sessionId: "a1", studentId: "s2", status: "late" },
+  { id: "ar2", sessionId: "a1", studentId: "s2", status: "makeup" },
   { id: "ar3", sessionId: "a1", studentId: "s3", status: "present" },
   { id: "ar4", sessionId: "a1", studentId: "s4", status: "absent" },
   { id: "ar5", sessionId: "a2", studentId: "s1", status: "present" },
@@ -246,7 +347,7 @@ export const attendanceRecords: AttendanceRecord[] = [
   { id: "ar11", sessionId: "a3", studentId: "s3", status: "present" },
   { id: "ar12", sessionId: "a3", studentId: "s4", status: "excused" },
   { id: "ar13", sessionId: "a4", studentId: "s5", status: "present" },
-  { id: "ar14", sessionId: "a4", studentId: "s6", status: "late" },
+  { id: "ar14", sessionId: "a4", studentId: "s6", status: "makeup" },
   { id: "ar15", sessionId: "a5", studentId: "s5", status: "present" },
   { id: "ar16", sessionId: "a5", studentId: "s6", status: "present" },
   { id: "ar17", sessionId: "a6", studentId: "s7", status: "present" },

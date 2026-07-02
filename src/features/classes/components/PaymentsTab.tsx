@@ -1,7 +1,8 @@
-import { Download, Filter } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Download } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,42 +20,165 @@ import {
 } from "@/components/ui/table";
 import {
   currentPaymentMonth,
+  getClassById,
   getPaymentsForClassMonth,
   getStudentsByClassId,
+  paymentMonths,
 } from "@/data/mockData";
-import { formatCurrency, formatDate, paymentStatusLabel } from "@/lib/format";
+import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
+import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
+import {
+  filterPaymentRows,
+  formatPaymentMonth,
+  formatPaymentMonthLabel,
+  getPaymentRows,
+  getPaymentSummary,
+  paymentFilterOptions,
+  paymentSelectClasses,
+  paymentStatusOptions,
+  todayDateKey,
+  upsertPayment,
+  type PaymentFilter,
+  type PaymentRow,
+} from "@/features/classes/utils/payments";
+import { formatCurrency, formatDate } from "@/lib/format";
+import type { Payment, PaymentStatus } from "@/types/payment";
 
 type PaymentsTabProps = {
   classId: string;
 };
 
+type PaymentsByMonth = Record<string, Payment[]>;
+
 export function PaymentsTab({ classId }: PaymentsTabProps) {
+  const [selectedMonth, setSelectedMonth] = useState(currentPaymentMonth);
+  const [filter, setFilter] = useState<PaymentFilter>("all");
+  const [pendingPaidRow, setPendingPaidRow] = useState<PaymentRow | null>(null);
+  const [pendingWaivedRow, setPendingWaivedRow] = useState<PaymentRow | null>(null);
   const students = getStudentsByClassId(classId);
-  const payments = getPaymentsForClassMonth(classId);
+  const classItem = getClassById(classId);
+  const monthlyFee = classItem?.monthlyFee ?? 0;
+  const [paymentsByMonth, setPaymentsByMonth] = useState<PaymentsByMonth>(() =>
+    paymentMonths.reduce<PaymentsByMonth>((result, month) => {
+      result[month] = getPaymentsForClassMonth(classId, month);
+      return result;
+    }, {}),
+  );
+
+  const currentPayments = paymentsByMonth[selectedMonth] ?? [];
+  const rows = useMemo(
+    () => getPaymentRows(students, currentPayments, classId, selectedMonth),
+    [classId, currentPayments, selectedMonth, students],
+  );
+  const visibleRows = filterPaymentRows(rows, filter);
+  const summary = getPaymentSummary(rows);
+  const selectedMonthLabel = formatPaymentMonth(selectedMonth);
+
+  function updatePayment(nextPayment: Payment) {
+    setPaymentsByMonth((current) => ({
+      ...current,
+      [selectedMonth]: upsertPayment(current[selectedMonth] ?? [], nextPayment),
+    }));
+  }
+
+  function handleStatusChange(row: PaymentRow, status: PaymentStatus) {
+    if (status === "paid") {
+      setPendingPaidRow(row);
+      return;
+    }
+
+    if (status === "waived") {
+      setPendingWaivedRow(row);
+      return;
+    }
+
+    updatePayment({
+      ...row.payment,
+      status: "unpaid",
+      amount: 0,
+      paidAt: undefined,
+    });
+  }
+
+  function confirmPaid() {
+    if (!pendingPaidRow) {
+      return;
+    }
+
+    updatePayment({
+      ...pendingPaidRow.payment,
+      status: "paid",
+      amount: monthlyFee,
+      paidAt: todayDateKey(),
+    });
+    setPendingPaidRow(null);
+  }
+
+  function saveWaiver(amount: number, note: string) {
+    if (!pendingWaivedRow) {
+      return;
+    }
+
+    updatePayment({
+      ...pendingWaivedRow.payment,
+      status: "waived",
+      amount,
+      note,
+      paidAt: amount > 0 ? todayDateKey() : undefined,
+    });
+    setPendingWaivedRow(null);
+  }
+
+  function updateNote(row: PaymentRow, note: string) {
+    updatePayment({
+      ...row.payment,
+      note,
+    });
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
-        <Select value={currentPaymentMonth}>
-          <SelectTrigger className="h-9 min-w-40 bg-white">
+        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+          <SelectTrigger className="h-9 min-w-44 bg-white">
             <SelectValue placeholder="Chọn tháng" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={currentPaymentMonth}>Tháng 07/2026</SelectItem>
+            {paymentMonths.map((month) => (
+              <SelectItem key={month} value={month}>
+                {formatPaymentMonthLabel(month)}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" className="gap-2">
-          <Filter className="size-4" />
-          <span className="hidden sm:inline">Lọc chưa đóng</span>
-        </Button>
+        <Select value={filter} onValueChange={(value) => setFilter(value as PaymentFilter)}>
+          <SelectTrigger className="h-9 min-w-36 bg-white">
+            <SelectValue placeholder="Lọc trạng thái" />
+          </SelectTrigger>
+          <SelectContent>
+            {paymentFilterOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" className="gap-2">
           <Download className="size-4" />
           <span className="hidden sm:inline">Xuất Excel</span>
         </Button>
       </div>
 
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+        <SummaryCard label="Tổng học sinh" value={summary.totalStudents} />
+        <SummaryCard label="Đã đóng" value={summary.paid} />
+        <SummaryCard label="Chưa đóng" value={summary.unpaid} />
+        <SummaryCard label="Miễn giảm" value={summary.waived} />
+        <SummaryCard label="Tổng đã thu" value={formatCurrency(summary.collected)} />
+      </div>
+
       <div className="min-w-0 rounded-lg border bg-white">
-        <Table className="min-w-[760px]">
+        <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow className="bg-slate-50">
               <TableHead>STT</TableHead>
@@ -66,36 +190,83 @@ export function PaymentsTab({ classId }: PaymentsTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {students.map((student, index) => {
-              const payment = payments.find((item) => item.studentId === student.id);
-              const status = payment?.status ?? "unpaid";
-
-              return (
-                <TableRow key={student.id}>
-                  <TableCell>{index + 1}</TableCell>
-                  <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
-                  <TableCell>
-                    <Badge
-                      className={
-                        status === "paid"
-                          ? "bg-emerald-100 text-emerald-900 hover:bg-emerald-100"
-                          : "bg-amber-100 text-amber-900 hover:bg-amber-100"
-                      }
+            {visibleRows.map((row, index) => (
+              <TableRow key={row.student.id}>
+                <TableCell>{index + 1}</TableCell>
+                <TableCell className="font-medium text-slate-950">{row.student.fullName}</TableCell>
+                <TableCell>
+                  <Select
+                    value={row.payment.status}
+                    onValueChange={(value) => handleStatusChange(row, value as PaymentStatus)}
+                  >
+                    <SelectTrigger
+                      className={[
+                        "h-8 w-36 justify-between font-medium shadow-none",
+                        paymentSelectClasses[row.payment.status],
+                      ].join(" ")}
                     >
-                      {paymentStatusLabel(status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{formatCurrency(payment?.amount ?? 0)}</TableCell>
-                  <TableCell>{formatDate(payment?.paidAt)}</TableCell>
-                  <TableCell className="max-w-52 whitespace-normal text-muted-foreground">
-                    {payment?.note ?? "-"}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paymentStatusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>{formatCurrency(row.payment.amount)}</TableCell>
+                <TableCell>{formatDate(row.payment.paidAt)}</TableCell>
+                <TableCell>
+                  <Input
+                    value={row.payment.note ?? ""}
+                    onChange={(event) => updateNote(row, event.target.value)}
+                    className="h-8 min-w-56 bg-white"
+                    placeholder="Thêm ghi chú"
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>
+
+      <ConfirmPaidDialog
+        open={Boolean(pendingPaidRow)}
+        studentName={pendingPaidRow?.student.fullName ?? ""}
+        monthLabel={selectedMonthLabel}
+        monthlyFee={monthlyFee}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingPaidRow(null);
+          }
+        }}
+        onConfirm={confirmPaid}
+      />
+      <TuitionWaiverDialog
+        open={Boolean(pendingWaivedRow)}
+        studentName={pendingWaivedRow?.student.fullName ?? ""}
+        monthLabel={selectedMonthLabel}
+        monthlyFee={monthlyFee}
+        defaultAmount={pendingWaivedRow?.payment.amount ?? 0}
+        defaultNote={pendingWaivedRow?.payment.note ?? ""}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingWaivedRow(null);
+          }
+        }}
+        onSave={saveWaiver}
+      />
+    </div>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-1 truncate text-2xl font-semibold text-slate-950">{value}</p>
     </div>
   );
 }

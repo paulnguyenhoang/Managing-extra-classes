@@ -34,7 +34,13 @@ export function studentStatusLabel(status: StudentStatus) {
 }
 
 export function paymentStatusLabel(status: PaymentStatus) {
-  return status === "paid" ? "Đã đóng" : "Chưa đóng";
+  const labels: Record<PaymentStatus, string> = {
+    paid: "Đã đóng",
+    unpaid: "Chưa đóng",
+    waived: "Miễn giảm",
+  };
+
+  return labels[status];
 }
 
 export function attendanceStatusLabel(status?: AttendanceStatus) {
@@ -42,7 +48,7 @@ export function attendanceStatusLabel(status?: AttendanceStatus) {
     present: "Có mặt",
     absent: "Vắng",
     excused: "Có phép",
-    late: "Đi muộn",
+    makeup: "Học bù",
   };
 
   return status ? labels[status] : "-";
