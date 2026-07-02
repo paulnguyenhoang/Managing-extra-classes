@@ -1,0 +1,67 @@
+import { Download, Plus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { getScoreColumnsByClassId, getScoreRowsByClassId } from "@/data/mockData";
+
+type ScoresTabProps = {
+  classId: string;
+};
+
+export function ScoresTab({ classId }: ScoresTabProps) {
+  const columns = getScoreColumnsByClassId(classId);
+  const rows = getScoreRowsByClassId(classId);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button className="gap-2">
+          <Plus className="size-4" />
+          <span className="hidden sm:inline">Thêm cột điểm</span>
+        </Button>
+        <Button variant="outline" className="gap-2">
+          <Download className="size-4" />
+          <span className="hidden sm:inline">Xuất bảng điểm</span>
+        </Button>
+      </div>
+
+      <div className="min-w-0 rounded-lg border bg-white">
+        <Table className="min-w-[760px]">
+          <TableHeader>
+            <TableRow className="bg-slate-50">
+              <TableHead>STT</TableHead>
+              <TableHead>Họ tên</TableHead>
+              {columns.map((column) => (
+                <TableHead key={column.id}>{column.label}</TableHead>
+              ))}
+              <TableHead>Ghi chú</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row, index) => (
+              <TableRow key={row.student.id}>
+                <TableCell>{index + 1}</TableCell>
+                <TableCell className="font-medium text-slate-950">{row.student.fullName}</TableCell>
+                {columns.map((column) => (
+                  <TableCell key={column.id}>
+                    {row.valuesByColumnId[column.id] ?? "-"}
+                  </TableCell>
+                ))}
+                <TableCell className="max-w-52 whitespace-normal text-muted-foreground">
+                  {row.note ?? "-"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
