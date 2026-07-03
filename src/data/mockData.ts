@@ -437,13 +437,16 @@ export function getUnpaidCountForClass(classId: string, month = currentPaymentMo
 }
 
 export function getClassOverviewsByYear(academicYearId: string): ClassOverview[] {
-  return classes
+  return getAllClassOverviews()
     .filter((item) => item.academicYearId === academicYearId)
-    .map((item) => ({
-      ...item,
-      studentCount: getStudentsByClassId(item.id).length,
-      unpaidCount: getUnpaidCountForClass(item.id),
-    }));
+}
+
+export function getAllClassOverviews(): ClassOverview[] {
+  return classes.map((item) => ({
+    ...item,
+    studentCount: getStudentsByClassId(item.id).length,
+    unpaidCount: getUnpaidCountForClass(item.id),
+  }));
 }
 
 export function getHomeSummary(academicYearId: string): HomeSummary {

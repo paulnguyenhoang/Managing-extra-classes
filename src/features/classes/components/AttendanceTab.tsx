@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Lock, Unlock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,9 +28,11 @@ import {
 } from "@/features/classes/utils/attendance";
 import { attendanceStatusLabel } from "@/lib/format";
 import type { AttendanceStatus } from "@/types/attendance";
+import type { ClassScheduleItem } from "@/types/class";
 
 type AttendanceTabProps = {
   classId: string;
+  scheduleItems: ClassScheduleItem[];
 };
 
 type AttendanceCellStatus = AttendanceStatus | undefined;
@@ -58,14 +60,16 @@ function SessionHeader({
   session,
   today,
   isCancelled,
+  isUnlocked,
   onCancel,
-  onUnlock,
+  onToggleLock,
 }: {
   session: WeeklySession;
   today: Date;
   isCancelled: boolean;
+  isUnlocked: boolean;
   onCancel: () => void;
-  onUnlock: () => void;
+  onToggleLock: () => void;
 }) {
   const past = isPastDate(session.date, today);
 
@@ -97,30 +101,32 @@ function SessionHeader({
         <Button
           type="button"
           size="xs"
-          variant="ghost"
-          className="h-6 px-2 text-xs"
-          onClick={onUnlock}
+          variant={isUnlocked ? "default" : "ghost"}
+          className="h-6 gap-1 px-2 text-xs"
+          onClick={onToggleLock}
         >
-          Mở khóa
+          {isUnlocked ? <Lock className="size-3" /> : <Unlock className="size-3" />}
+          {isUnlocked ? "Khóa" : "Mở khóa"}
         </Button>
       </div>
     </div>
   );
 }
 
-export function AttendanceTab({ classId }: AttendanceTabProps) {
+export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(today));
   const students = getStudentsByClassId(classId);
   const {
     sessions,
     cancelledSessionIds,
+    unlockedSessionIds,
     getStatus,
     cycleStatus,
     cancelSession,
-    unlockSession,
+    toggleSessionLock,
     addMakeupSession,
-  } = useMockAttendance(weekStart);
+  } = useMockAttendance(weekStart, scheduleItems);
 
   function goToPreviousWeek() {
     setWeekStart((current) => addDays(current, -7));
@@ -147,9 +153,6 @@ export function AttendanceTab({ classId }: AttendanceTabProps) {
               <ChevronRight className="size-4" />
             </Button>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Lịch cố định: Thứ 3 và Thứ 5 lúc 18:00
-          </p>
         </div>
       </section>
 
@@ -175,8 +178,9 @@ export function AttendanceTab({ classId }: AttendanceTabProps) {
                     session={session}
                     today={today}
                     isCancelled={cancelledSessionIds.includes(session.id)}
+                    isUnlocked={unlockedSessionIds.includes(session.id)}
                     onCancel={() => cancelSession(session.id)}
-                    onUnlock={() => unlockSession(session.id)}
+                    onToggleLock={() => toggleSessionLock(session.id)}
                   />
                 </TableHead>
               ))}
@@ -189,6 +193,7 @@ export function AttendanceTab({ classId }: AttendanceTabProps) {
                 <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
                 {sessions.map((session) => {
                   const isCancelled = cancelledSessionIds.includes(session.id);
+                  const isUnlocked = unlockedSessionIds.includes(session.id);
                   const status = getStatus(session.id, student.id);
 
                   return (
@@ -200,8 +205,19 @@ export function AttendanceTab({ classId }: AttendanceTabProps) {
                       ) : (
                         <button
                           type="button"
-                          className="rounded-md outline-none transition hover:scale-[1.02] focus-visible:ring-3 focus-visible:ring-ring/50"
+                          disabled={!isUnlocked}
+                          className={[
+                            "rounded-md outline-none transition focus-visible:ring-3 focus-visible:ring-ring/50",
+                            isUnlocked
+                              ? "hover:scale-[1.02]"
+                              : "cursor-not-allowed opacity-75",
+                          ].join(" ")}
                           onClick={() => cycleStatus(session.id, student.id)}
+                          title={
+                            isUnlocked
+                              ? "Bấm để đổi trạng thái điểm danh"
+                              : "Bấm Mở khóa để chỉnh sửa buổi này"
+                          }
                         >
                           <AttendanceStatusBadge status={status} />
                         </button>

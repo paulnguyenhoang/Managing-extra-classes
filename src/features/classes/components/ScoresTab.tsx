@@ -1,7 +1,24 @@
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { ClipboardList, Download, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 
+import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -10,62 +27,212 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getScoreColumnsByClassId, getScoreRowsByClassId } from "@/data/mockData";
-import { AddScoreColumnDialog } from "@/features/classes/components/AddScoreColumnDialog";
-import type { ScoreColumn } from "@/types/score";
+import { useMockScores } from "@/features/classes/hooks/useMockScores";
+import {
+  canUseScoreInput,
+  formatScoreMonthLabel,
+  scoreMonths,
+  type MonthlyScoreColumn,
+} from "@/features/classes/utils/scores";
 
 type ScoresTabProps = {
   classId: string;
 };
 
 export function ScoresTab({ classId }: ScoresTabProps) {
-  const [extraColumns, setExtraColumns] = useState<ScoreColumn[]>([]);
-  const columns = [...getScoreColumnsByClassId(classId), ...extraColumns];
-  const rows = getScoreRowsByClassId(classId);
+  const [pendingDeleteColumn, setPendingDeleteColumn] = useState<MonthlyScoreColumn | null>(null);
+  const {
+    activeSheet,
+    errorMessage,
+    isEditing,
+    selectedMonth,
+    students,
+    addColumn,
+    cancelEditing,
+    changeMonth,
+    deleteColumn,
+    saveEditing,
+    startEditing,
+    updateColumnLabel,
+    updateScore,
+  } = useMockScores(classId);
+  const hasColumns = activeSheet.columns.length > 0;
+
+  function confirmDeleteColumn() {
+    if (!pendingDeleteColumn) {
+      return;
+    }
+
+    deleteColumn(pendingDeleteColumn.id);
+    setPendingDeleteColumn(null);
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-end gap-2">
-        <AddScoreColumnDialog
-          classId={classId}
-          onAdd={(column) => setExtraColumns((current) => [...current, column])}
-        />
-        <Button variant="outline" className="gap-2">
-          <Download className="size-4" />
-          <span className="hidden sm:inline">Xuất bảng điểm</span>
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Select value={selectedMonth} onValueChange={changeMonth}>
+          <SelectTrigger className="h-9 min-w-44 bg-white">
+            <SelectValue placeholder="Chọn tháng" />
+          </SelectTrigger>
+          <SelectContent>
+            {scoreMonths.map((month) => (
+              <SelectItem key={month} value={month}>
+                {formatScoreMonthLabel(month)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          {isEditing ? (
+            <>
+              <Button className="gap-2" onClick={saveEditing}>
+                <Save className="size-4" />
+                <span className="hidden sm:inline">Lưu thay đổi</span>
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={cancelEditing}>
+                <X className="size-4" />
+                <span className="hidden sm:inline">Hủy</span>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button className="gap-2" onClick={addColumn}>
+                <Plus className="size-4" />
+                <span className="hidden sm:inline">Thêm bài kiểm tra</span>
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={startEditing}>
+                <Pencil className="size-4" />
+                <span className="hidden sm:inline">Cập nhật</span>
+              </Button>
+              <Button variant="outline" className="gap-2">
+                <Download className="size-4" />
+                <span className="hidden sm:inline">Xuất bảng điểm</span>
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="min-w-0 rounded-lg border bg-white">
-        <Table className="min-w-[760px]">
-          <TableHeader>
-            <TableRow className="bg-slate-50">
-              <TableHead>STT</TableHead>
-              <TableHead>Họ tên</TableHead>
-              {columns.map((column) => (
-                <TableHead key={column.id}>{column.label}</TableHead>
-              ))}
-              <TableHead>Ghi chú</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row, index) => (
-              <TableRow key={row.student.id}>
-                <TableCell>{index + 1}</TableCell>
-                <TableCell className="font-medium text-slate-950">{row.student.fullName}</TableCell>
-                {columns.map((column) => (
-                  <TableCell key={column.id}>
-                    {row.valuesByColumnId[column.id] ?? "-"}
-                  </TableCell>
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {!hasColumns ? (
+        <EmptyState
+          icon={ClipboardList}
+          title="Tháng này chưa có bài kiểm tra nào."
+          description="Thầy có thể thêm bài kiểm tra đầu tiên cho tháng đang chọn."
+          action={
+            <Button className="gap-2" onClick={addColumn}>
+              <Plus className="size-4" />
+              Thêm bài kiểm tra
+            </Button>
+          }
+        />
+      ) : (
+        <div className="min-w-0 rounded-lg border bg-white">
+          <Table className="min-w-[760px]">
+            <TableHeader>
+              <TableRow className="bg-slate-50">
+                <TableHead className="w-16">STT</TableHead>
+                <TableHead className="min-w-52">Họ tên</TableHead>
+                {activeSheet.columns.map((column) => (
+                  <TableHead key={column.id} className="min-w-40">
+                    {isEditing ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={column.label}
+                          onChange={(event) => updateColumnLabel(column.id, event.target.value)}
+                          className="h-8 min-w-36 bg-white font-medium"
+                          aria-label="Tên bài kiểm tra"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                          onClick={() => setPendingDeleteColumn(column)}
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">Xóa cột điểm</span>
+                        </Button>
+                      </div>
+                    ) : (
+                      column.label
+                    )}
+                  </TableHead>
                 ))}
-                <TableCell className="max-w-52 whitespace-normal text-muted-foreground">
-                  {row.note ?? "-"}
-                </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {students.map((student, index) => (
+                <TableRow key={student.id}>
+                  <TableCell>{index + 1}</TableCell>
+                  <TableCell className="font-medium text-slate-950">
+                    {student.fullName}
+                  </TableCell>
+                  {activeSheet.columns.map((column) => {
+                    const score = activeSheet.valuesByStudentId[student.id]?.[column.id] ?? "";
+
+                    return (
+                      <TableCell key={column.id}>
+                        {isEditing ? (
+                          <Input
+                            value={score}
+                            inputMode="decimal"
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              if (canUseScoreInput(nextValue)) {
+                                updateScore(student.id, column.id, nextValue);
+                              }
+                            }}
+                            className="h-8 w-24 bg-white"
+                            placeholder="-"
+                            aria-label={`Điểm ${column.label} của ${student.fullName}`}
+                          />
+                        ) : (
+                          score || "-"
+                        )}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <Dialog
+        open={Boolean(pendingDeleteColumn)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteColumn(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xóa cột điểm</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Bạn có chắc muốn xóa cột điểm này? Toàn bộ điểm trong cột sẽ bị xóa.
+          </p>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Hủy
+              </Button>
+            </DialogClose>
+            <Button type="button" variant="destructive" onClick={confirmDeleteColumn}>
+              Xóa cột điểm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

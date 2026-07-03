@@ -2,6 +2,10 @@ import { CalendarDays, Users, WalletCards } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { ClassOverview } from "@/data/mockData";
+import {
+  formatScheduleLines,
+  parseScheduleText,
+} from "@/features/classes/utils/classSchedule";
 import { formatCurrency } from "@/lib/format";
 
 type ClassCardProps = {
@@ -10,6 +14,8 @@ type ClassCardProps = {
 };
 
 export function ClassCard({ classItem, onOpen }: ClassCardProps) {
+  const scheduleLines = formatScheduleLines(parseScheduleText(classItem.schedule));
+
   return (
     <button
       type="button"
@@ -21,10 +27,16 @@ export function ClassCard({ classItem, onOpen }: ClassCardProps) {
           <h3 className="break-words text-lg font-semibold leading-snug text-slate-950">
             {classItem.name}
           </h3>
-          <p className="mt-2 flex min-w-0 items-center gap-2 text-sm text-slate-600">
+          <div className="mt-2 flex min-w-0 items-start gap-2 text-sm leading-5 text-slate-600">
             <CalendarDays className="size-4 shrink-0 text-emerald-700" />
-            <span className="min-w-0 truncate">{classItem.schedule}</span>
-          </p>
+            <div className="min-w-0 space-y-0.5">
+              {scheduleLines.map((line) => (
+                <p key={line} className="break-words">
+                  {line}
+                </p>
+              ))}
+            </div>
+          </div>
         </div>
         {classItem.unpaidCount > 0 ? (
           <Badge className="shrink-0 bg-amber-100 text-amber-900 hover:bg-amber-100">

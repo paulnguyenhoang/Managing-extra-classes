@@ -1,9 +1,11 @@
 import type { AttendanceStatus } from "@/types/attendance";
+import type { ClassScheduleItem } from "@/types/class";
 
 export type WeeklySession = {
   id: string;
   date: Date;
-  time: string;
+  startTime: string;
+  endTime: string;
   isMakeup?: boolean;
   makeupForSessionId?: string;
 };
@@ -13,8 +15,6 @@ export type MakeupSessionInput = {
   time: string;
   makeupForSessionId: string;
 };
-
-const studyDayIndexes = [2, 4];
 
 export const attendanceCycle: Array<AttendanceStatus | undefined> = [
   undefined,
@@ -99,18 +99,23 @@ export function isPastDate(date: Date, today = new Date()) {
   return startOfDay(date).getTime() < startOfDay(today).getTime();
 }
 
-export function isStudyDay(date: Date) {
-  return studyDayIndexes.includes(date.getDay());
+export function isStudyDay(date: Date, scheduleItems: ClassScheduleItem[]) {
+  return scheduleItems.some((item) => item.weekday === date.getDay());
 }
 
-export function getRegularSessionsForWeek(weekStart: Date): WeeklySession[] {
-  return studyDayIndexes.map((dayIndex) => {
+export function getRegularSessionsForWeek(
+  weekStart: Date,
+  scheduleItems: ClassScheduleItem[],
+): WeeklySession[] {
+  return scheduleItems.map((item) => {
+    const dayIndex = item.weekday === 0 ? 7 : item.weekday;
     const date = addDays(weekStart, dayIndex - 1);
 
     return {
-      id: `regular-${toDateKey(date)}`,
+      id: `regular-${toDateKey(date)}-${item.startTime}-${item.endTime}`,
       date,
-      time: "18:00",
+      startTime: item.startTime,
+      endTime: item.endTime,
     };
   });
 }

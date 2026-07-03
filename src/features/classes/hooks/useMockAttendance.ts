@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { AttendanceStatus } from "@/types/attendance";
+import type { ClassScheduleItem } from "@/types/class";
 import {
   attendanceCellKey,
   getNextAttendanceStatus,
@@ -13,13 +14,14 @@ import {
 
 type AttendanceState = Record<string, AttendanceStatus | undefined>;
 
-export function useMockAttendance(weekStart: Date) {
+export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleItem[]) {
   const [attendance, setAttendance] = useState<AttendanceState>({});
   const [cancelledSessionIds, setCancelledSessionIds] = useState<string[]>([]);
+  const [unlockedSessionIds, setUnlockedSessionIds] = useState<string[]>([]);
   const [makeupSessions, setMakeupSessions] = useState<WeeklySession[]>([]);
 
   const sessions = useMemo(() => {
-    const regularSessions = getRegularSessionsForWeek(weekStart);
+    const regularSessions = getRegularSessionsForWeek(weekStart, scheduleItems);
     const visibleMakeupSessions = makeupSessions.filter((session) =>
       isDateInWeek(session.date, weekStart),
     );
@@ -27,14 +29,14 @@ export function useMockAttendance(weekStart: Date) {
     return [...regularSessions, ...visibleMakeupSessions].sort(
       (first, second) => first.date.getTime() - second.date.getTime(),
     );
-  }, [makeupSessions, weekStart]);
+  }, [makeupSessions, scheduleItems, weekStart]);
 
   function getStatus(sessionId: string, studentId: string) {
     return attendance[attendanceCellKey(sessionId, studentId)];
   }
 
   function cycleStatus(sessionId: string, studentId: string) {
-    if (cancelledSessionIds.includes(sessionId)) {
+    if (cancelledSessionIds.includes(sessionId) || !unlockedSessionIds.includes(sessionId)) {
       return;
     }
 
@@ -65,10 +67,16 @@ export function useMockAttendance(weekStart: Date) {
     setCancelledSessionIds((current) =>
       current.includes(sessionId) ? current : [...current, sessionId],
     );
+    setUnlockedSessionIds((current) => current.filter((id) => id !== sessionId));
   }
 
-  function unlockSession(sessionId: string) {
+  function toggleSessionLock(sessionId: string) {
     setCancelledSessionIds((current) => current.filter((id) => id !== sessionId));
+    setUnlockedSessionIds((current) =>
+      current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : [...current, sessionId],
+    );
   }
 
   function addMakeupSession(input: MakeupSessionInput) {
@@ -79,7 +87,8 @@ export function useMockAttendance(weekStart: Date) {
       {
         id: `makeup-${Date.now()}`,
         date,
-        time: input.time || "18:00",
+        startTime: input.time || "18:00",
+        endTime: input.time || "20:00",
         isMakeup: true,
         makeupForSessionId: input.makeupForSessionId,
       },
@@ -89,11 +98,12 @@ export function useMockAttendance(weekStart: Date) {
   return {
     sessions,
     cancelledSessionIds,
+    unlockedSessionIds,
     getStatus,
     cycleStatus,
     markSessionForStudents,
     cancelSession,
-    unlockSession,
+    toggleSessionLock,
     addMakeupSession,
   };
 }

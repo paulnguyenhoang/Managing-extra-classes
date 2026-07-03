@@ -1,7 +1,11 @@
 import { useState } from "react";
 
 import { AppShell } from "@/components/layout/AppShell";
-import { getCurrentAcademicYearId } from "@/data/mockData";
+import {
+  type ClassOverview,
+  getAllClassOverviews,
+  getCurrentAcademicYearId,
+} from "@/data/mockData";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ClassDetailPage } from "@/features/classes/ClassDetailPage";
 import { HomePage } from "@/features/home/HomePage";
@@ -12,6 +16,8 @@ function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [selectedYearId, setSelectedYearId] = useState(getCurrentAcademicYearId);
+  const [classOverviews, setClassOverviews] = useState(getAllClassOverviews);
+  const selectedClass = classOverviews.find((classItem) => classItem.id === selectedClassId);
 
   function handleOpenClass(classId: string) {
     setSelectedClassId(classId);
@@ -28,19 +34,37 @@ function App() {
     setScreen("login");
   }
 
+  function handleCreateClass(classItem: ClassOverview) {
+    setClassOverviews((current) => [...current, classItem]);
+  }
+
+  function handleUpdateClass(classId: string, updates: Partial<ClassOverview>) {
+    setClassOverviews((current) =>
+      current.map((classItem) =>
+        classItem.id === classId ? { ...classItem, ...updates } : classItem,
+      ),
+    );
+  }
+
   if (screen === "login") {
     return <LoginPage onLogin={() => setScreen("home")} />;
   }
 
   return (
     <AppShell onLogout={handleLogout}>
-      {screen === "class-detail" && selectedClassId ? (
-        <ClassDetailPage classId={selectedClassId} onBack={handleBackHome} />
+      {screen === "class-detail" && selectedClass ? (
+        <ClassDetailPage
+          classItem={selectedClass}
+          onBack={handleBackHome}
+          onClassUpdate={handleUpdateClass}
+        />
       ) : (
         <HomePage
           selectedYearId={selectedYearId}
+          classOverviews={classOverviews}
           onYearChange={setSelectedYearId}
           onOpenClass={handleOpenClass}
+          onCreateClass={handleCreateClass}
         />
       )}
     </AppShell>

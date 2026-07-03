@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { BookOpenCheck, FolderOpen, Users, WalletCards } from "lucide-react";
 
 import { EmptyState } from "@/components/common/EmptyState";
@@ -6,7 +5,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   academicYears,
   type ClassOverview,
-  getClassOverviewsByYear,
 } from "@/data/mockData";
 import { ClassCard } from "@/features/home/components/ClassCard";
 import { CreateClassDialog } from "@/features/home/components/CreateClassDialog";
@@ -14,8 +12,10 @@ import { YearSelector } from "@/features/home/components/YearSelector";
 
 type HomePageProps = {
   selectedYearId: string;
+  classOverviews: ClassOverview[];
   onYearChange: (yearId: string) => void;
   onOpenClass: (classId: string) => void;
+  onCreateClass: (classItem: ClassOverview) => void;
 };
 
 const summaryCards = [
@@ -24,16 +24,26 @@ const summaryCards = [
   { key: "unpaidThisMonth", label: "Chưa đóng học phí tháng này", icon: WalletCards },
 ] as const;
 
-export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePageProps) {
-  const [createdClasses, setCreatedClasses] = useState<ClassOverview[]>([]);
-  const classOverviews = [
-    ...getClassOverviewsByYear(selectedYearId),
-    ...createdClasses.filter((classItem) => classItem.academicYearId === selectedYearId),
-  ];
+export function HomePage({
+  selectedYearId,
+  classOverviews,
+  onYearChange,
+  onOpenClass,
+  onCreateClass,
+}: HomePageProps) {
+  const visibleClassOverviews = classOverviews.filter(
+    (classItem) => classItem.academicYearId === selectedYearId,
+  );
   const summary = {
-    totalClasses: classOverviews.length,
-    totalStudents: classOverviews.reduce((total, classItem) => total + classItem.studentCount, 0),
-    unpaidThisMonth: classOverviews.reduce((total, classItem) => total + classItem.unpaidCount, 0),
+    totalClasses: visibleClassOverviews.length,
+    totalStudents: visibleClassOverviews.reduce(
+      (total, classItem) => total + classItem.studentCount,
+      0,
+    ),
+    unpaidThisMonth: visibleClassOverviews.reduce(
+      (total, classItem) => total + classItem.unpaidCount,
+      0,
+    ),
   };
 
   return (
@@ -49,7 +59,7 @@ export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePage
           <YearSelector years={academicYears} value={selectedYearId} onChange={onYearChange} />
           <CreateClassDialog
             academicYearId={selectedYearId}
-            onCreate={(classItem) => setCreatedClasses((current) => [...current, classItem])}
+            onCreate={onCreateClass}
           />
         </div>
       </section>
@@ -81,9 +91,9 @@ export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePage
             Bấm vào lớp để xem chi tiết.
           </p>
         </div>
-        {classOverviews.length > 0 ? (
+        {visibleClassOverviews.length > 0 ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3">
-            {classOverviews.map((classItem) => (
+            {visibleClassOverviews.map((classItem) => (
               <ClassCard key={classItem.id} classItem={classItem} onOpen={onOpenClass} />
             ))}
           </div>
@@ -95,7 +105,7 @@ export function HomePage({ selectedYearId, onYearChange, onOpenClass }: HomePage
             action={
               <CreateClassDialog
                 academicYearId={selectedYearId}
-                onCreate={(classItem) => setCreatedClasses((current) => [...current, classItem])}
+                onCreate={onCreateClass}
               />
             }
           />
