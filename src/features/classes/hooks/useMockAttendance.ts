@@ -70,6 +70,13 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
     setUnlockedSessionIds((current) => current.filter((id) => id !== sessionId));
   }
 
+  function restoreCancelledSession(sessionId: string) {
+    setCancelledSessionIds((current) => current.filter((id) => id !== sessionId));
+    setUnlockedSessionIds((current) =>
+      current.includes(sessionId) ? current : [...current, sessionId],
+    );
+  }
+
   function toggleSessionLock(sessionId: string) {
     setCancelledSessionIds((current) => current.filter((id) => id !== sessionId));
     setUnlockedSessionIds((current) =>
@@ -103,6 +110,7 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
     cycleStatus,
     markSessionForStudents,
     cancelSession,
+    restoreCancelledSession,
     toggleSessionLock,
     addMakeupSession,
   };

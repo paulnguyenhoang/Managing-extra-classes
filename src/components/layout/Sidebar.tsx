@@ -1,13 +1,27 @@
-import { BookMarked, CalendarCheck, GraduationCap, WalletCards } from "lucide-react";
+import {
+  CalendarCheck,
+  GraduationCap,
+  HardDriveDownload,
+  Settings,
+  WalletCards,
+} from "lucide-react";
 
 const navigationItems = [
-  { label: "Tổng quan", icon: GraduationCap, isActive: true },
-  { label: "Lịch học", icon: CalendarCheck, isActive: false },
-  { label: "Học sinh", icon: BookMarked, isActive: false },
-  { label: "Học phí", icon: WalletCards, isActive: false },
-];
+  { id: "home", label: "Tổng quan", icon: GraduationCap },
+  { id: "schedule", label: "Lịch học", icon: CalendarCheck },
+  { id: "tuition-dashboard", label: "Học phí", icon: WalletCards },
+  { id: "backup", label: "Sao lưu dữ liệu", icon: HardDriveDownload },
+  { id: "settings", label: "Cài đặt", icon: Settings },
+] as const;
 
-export function Sidebar() {
+export type SidebarScreen = (typeof navigationItems)[number]["id"];
+
+type SidebarProps = {
+  activeScreen: SidebarScreen;
+  onNavigate: (screen: SidebarScreen) => void;
+};
+
+export function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
   return (
     <aside className="w-16 shrink-0 border-r bg-white px-2 py-4 lg:w-64 lg:px-4 lg:py-6">
       <div className="mb-5 hidden rounded-lg border border-emerald-100 bg-emerald-50 p-4 lg:block">
@@ -18,15 +32,17 @@ export function Sidebar() {
       <nav className="space-y-2">
         {navigationItems.map((item) => {
           const Icon = item.icon;
+          const isActive = activeScreen === item.id;
 
           return (
             <button
-              key={item.label}
+              key={item.id}
               type="button"
               title={item.label}
+              onClick={() => onNavigate(item.id)}
               className={[
                 "flex h-11 w-full items-center justify-center gap-3 rounded-lg text-left text-sm font-medium lg:justify-start lg:px-3",
-                item.isActive
+                isActive
                   ? "bg-slate-900 text-white"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-950",
               ].join(" ")}

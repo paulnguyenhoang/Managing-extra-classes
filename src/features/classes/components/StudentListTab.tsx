@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import { Check, Download, Pencil, Search, Trash2, X } from "lucide-react";
+import { Check, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -20,8 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getStudentsByClassId } from "@/data/mockData";
-import { AddStudentDialog } from "@/features/classes/components/AddStudentDialog";
-import type { Student } from "@/types/student";
+import type { Student, StudentStatus } from "@/types/student";
 
 type StudentListTabProps = {
   classId: string;
@@ -29,30 +28,46 @@ type StudentListTabProps = {
 
 type EditableStudentField = "fullName" | "schoolClass" | "school" | "parentPhone" | "note";
 
+const studentStatusConfig: Record<
+  StudentStatus,
+  { label: string; className: string }
+> = {
+  active: {
+    label: "Đang học",
+    className: "bg-emerald-100 text-emerald-900 hover:bg-emerald-100",
+  },
+  paused: {
+    label: "Đã nghỉ",
+    className: "bg-slate-200 text-slate-700 hover:bg-slate-200",
+  },
+};
+
 export function StudentListTab({ classId }: StudentListTabProps) {
   const [students, setStudents] = useState<Student[]>(() => getStudentsByClassId(classId));
+  const [newStudentIds, setNewStudentIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isEditing, setIsEditing] = useState(false);
-  const [isSelectingToDelete, setIsSelectingToDelete] = useState(false);
-  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredStudents = normalizedQuery
     ? students.filter((student) =>
-        [student.fullName, student.schoolClass, student.school, student.parentPhone, student.note]
+        [
+          student.fullName,
+          student.schoolClass,
+          student.school,
+          student.parentPhone,
+          student.note,
+          studentStatusConfig[student.status].label,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(normalizedQuery),
       )
     : students;
-  const selectedCount = selectedStudentIds.length;
 
   useEffect(() => {
     setStudents(getStudentsByClassId(classId));
+    setNewStudentIds([]);
     setIsEditing(false);
-    setIsSelectingToDelete(false);
-    setSelectedStudentIds([]);
-    setConfirmDeleteOpen(false);
   }, [classId]);
 
   function updateStudentField(
@@ -67,39 +82,45 @@ export function StudentListTab({ classId }: StudentListTabProps) {
     );
   }
 
-  function toggleDeleteMode() {
-    if (!isSelectingToDelete) {
+  function updateStudentStatus(studentId: string, status: StudentStatus) {
+    setStudents((current) =>
+      current.map((student) => (student.id === studentId ? { ...student, status } : student)),
+    );
+  }
+
+  function addInlineStudent() {
+    const newStudentId = `mock-student-${Date.now()}`;
+
+    setStudents((current) => [
+      ...current,
+      {
+        id: newStudentId,
+        classId,
+        fullName: "",
+        schoolClass: "",
+        school: "",
+        parentPhone: "",
+        status: "active",
+        note: "",
+      },
+    ]);
+    setNewStudentIds((current) => [...current, newStudentId]);
+    setIsEditing(true);
+  }
+
+  function removeNewStudent(studentId: string) {
+    setStudents((current) => current.filter((student) => student.id !== studentId));
+    setNewStudentIds((current) => current.filter((id) => id !== studentId));
+  }
+
+  function toggleEditing() {
+    if (isEditing) {
+      setNewStudentIds([]);
       setIsEditing(false);
-      setIsSelectingToDelete(true);
-      setSelectedStudentIds([]);
       return;
     }
 
-    if (selectedCount > 0) {
-      setConfirmDeleteOpen(true);
-    }
-  }
-
-  function cancelDeleteMode() {
-    setIsSelectingToDelete(false);
-    setSelectedStudentIds([]);
-  }
-
-  function toggleSelectedStudent(studentId: string) {
-    setSelectedStudentIds((current) =>
-      current.includes(studentId)
-        ? current.filter((id) => id !== studentId)
-        : [...current, studentId],
-    );
-  }
-
-  function confirmDeleteStudents() {
-    setStudents((current) =>
-      current.filter((student) => !selectedStudentIds.includes(student.id)),
-    );
-    setSelectedStudentIds([]);
-    setIsSelectingToDelete(false);
-    setConfirmDeleteOpen(false);
+    setIsEditing(true);
   }
 
   return (
@@ -119,37 +140,15 @@ export function StudentListTab({ classId }: StudentListTabProps) {
             type="button"
             variant={isEditing ? "default" : "outline"}
             className="gap-2"
-            onClick={() => {
-              setIsSelectingToDelete(false);
-              setSelectedStudentIds([]);
-              setIsEditing((current) => !current);
-            }}
+            onClick={toggleEditing}
           >
             {isEditing ? <Check className="size-4" /> : <Pencil className="size-4" />}
             <span className="hidden sm:inline">{isEditing ? "Lưu cập nhật" : "Cập nhật"}</span>
           </Button>
-          <Button
-            type="button"
-            variant={isSelectingToDelete ? "destructive" : "outline"}
-            className="gap-2"
-            disabled={isSelectingToDelete && selectedCount === 0}
-            onClick={toggleDeleteMode}
-          >
-            <Trash2 className="size-4" />
-            <span className="hidden sm:inline">
-              {isSelectingToDelete ? `Xác nhận xóa (${selectedCount})` : "Xóa học sinh"}
-            </span>
+          <Button type="button" className="gap-2" onClick={addInlineStudent}>
+            <Plus className="size-4" />
+            <span className="hidden sm:inline">Thêm học sinh</span>
           </Button>
-          {isSelectingToDelete && (
-            <Button type="button" variant="ghost" className="gap-2" onClick={cancelDeleteMode}>
-              <X className="size-4" />
-              <span className="hidden sm:inline">Hủy</span>
-            </Button>
-          )}
-          <AddStudentDialog
-            classId={classId}
-            onAdd={(student) => setStudents((current) => [...current, student])}
-          />
           <Button variant="outline" className="gap-2">
             <Download className="size-4" />
             <span className="hidden sm:inline">Xuất Excel</span>
@@ -158,87 +157,124 @@ export function StudentListTab({ classId }: StudentListTabProps) {
       </div>
 
       <div className="min-w-0 rounded-lg border bg-white">
-        <Table className="min-w-[920px]">
+        <Table className="min-w-[1040px]">
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-16">{isSelectingToDelete ? "Chọn" : "STT"}</TableHead>
+              <TableHead className="w-20">STT</TableHead>
               <TableHead>Họ tên</TableHead>
               <TableHead>Lớp ở trường</TableHead>
               <TableHead>Trường</TableHead>
               <TableHead>SĐT phụ huynh</TableHead>
+              <TableHead>Trạng thái</TableHead>
               <TableHead>Ghi chú</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredStudents.map((student, index) => (
-              <TableRow key={student.id}>
-                <TableCell>
-                  {isSelectingToDelete ? (
-                    <input
-                      type="checkbox"
-                      checked={selectedStudentIds.includes(student.id)}
-                      onChange={() => toggleSelectedStudent(student.id)}
-                      className="size-4 rounded border-slate-300 accent-slate-950"
-                      aria-label={`Chọn ${student.fullName}`}
-                    />
-                  ) : (
-                    index + 1
-                  )}
-                </TableCell>
-                <EditableCell
-                  isEditing={isEditing}
-                  value={student.fullName}
-                  className="font-medium text-slate-950"
-                  onChange={(value) => updateStudentField(student.id, "fullName", value)}
-                />
-                <EditableCell
-                  isEditing={isEditing}
-                  value={student.schoolClass}
-                  onChange={(value) => updateStudentField(student.id, "schoolClass", value)}
-                />
-                <EditableCell
-                  isEditing={isEditing}
-                  value={student.school}
-                  onChange={(value) => updateStudentField(student.id, "school", value)}
-                />
-                <EditableCell
-                  isEditing={isEditing}
-                  value={student.parentPhone}
-                  onChange={(value) => updateStudentField(student.id, "parentPhone", value)}
-                />
-                <EditableCell
-                  isEditing={isEditing}
-                  value={student.note ?? ""}
-                  className="max-w-56 whitespace-normal text-slate-950"
-                  onChange={(value) => updateStudentField(student.id, "note", value)}
-                />
-              </TableRow>
-            ))}
+            {filteredStudents.map((student, index) => {
+              const isNewStudent = newStudentIds.includes(student.id);
+              const canEditRow = isEditing || isNewStudent;
+
+              return (
+                <TableRow key={student.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <span>{index + 1}</span>
+                      {isNewStudent && (
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                          onClick={() => removeNewStudent(student.id)}
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">Xóa dòng học sinh mới</span>
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                  <EditableCell
+                    isEditing={canEditRow}
+                    value={student.fullName}
+                    className="font-medium text-slate-950"
+                    placeholder="Nhập họ tên"
+                    onChange={(value) => updateStudentField(student.id, "fullName", value)}
+                  />
+                  <EditableCell
+                    isEditing={canEditRow}
+                    value={student.schoolClass}
+                    placeholder="Ví dụ: 9A1"
+                    onChange={(value) => updateStudentField(student.id, "schoolClass", value)}
+                  />
+                  <EditableCell
+                    isEditing={canEditRow}
+                    value={student.school}
+                    placeholder="Tên trường"
+                    onChange={(value) => updateStudentField(student.id, "school", value)}
+                  />
+                  <EditableCell
+                    isEditing={canEditRow}
+                    value={student.parentPhone}
+                    placeholder="SĐT phụ huynh"
+                    onChange={(value) => updateStudentField(student.id, "parentPhone", value)}
+                  />
+                  <EditableStatusCell
+                    isEditing={canEditRow}
+                    status={student.status}
+                    onChange={(status) => updateStudentStatus(student.id, status)}
+                  />
+                  <EditableCell
+                    isEditing={canEditRow}
+                    value={student.note ?? ""}
+                    className="max-w-56 whitespace-normal text-slate-950"
+                    placeholder="Ghi chú"
+                    onChange={(value) => updateStudentField(student.id, "note", value)}
+                  />
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
-
-      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Xác nhận xóa học sinh</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Thầy có chắc muốn xóa {selectedCount} học sinh đã chọn khỏi danh sách lớp này không?
-          </p>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Hủy
-              </Button>
-            </DialogClose>
-            <Button type="button" variant="destructive" onClick={confirmDeleteStudents}>
-              Xác nhận xóa
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
+  );
+}
+
+function StudentStatusBadge({ status }: { status: StudentStatus }) {
+  const config = studentStatusConfig[status];
+
+  return <Badge className={config.className}>{config.label}</Badge>;
+}
+
+function EditableStatusCell({
+  isEditing,
+  status,
+  onChange,
+}: {
+  isEditing: boolean;
+  status: StudentStatus;
+  onChange: (status: StudentStatus) => void;
+}) {
+  if (!isEditing) {
+    return (
+      <TableCell>
+        <StudentStatusBadge status={status} />
+      </TableCell>
+    );
+  }
+
+  return (
+    <TableCell>
+      <Select value={status} onValueChange={(value) => onChange(value as StudentStatus)}>
+        <SelectTrigger className="h-8 min-w-32 bg-white">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="active">Đang học</SelectItem>
+          <SelectItem value="paused">Đã nghỉ</SelectItem>
+        </SelectContent>
+      </Select>
+    </TableCell>
   );
 }
 
@@ -246,11 +282,13 @@ function EditableCell({
   isEditing,
   value,
   className,
+  placeholder,
   onChange,
 }: {
   isEditing: boolean;
   value: string;
   className?: string;
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -258,6 +296,7 @@ function EditableCell({
       {isEditing ? (
         <Input
           value={value}
+          placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
           className="h-8 min-w-36 bg-white"
         />

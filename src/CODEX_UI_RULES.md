@@ -2,6 +2,11 @@
 
 File này ghi các quy tắc cần giữ khi chỉnh giao diện app quản lý lớp học thêm.
 
+## Kiểm tra sau khi code
+
+- Không tự chạy `pnpm tauri dev` sau khi code xong. Người dùng sẽ tự chạy lệnh này khi cần mở app.
+- Khi cần kiểm tra nhanh, ưu tiên chạy `pnpm run build` để bắt lỗi TypeScript/build.
+
 ## Layout chung
 
 - Không để `body` hoặc `#root` tạo thanh cuộn ngoài cửa sổ Tauri.
