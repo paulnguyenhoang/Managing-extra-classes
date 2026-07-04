@@ -323,20 +323,55 @@ Today/current day:
 
 Attendance statuses:
 
-- Type `AttendanceStatus = "present" | "absent" | "excused" | "makeup"`.
+- Type `AttendanceStatus = "present" | "absent" | "makeup"`.
+- Trạng thái rỗng/undefined hiển thị `"Chưa điểm danh"`.
 - UI labels:
-  - `present`: Có mặt
-  - `absent`: Vắng
-  - `excused`: Có phép
+  - empty/undefined: Chưa điểm danh
+  - `present`: Có học
+  - `absent`: Nghỉ
   - `makeup`: Học bù
-- Empty cell hiển thị `"Chưa điểm danh"`.
-- Trong code hiện tại, `"Học bù"` vừa là trạng thái điểm danh của học sinh (`makeup`), vừa có khái niệm session học bù (`session.isMakeup`). Hai khái niệm này là hai chỗ khác nhau trong code.
+- MVP hiện tại không có `"Có phép"` và không có `"Đi muộn"` trong type, badge, legend hoặc click cycle.
+- Legend hiện tại: `"Chú thích: Chưa điểm danh, Có học, Nghỉ, Học bù"`.
+- `"Học bù"` có 2 khái niệm khác nhau trong code:
+  - Class-level makeup: một session/cột học bù cả lớp (`session.isMakeup`) và header có badge `"Học bù cả lớp"`.
+  - Student-level makeup: trạng thái `makeup` của một học sinh ở buổi gốc, có record liên kết sang lớp/buổi nhận học bù.
 
 Cell click behavior:
 
 - Mỗi cell là button.
 - Chỉ click được khi session đang unlocked và không bị cancel.
-- Chu kỳ trạng thái: empty -> Có mặt -> Vắng -> Có phép -> Học bù -> empty.
+- Chu kỳ intended cho học sinh chính thức: empty -> Có học -> Nghỉ -> Học bù -> empty.
+- Trong code, khi next status là `present` hoặc `absent`, cell cập nhật ngay bằng `setAttendanceStatus`.
+- Khi next status là `makeup`, UI không set ngay mà mở dialog `"Chọn lớp học bù"`.
+- Nếu cancel dialog học bù, giữ nguyên trạng thái cũ.
+- Nếu confirm dialog học bù:
+  - Tạo local `StudentMakeupRecord`.
+  - Cell buổi gốc được set thành `makeup`.
+  - Cell có helper text dạng `"Học bù tại [Tên lớp] - [ngày]"`.
+- Nếu một cell đang `makeup` được click sang trạng thái khác, code gọi `removeStudentMakeupRecordForOriginal` để xóa liên kết học bù cũ.
+
+Student-level makeup dialog:
+
+- Dialog title: `"Chọn lớp học bù"`.
+- Readonly info:
+  - Học sinh
+  - Lớp gốc
+  - Buổi gốc
+  - Thứ tự buổi, ví dụ `"Buổi 1 trong tuần"`
+- Danh sách lớp/buổi học bù lấy từ `getEligibleStudentMakeupSessions`.
+- Điều kiện hiện tại của eligible session:
+  - Chỉ lấy lớp khác `sourceClassId`.
+  - Chỉ lấy lớp cùng `academicYearId` với lớp gốc.
+  - Chỉ lấy buổi có cùng thứ tự trong tuần với buổi gốc.
+  - Dựa trên danh sách `classes` mock và schedule parse từ `mockData.ts`.
+- Student-level makeup hiện đã có UI và local state, nhưng vẫn là mock/in-memory, chưa persist database.
+
+Receiving makeup students:
+
+- Khi xem lớp/buổi nhận học bù, nếu có `StudentMakeupRecord` trỏ về class/session hiện tại, table hiện thêm section `"Học sinh học bù"`.
+- Dòng học sinh học bù không thêm vào danh sách học sinh chính thức của lớp nhận.
+- Trạng thái của dòng học sinh học bù ở lớp nhận chỉ cycle: empty -> Có học -> Nghỉ -> empty.
+- Các cell không phải session nhận học bù hiển thị `"-"`.
 
 Lock/unlock behavior:
 
@@ -361,7 +396,8 @@ Makeup session:
 - Fields: ngày học bù, giờ học bù, bù cho buổi nào.
 - Khi lưu, thêm một `WeeklySession` local với id `makeup-${Date.now()}`, date, startTime/endTime, `isMakeup: true`, `makeupForSessionId`.
 - Nếu ngày học bù nằm trong tuần đang xem thì session hiện thành cột mới.
-- Header có badge `"Học bù"` nếu `session.isMakeup`.
+- Header có badge `"Học bù cả lớp"` nếu `session.isMakeup`.
+- Đây là class-level makeup, tức khái niệm session-level, khác với trạng thái student-level `makeup`.
 
 Quick action:
 
@@ -377,7 +413,8 @@ Export:
 State/data source:
 
 - Students lấy trực tiếp từ `getStudentsByClassId(classId)`.
-- Attendance state nằm trong `useMockAttendance`: `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`.
+- Attendance state nằm trong `useMockAttendance`: `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`, `studentMakeupRecords`.
+- Hook hiện dùng module-level mock stores để giữ dữ liệu qua unmount/remount trong cùng renderer session.
 - Không dùng `attendanceSessions` và `attendanceRecords` trong `mockData.ts` cho UI AttendanceTab hiện tại.
 
 Hạn chế:
@@ -385,7 +422,8 @@ Hạn chế:
 - Không có lưu database.
 - Không phân biệt active/paused student khi điểm danh; code đang map tất cả student của class.
 - Không có note theo buổi hoặc theo record trong UI hiện tại.
-- Session quá khứ chỉ bị làm mờ bằng opacity trong header, không tự lock theo rule backend; hiện lock do `unlockedSessionIds`.
+- Student-level makeup, class-level makeup, lock/unlock và trạng thái nghỉ đều chỉ là mock/local.
+- Dữ liệu module-level có thể giữ khi chuyển tab/class trong cùng phiên renderer, nhưng không phải persistence thật sau reload/restart.
 
 ## 13. Tab Nhập điểm hiện tại
 
@@ -616,12 +654,29 @@ State/data source:
 ### Attendance data
 
 - Types trong `src/types/attendance.ts`:
-  - `AttendanceStatus = "present" | "absent" | "excused" | "makeup"`.
+  - `AttendanceStatus = "present" | "absent" | "makeup"`.
   - `AttendanceSession = { id, classId, date, content?, note? }`.
   - `AttendanceRecord = { id, sessionId, studentId, status, note? }`.
+- Empty/undefined không nằm trong `AttendanceStatus`; UI dùng nó để hiển thị `"Chưa điểm danh"`.
+- Labels hiện tại:
+  - empty/undefined: Chưa điểm danh
+  - `present`: Có học
+  - `absent`: Nghỉ
+  - `makeup`: Học bù
+- Không còn `"excused"`, `"late"`, `"Có phép"` hoặc `"Đi muộn"` trong MVP attendance model hiện tại.
 - `mockData.ts` có `attendanceSessions` và `attendanceRecords`.
 - UI AttendanceTab hiện tại không dùng trực tiếp các array này; nó sinh session từ schedule và giữ record trong `useMockAttendance`.
 - `useMockAttendance` dùng key `${sessionId}:${studentId}` để lưu trạng thái.
+- Helper type trong `features/classes/utils/attendance.ts`:
+  - `WeeklySession`: session sinh từ lịch học hoặc session học bù cả lớp (`isMakeup`, `makeupForSessionId`).
+  - `StudentMakeupRecord`: liên kết học sinh từ buổi gốc sang class/session nhận học bù.
+  - `StudentMakeupSessionOption`: option hiển thị trong dialog chọn lớp học bù.
+- `useMockAttendance` giữ thêm module-level mock stores:
+  - `mockAttendanceState`
+  - `mockCancelledSessionIds`
+  - `mockUnlockedSessionIds`
+  - `mockMakeupSessions`
+  - `mockStudentMakeupRecords`
 
 ### Score data
 
@@ -671,8 +726,8 @@ State/data source:
   - giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
   - reset khi `classId` đổi.
 - AttendanceTab/useMockAttendance:
-  - `weekStart`, `weekPickerOpen`, `visibleCalendarMonth`, `pendingCancelSession` ở tab.
-  - `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions` ở hook.
+  - `weekStart`, `weekPickerOpen`, `visibleCalendarMonth`, `pendingCancelSession`, `pendingStudentMakeup`, `selectedStudentMakeupSessionId` ở tab.
+  - `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`, `studentMakeupRecords` ở hook/module-level mock store.
 - ScoresTab/useMockScores:
   - `selectedMonth`, `savedSheets`, `draftSheets`, `isEditing`, `errorMessage`.
 - PaymentsTab:
@@ -700,11 +755,14 @@ State/data source:
 | Edit student | StudentListTab | Sửa fields và status trong edit mode | local `students` | local only | Update student/class membership/status |
 | Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar | `weekStart` | local only | Có thể query session theo week |
-| Add makeup session | AttendanceTab/AddMakeupSessionDialog | Thêm session học bù local | `makeupSessions` | local only | Insert `attendance_sessions` type makeup |
+| Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Thêm session `"Học bù cả lớp"` local | `makeupSessions` | local only | Insert `attendance_sessions` type makeup, link optional to original session |
 | Mark today present | AttendanceTab | Nếu có session hôm nay, set tất cả status present | `attendance` | local only | Batch update attendance_records |
 | Cancel/restored session | AttendanceTab | Dialog xác nhận nghỉ/hủy nghỉ, lock/unlock tương ứng | `cancelledSessionIds`, `unlockedSessionIds` | local only | Session status cancelled/restored |
 | Lock/unlock session | AttendanceTab | Toggle khả năng sửa cell | `unlockedSessionIds` | local only | Cần field locked hoặc rule theo date |
-| Tick attendance cell | AttendanceTab | Cycle empty/present/absent/excused/makeup | `attendance` | local only | Upsert attendance_record |
+| Tick official attendance cell | AttendanceTab | Cycle empty/present/absent; khi tới makeup thì mở dialog chọn lớp học bù | `attendance`, `pendingStudentMakeup` | local only | Upsert attendance_record, có thể cần transaction khi chọn makeup |
+| Confirm student-level makeup | AttendanceTab dialog | Tạo liên kết học bù và set buổi gốc thành makeup | `attendance`, `studentMakeupRecords` | local only | Có thể cần bảng `student_makeup_records` hoặc link trong attendance record |
+| Remove student-level makeup by cycling off | AttendanceTab | Khi cell đang makeup chuyển sang status khác, xóa liên kết học bù cũ | `attendance`, `studentMakeupRecords` | local only | Cần delete/update record liên kết và xử lý attendance ở lớp nhận |
+| Tick receiving makeup student cell | AttendanceTab receiving class | Dòng học sinh học bù cycle empty/present/absent | `attendance` | local only | Lưu attendance cho học sinh khách nhưng không thêm vào roster chính thức |
 | Export attendance Excel | AttendanceTab | Chưa có behavior | none | none | Export sheet theo week/class |
 | Change score month | ScoresTab | Chuyển sheet tháng, thoát edit | `selectedMonth`, draft | local only | Query score columns/values by month |
 | Add score column/test | ScoresTab | Thêm cột mới, vào edit mode | `draftSheets` | local only | Insert score column |
@@ -740,7 +798,11 @@ State/data source:
 - Chưa có phân quyền hoặc nhiều người dùng.
 - Chưa có xử lý hard delete/archive học sinh hiện có.
 - Chưa có lưu lịch sử học phí theo tháng.
-- Chưa có phân biệt rõ session học bù và trạng thái học sinh đi học bù ở backend.
+- Attendance MVP không có `"Có phép"` và không có `"Đi muộn"`; nếu muốn dùng lại cần xác nhận model mới.
+- Class-level makeup và student-level makeup đã được tách trong UI/code, nhưng vẫn chỉ là mock/local.
+- Student-level makeup hiện đã có flow chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận, nhưng chưa có persistence thật.
+- Danh sách lớp/buổi đủ điều kiện học bù lấy từ `classes` mock trong `mockData.ts`, cùng năm học và cùng thứ tự buổi trong tuần; chưa dùng dữ liệu database hoặc class được thêm local ngoài mock.
+- Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
 - Chưa có transaction hoặc optimistic update/error rollback vì chưa có backend.
 
 ## 20. Future database candidates based on current code
@@ -754,8 +816,10 @@ State/data source:
 | `class_schedules` | Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
 | `students` | Lưu thông tin học sinh: tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú |
 | `class_students` | Nên có nếu sau này một học sinh học nhiều lớp hoặc cần trạng thái theo từng lớp |
-| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù, ngày học |
-| `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session |
+| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, lock/cancel state, link optional tới buổi gốc |
+| `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
+| `student_makeup_records` | Lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần; hoặc gộp vào attendance schema nếu thiết kế khác |
+| `makeup_attendance_records` hoặc field liên kết | Nếu học sinh học bù ở lớp nhận cần lưu trạng thái có học/nghỉ riêng mà không thêm vào roster chính thức |
 | `score_columns` | Lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
 | `score_values` | Lưu điểm từng học sinh từng cột |
 | `payment_records` | Lưu học phí theo student/class/month/status/amount/paidAt/note |
@@ -784,7 +848,13 @@ State/data source:
 - Có cần sinh sẵn `attendance_sessions` theo lịch hay chỉ sinh khi mở tuần/điểm danh?
 - Buổi nghỉ nên lưu như một trạng thái của session hay tạo attendance record `"Nghỉ"` cho từng học sinh?
 - Khi hủy trạng thái nghỉ, có giữ lại data điểm danh cũ không? Code hiện tại đang giữ.
-- Học bù là trạng thái của học sinh trong một buổi thường, hay là một session riêng, hay cả hai?
+- Class-level makeup có cần bắt buộc link tới một buổi nghỉ gốc không, hay có thể là một buổi học bù độc lập?
+- Student-level makeup nên lưu bằng bảng riêng `student_makeup_records`, hay lưu bằng attendance record có field `receivingSessionId`?
+- Ở buổi/lớp nhận học bù, trạng thái có học/nghỉ của học sinh khách nên lưu chung trong `attendance_records` hay bảng riêng?
+- Khi học sinh chuyển khỏi trạng thái `"Học bù"` ở buổi gốc, backend có xóa record ở lớp nhận học bù không?
+- Điều kiện chọn lớp học bù có luôn là cùng năm học và cùng thứ tự buổi trong tuần không, hay thầy cần override thủ công?
+- Học sinh học bù có được chọn sang lớp khác khối/lệch nội dung nếu thầy muốn không?
+- MVP xác nhận bỏ hẳn `"Có phép"` và `"Đi muộn"` chứ không lưu ẩn trong backend?
 - Button `"Đánh dấu cả lớp đi học"` có áp dụng cho học sinh `"Đã nghỉ"` không?
 - Buổi đã qua có tự khóa không, và ai được mở khóa?
 - Học phí `"Chưa đóng"` nên hiển thị amount là 0 hay học phí dự kiến?

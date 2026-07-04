@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import { AppShell } from "@/components/layout/AppShell";
 import type { SidebarScreen } from "@/components/layout/Sidebar";
@@ -17,12 +18,32 @@ import { TuitionDashboardPage } from "@/features/tuition-dashboard/TuitionDashbo
 
 type Screen = "login" | "class-detail" | SidebarScreen;
 
+type DatabaseReadyStatus = {
+  ready: boolean;
+  database_path: string;
+  applied_migrations: string[];
+};
+
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [selectedYearId, setSelectedYearId] = useState(getCurrentAcademicYearId);
   const [classOverviews, setClassOverviews] = useState(getAllClassOverviews);
   const selectedClass = classOverviews.find((classItem) => classItem.id === selectedClassId);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+
+    invoke<DatabaseReadyStatus>("check_database_ready")
+      .then((status) => {
+        console.info("[database] ready", status);
+      })
+      .catch((error) => {
+        console.warn("[database] readiness check failed", error);
+      });
+  }, []);
 
   function handleOpenClass(classId: string) {
     setSelectedClassId(classId);
