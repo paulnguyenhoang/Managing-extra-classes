@@ -71,6 +71,50 @@ impl AppDatabase {
             applied_migrations,
         })
     }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "Không khóa được SQLite connection".to_string())?;
+
+        connection
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được cài đặt ứng dụng: {error}"))
+    }
+
+    pub fn set_settings(&self, settings: &[(&str, &str)]) -> Result<(), String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "Không khóa được SQLite connection".to_string())?;
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được settings transaction: {error}"))?;
+
+        for (key, value) in settings {
+            transaction
+                .execute(
+                    "INSERT INTO app_settings (key, value, updated_at)
+                     VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = CURRENT_TIMESTAMP",
+                    params![key, value],
+                )
+                .map_err(|error| format!("Không lưu được cài đặt ứng dụng: {error}"))?;
+        }
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được settings transaction: {error}"))
+    }
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), String> {

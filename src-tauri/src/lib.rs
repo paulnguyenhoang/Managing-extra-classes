@@ -1,4 +1,5 @@
 mod db;
+mod settings;
 
 use tauri::Manager;
 
@@ -29,7 +30,14 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, db::check_database_ready])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            db::check_database_ready,
+            settings::is_password_set,
+            settings::set_initial_password,
+            settings::verify_password,
+            settings::change_password
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
