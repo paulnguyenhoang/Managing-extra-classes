@@ -1,5 +1,6 @@
 import type { AttendanceStatus } from "@/types/attendance";
-import type { ClassScheduleItem } from "@/types/class";
+import type { ClassScheduleItem, ExtraClass } from "@/types/class";
+import { parseScheduleText } from "@/features/classes/utils/classSchedule";
 
 export type WeeklySession = {
   id: string;
@@ -16,12 +17,42 @@ export type MakeupSessionInput = {
   makeupForSessionId: string;
 };
 
+export type StudentMakeupRecord = {
+  id: string;
+  studentId: string;
+  originalClassId: string;
+  originalClassName: string;
+  originalSessionId: string;
+  originalSessionDate: string;
+  originalSessionOrder: number;
+  receivingClassId: string;
+  receivingClassName: string;
+  receivingSessionId: string;
+  receivingSessionDate: string;
+  receivingStartTime: string;
+  receivingEndTime: string;
+};
+
+export type StudentMakeupSessionOption = {
+  sessionId: string;
+  classId: string;
+  className: string;
+  date: Date;
+  startTime: string;
+  endTime: string;
+};
+
 export const attendanceCycle: Array<AttendanceStatus | undefined> = [
   undefined,
   "present",
   "absent",
-  "excused",
   "makeup",
+];
+
+export const makeupStudentAttendanceCycle: Array<AttendanceStatus | undefined> = [
+  undefined,
+  "present",
+  "absent",
 ];
 
 export function startOfDay(date: Date) {
@@ -107,17 +138,19 @@ export function getRegularSessionsForWeek(
   weekStart: Date,
   scheduleItems: ClassScheduleItem[],
 ): WeeklySession[] {
-  return scheduleItems.map((item) => {
-    const dayIndex = item.weekday === 0 ? 7 : item.weekday;
-    const date = addDays(weekStart, dayIndex - 1);
+  return scheduleItems
+    .map((item) => {
+      const dayIndex = item.weekday === 0 ? 7 : item.weekday;
+      const date = addDays(weekStart, dayIndex - 1);
 
-    return {
-      id: `regular-${toDateKey(date)}-${item.startTime}-${item.endTime}`,
-      date,
-      startTime: item.startTime,
-      endTime: item.endTime,
-    };
-  });
+      return {
+        id: `regular-${toDateKey(date)}-${item.startTime}-${item.endTime}`,
+        date,
+        startTime: item.startTime,
+        endTime: item.endTime,
+      };
+    })
+    .sort((first, second) => first.date.getTime() - second.date.getTime());
 }
 
 export function getNextAttendanceStatus(status: AttendanceStatus | undefined) {
@@ -127,6 +160,68 @@ export function getNextAttendanceStatus(status: AttendanceStatus | undefined) {
   return attendanceCycle[nextIndex];
 }
 
+export function getNextMakeupStudentAttendanceStatus(status: AttendanceStatus | undefined) {
+  const currentIndex = makeupStudentAttendanceCycle.indexOf(status);
+  const nextIndex = (currentIndex + 1) % makeupStudentAttendanceCycle.length;
+
+  return makeupStudentAttendanceCycle[nextIndex];
+}
+
 export function attendanceCellKey(sessionId: string, studentId: string) {
   return `${sessionId}:${studentId}`;
+}
+
+export function getSessionOrderInWeek(session: WeeklySession, sessions: WeeklySession[]) {
+  const regularSessions = sessions
+    .filter((item) => !item.isMakeup)
+    .sort((first, second) => first.date.getTime() - second.date.getTime());
+  const index = regularSessions.findIndex((item) => item.id === session.id);
+
+  return index >= 0 ? index + 1 : 1;
+}
+
+export function getEligibleStudentMakeupSessions({
+  sourceClassId,
+  sourceSession,
+  sourceSessions,
+  weekStart,
+  classes,
+}: {
+  sourceClassId: string;
+  sourceSession: WeeklySession;
+  sourceSessions: WeeklySession[];
+  weekStart: Date;
+  classes: ExtraClass[];
+}): StudentMakeupSessionOption[] {
+  const sourceOrder = getSessionOrderInWeek(sourceSession, sourceSessions);
+  const sourceClass = classes.find((classItem) => classItem.id === sourceClassId);
+
+  return classes
+    .filter(
+      (classItem) =>
+        classItem.id !== sourceClassId &&
+        classItem.academicYearId === sourceClass?.academicYearId,
+    )
+    .flatMap((classItem) => {
+      const classSessions = getRegularSessionsForWeek(
+        weekStart,
+        parseScheduleText(classItem.schedule),
+      );
+      const matchingSession = classSessions[sourceOrder - 1];
+
+      if (!matchingSession) {
+        return [];
+      }
+
+      return [
+        {
+          sessionId: matchingSession.id,
+          classId: classItem.id,
+          className: classItem.name,
+          date: matchingSession.date,
+          startTime: matchingSession.startTime,
+          endTime: matchingSession.endTime,
+        },
+      ];
+    });
 }

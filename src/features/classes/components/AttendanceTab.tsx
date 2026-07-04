@@ -28,24 +28,41 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getStudentsByClassId } from "@/data/mockData";
+import {
+  classes,
+  getStudentsByClassId,
+  students as allMockStudents,
+} from "@/data/mockData";
 import { AddMakeupSessionDialog } from "@/features/classes/components/AddMakeupSessionDialog";
 import { useMockAttendance } from "@/features/classes/hooks/useMockAttendance";
 import {
   addDays,
   formatDateRange,
   formatDayMonth,
+  getEligibleStudentMakeupSessions,
+  getNextAttendanceStatus,
+  getSessionOrderInWeek,
   getWeekEnd,
   getWeekStart,
   isPastDate,
   isSameDay,
   startOfDay,
   weekdayLabel,
+  type StudentMakeupRecord,
+  type StudentMakeupSessionOption,
   type WeeklySession,
 } from "@/features/classes/utils/attendance";
 import { attendanceStatusLabel } from "@/lib/format";
 import type { AttendanceStatus } from "@/types/attendance";
 import type { ClassScheduleItem } from "@/types/class";
+import type { Student } from "@/types/student";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type AttendanceTabProps = {
   classId: string;
@@ -57,7 +74,6 @@ type AttendanceCellStatus = AttendanceStatus | undefined;
 const attendanceBadgeClasses: Record<AttendanceStatus, string> = {
   present: "bg-emerald-100 text-emerald-900 hover:bg-emerald-100",
   absent: "bg-red-100 text-red-900 hover:bg-red-100",
-  excused: "bg-blue-100 text-blue-900 hover:bg-blue-100",
   makeup: "bg-violet-100 text-violet-900 hover:bg-violet-100",
 };
 
@@ -118,7 +134,9 @@ function SessionHeader({
           <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">Hôm nay</Badge>
         ) : null}
         {session.isMakeup ? (
-          <Badge className="bg-violet-100 text-violet-900 hover:bg-violet-100">Học bù</Badge>
+          <Badge className="bg-violet-100 text-violet-900 hover:bg-violet-100">
+            Học bù cả lớp
+          </Badge>
         ) : null}
         {isCancelled ? (
           <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">Nghỉ</Badge>
@@ -140,6 +158,12 @@ function SessionHeader({
     </div>
   );
 }
+
+type PendingStudentMakeup = {
+  student: Student;
+  session: WeeklySession;
+  options: StudentMakeupSessionOption[];
+};
 
 function WeekPicker({
   visibleMonth,
@@ -258,21 +282,35 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [visibleCalendarMonth, setVisibleCalendarMonth] = useState(() => weekStart);
   const [pendingCancelSession, setPendingCancelSession] = useState<WeeklySession | null>(null);
+  const [pendingStudentMakeup, setPendingStudentMakeup] =
+    useState<PendingStudentMakeup | null>(null);
+  const [selectedStudentMakeupSessionId, setSelectedStudentMakeupSessionId] = useState("");
   const students = getStudentsByClassId(classId);
+  const currentClassName = classes.find((classItem) => classItem.id === classId)?.name ?? "";
   const {
     sessions,
     cancelledSessionIds,
     unlockedSessionIds,
+    studentMakeupRecords,
     getStatus,
-    cycleStatus,
+    setAttendanceStatus,
+    getMakeupStudentStatus,
+    cycleMakeupStudentStatus,
     markSessionForStudents,
     cancelSession,
     restoreCancelledSession,
     toggleSessionLock,
     addMakeupSession,
+    addStudentMakeupRecord,
+    removeStudentMakeupRecordForOriginal,
   } = useMockAttendance(weekStart, scheduleItems);
   const todaySession = sessions.find((session) => isSameDay(session.date, today));
   const canMarkTodayPresent = Boolean(todaySession);
+  const visibleStudentMakeupRecords = studentMakeupRecords.filter(
+    (record) =>
+      record.receivingClassId === classId &&
+      sessions.some((session) => session.id === record.receivingSessionId),
+  );
 
   function goToPreviousWeek() {
     setWeekStart((current) => addDays(current, -7));
@@ -319,6 +357,82 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   function selectWeek(nextWeekStart: Date) {
     setWeekStart(startOfDay(nextWeekStart));
     setWeekPickerOpen(false);
+  }
+
+  function handleAttendanceCellClick(
+    student: Student,
+    session: WeeklySession,
+    currentStatus: AttendanceCellStatus,
+  ) {
+    const nextStatus = getNextAttendanceStatus(currentStatus);
+
+    if (nextStatus !== "makeup") {
+      if (currentStatus === "makeup") {
+        removeStudentMakeupRecordForOriginal({
+          studentId: student.id,
+          originalClassId: classId,
+          originalSessionId: session.id,
+        });
+      }
+
+      setAttendanceStatus(session.id, student.id, nextStatus);
+      return;
+    }
+
+    const options = getEligibleStudentMakeupSessions({
+      sourceClassId: classId,
+      sourceSession: session,
+      sourceSessions: sessions,
+      weekStart,
+      classes,
+    });
+
+    setPendingStudentMakeup({ student, session, options });
+    setSelectedStudentMakeupSessionId(options[0]?.sessionId ?? "");
+  }
+
+  function confirmStudentMakeup() {
+    if (!pendingStudentMakeup) {
+      return;
+    }
+
+    const selectedOption = pendingStudentMakeup.options.find(
+      (option) => option.sessionId === selectedStudentMakeupSessionId,
+    );
+
+    if (!selectedOption) {
+      return;
+    }
+
+    const record: StudentMakeupRecord = {
+      id: `student-makeup-${Date.now()}`,
+      studentId: pendingStudentMakeup.student.id,
+      originalClassId: classId,
+      originalClassName: currentClassName,
+      originalSessionId: pendingStudentMakeup.session.id,
+      originalSessionDate: formatDayMonth(pendingStudentMakeup.session.date),
+      originalSessionOrder: getSessionOrderInWeek(pendingStudentMakeup.session, sessions),
+      receivingClassId: selectedOption.classId,
+      receivingClassName: selectedOption.className,
+      receivingSessionId: selectedOption.sessionId,
+      receivingSessionDate: formatDayMonth(selectedOption.date),
+      receivingStartTime: selectedOption.startTime,
+      receivingEndTime: selectedOption.endTime,
+    };
+
+    addStudentMakeupRecord(record);
+    setAttendanceStatus(pendingStudentMakeup.session.id, pendingStudentMakeup.student.id, "makeup");
+    setPendingStudentMakeup(null);
+    setSelectedStudentMakeupSessionId("");
+  }
+
+  function getStudentMakeupRecord(studentId: string, sessionId: string) {
+    return studentMakeupRecords.find(
+      (record) =>
+        record.studentId === studentId &&
+        record.originalClassId === classId &&
+        record.originalSessionId === sessionId,
+    );
   }
 
   return (
@@ -383,6 +497,11 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
         </div>
       </section>
 
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+        <span className="font-medium text-slate-900">Chú thích:</span>{" "}
+        Chưa điểm danh, Có học, Nghỉ, Học bù
+      </div>
+
       <div className="min-w-0 rounded-lg border bg-white">
         <Table className="min-w-[900px]">
           <TableHeader>
@@ -412,6 +531,11 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                   const isCancelled = cancelledSessionIds.includes(session.id);
                   const isUnlocked = unlockedSessionIds.includes(session.id);
                   const status = getStatus(session.id, student.id);
+                  const makeupRecord =
+                    status === "makeup" ? getStudentMakeupRecord(student.id, session.id) : undefined;
+                  const makeupDetail = makeupRecord
+                    ? `Học bù tại ${makeupRecord.receivingClassName} - ${makeupRecord.receivingSessionDate}`
+                    : "";
 
                   return (
                     <TableCell key={session.id} className="text-center">
@@ -429,14 +553,21 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                               ? "hover:scale-[1.02]"
                               : "cursor-not-allowed opacity-75",
                           ].join(" ")}
-                          onClick={() => cycleStatus(session.id, student.id)}
+                          onClick={() => handleAttendanceCellClick(student, session, status)}
                           title={
                             isUnlocked
-                              ? "Bấm để đổi trạng thái điểm danh"
+                              ? makeupDetail || "Bấm để đổi trạng thái điểm danh"
                               : "Bấm Mở khóa để chỉnh sửa buổi này"
                           }
                         >
-                          <AttendanceStatusBadge status={status} />
+                          <span className="flex flex-col items-center gap-1">
+                            <AttendanceStatusBadge status={status} />
+                            {makeupDetail ? (
+                              <span className="max-w-40 text-xs font-normal text-slate-500">
+                                {makeupDetail}
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
                       )}
                     </TableCell>
@@ -444,6 +575,74 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                 })}
               </TableRow>
             ))}
+            {visibleStudentMakeupRecords.length > 0 ? (
+              <>
+                <TableRow className="bg-violet-50/70">
+                  <TableCell
+                    colSpan={2 + sessions.length}
+                    className="font-semibold text-violet-950"
+                  >
+                    Học sinh học bù
+                  </TableCell>
+                </TableRow>
+                {visibleStudentMakeupRecords.map((record) => {
+                  const student = allMockStudents.find((item) => item.id === record.studentId);
+
+                  return (
+                    <TableRow key={record.id}>
+                      <TableCell>HB</TableCell>
+                      <TableCell className="font-medium text-slate-950">
+                        {student?.fullName ?? "Học sinh học bù"}
+                        <div className="text-xs font-normal text-slate-500">
+                          Từ {record.originalClassName} - buổi {record.originalSessionDate}
+                        </div>
+                      </TableCell>
+                      {sessions.map((session) => {
+                        const isTargetSession = session.id === record.receivingSessionId;
+                        const isCancelled = cancelledSessionIds.includes(session.id);
+                        const isUnlocked = unlockedSessionIds.includes(session.id);
+                        const status = getMakeupStudentStatus(session.id, record.id);
+
+                        return (
+                          <TableCell key={session.id} className="text-center">
+                            {isTargetSession ? (
+                              isCancelled ? (
+                                <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">
+                                  Nghỉ
+                                </Badge>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!isUnlocked}
+                                  className={[
+                                    "rounded-md outline-none transition focus-visible:ring-3 focus-visible:ring-ring/50",
+                                    isUnlocked
+                                      ? "hover:scale-[1.02]"
+                                      : "cursor-not-allowed opacity-75",
+                                  ].join(" ")}
+                                  onClick={() =>
+                                    cycleMakeupStudentStatus(session.id, record.id)
+                                  }
+                                  title={
+                                    isUnlocked
+                                      ? "Bấm để đổi trạng thái học bù"
+                                      : "Bấm Mở khóa để chỉnh sửa buổi này"
+                                  }
+                                >
+                                  <AttendanceStatusBadge status={status} />
+                                </button>
+                              )
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })}
+              </>
+            ) : null}
           </TableBody>
         </Table>
       </div>
@@ -489,6 +688,89 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(pendingStudentMakeup)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingStudentMakeup(null);
+            setSelectedStudentMakeupSessionId("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Chọn lớp học bù</DialogTitle>
+          </DialogHeader>
+          {pendingStudentMakeup ? (
+            <div className="space-y-4">
+              <div className="grid gap-2 rounded-lg bg-slate-50 p-4 text-sm">
+                <ReadonlyInfo label="Học sinh" value={pendingStudentMakeup.student.fullName} />
+                <ReadonlyInfo label="Lớp gốc" value={currentClassName} />
+                <ReadonlyInfo
+                  label="Buổi gốc"
+                  value={`${weekdayLabel(pendingStudentMakeup.session.date)} ${formatDayMonth(
+                    pendingStudentMakeup.session.date,
+                  )}`}
+                />
+                <ReadonlyInfo
+                  label="Thứ tự buổi"
+                  value={`Buổi ${getSessionOrderInWeek(
+                    pendingStudentMakeup.session,
+                    sessions,
+                  )} trong tuần`}
+                />
+              </div>
+
+              {pendingStudentMakeup.options.length > 0 ? (
+                <Select
+                  value={selectedStudentMakeupSessionId}
+                  onValueChange={setSelectedStudentMakeupSessionId}
+                >
+                  <SelectTrigger className="w-full bg-white">
+                    <SelectValue placeholder="Chọn lớp học bù" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pendingStudentMakeup.options.map((option) => (
+                      <SelectItem key={option.sessionId} value={option.sessionId}>
+                        {option.className} - {weekdayLabel(option.date)}{" "}
+                        {formatDayMonth(option.date)} - {option.startTime} đến {option.endTime}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Tuần này chưa có lớp khác cùng thứ tự buổi để chọn học bù.
+                </p>
+              )}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Hủy
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              onClick={confirmStudentMakeup}
+              disabled={!selectedStudentMakeupSessionId}
+            >
+              Xác nhận
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ReadonlyInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right font-medium text-slate-950">{value}</span>
     </div>
   );
 }

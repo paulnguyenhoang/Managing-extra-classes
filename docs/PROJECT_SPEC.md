@@ -1,0 +1,796 @@
+# PROJECT_SPEC.md
+
+## 1. Mục đích tài liệu
+
+Tài liệu này ghi lại trạng thái hiện tại của ứng dụng dựa trên source code đang có trong `src/`, `package.json` và các file liên quan. Nội dung bên dưới mô tả những gì đã được triển khai thật trong frontend, cách dữ liệu mẫu và local state đang hoạt động, đồng thời tách riêng phần đề xuất cho backend/SQLite sau này.
+
+Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không còn dùng nữa.
+
+## 2. Tổng quan dự án hiện tại
+
+- App type: ứng dụng desktop Tauri dùng React + TypeScript.
+- Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
+- Trạng thái frontend: đã có skeleton chính, login mock, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
+- Trạng thái persistence: chưa có database, chưa có SQLite, chưa có lưu file thật.
+- Trạng thái mock/local state: dữ liệu gốc lấy từ `src/data/mockData.ts`; nhiều thao tác chỉ cập nhật React state trong phiên chạy hiện tại và mất khi reload app.
+
+## 3. Tech stack đang dùng trong code
+
+Các công nghệ/thư viện hiện diện trong `package.json`, config hoặc import thực tế:
+
+- Tauri v2: app desktop.
+- React 19: UI.
+- TypeScript: type checking.
+- Vite: dev/build frontend.
+- Tailwind CSS v4: styling qua `src/App.css`.
+- shadcn/ui: các component UI trong `src/components/ui/`.
+- Radix UI: dùng qua `radix-ui`, ví dụ Tabs/Dialog/Select.
+- lucide-react: icon.
+- class-variance-authority, clsx, tailwind-merge: helper className và variant cho UI.
+- tw-animate-css: animation CSS được import trong `App.css`.
+- @fontsource-variable/geist: font được import trong `App.css`.
+- @tanstack/react-table, exceljs, react-hook-form, zod, @hookform/resolvers: có trong dependency nhưng hiện chưa thấy được dùng trong các màn hình chính đã đọc.
+
+## 4. Cấu trúc thư mục thực tế
+
+```text
+src/
+  App.tsx
+  App.css
+  CODEX_UI_RULES.md
+  main.tsx
+  app/
+    App.tsx
+  components/
+    common/
+      EmptyState.tsx
+    layout/
+      AppShell.tsx
+      Header.tsx
+      Sidebar.tsx
+    ui/
+      badge.tsx
+      button.tsx
+      card.tsx
+      dialog.tsx
+      input.tsx
+      label.tsx
+      select.tsx
+      table.tsx
+      tabs.tsx
+      textarea.tsx
+  data/
+    mockData.ts
+  features/
+    auth/
+      LoginPage.tsx
+    backup/
+      BackupPage.tsx
+    classes/
+      ClassDetailPage.tsx
+      components/
+        AddMakeupSessionDialog.tsx
+        AttendanceTab.tsx
+        ConfirmPaidDialog.tsx
+        EditClassScheduleDialog.tsx
+        PaymentsTab.tsx
+        ScoresTab.tsx
+        StudentListTab.tsx
+        TuitionWaiverDialog.tsx
+      hooks/
+        useMockAttendance.ts
+        useMockScores.ts
+      utils/
+        attendance.ts
+        classSchedule.ts
+        payments.ts
+        scores.ts
+    home/
+      HomePage.tsx
+      components/
+        ClassCard.tsx
+        CreateClassDialog.tsx
+        YearSelector.tsx
+    schedule/
+      SchedulePage.tsx
+    settings/
+      SettingsPage.tsx
+    tuition-dashboard/
+      TuitionDashboardPage.tsx
+  lib/
+    format.ts
+    utils.ts
+  types/
+    academic-year.ts
+    attendance.ts
+    class.ts
+    payment.ts
+    score.ts
+    student.ts
+```
+
+- `src/app/App.tsx`: điều phối màn hình chính bằng local state, không dùng React Router.
+- `src/App.tsx`: re-export `src/app/App.tsx`.
+- `src/components/layout`: khung app sau login, header, sidebar.
+- `src/components/ui`: shadcn/ui wrappers.
+- `src/features/home`: trang tổng quan và card lớp.
+- `src/features/classes`: trang chi tiết lớp, 4 tab lõi, hooks/utils cho điểm danh, điểm, học phí, lịch học.
+- `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/backup`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/data/mockData.ts`: dữ liệu mẫu và selector/helper lấy dữ liệu.
+- `src/types`: type dữ liệu domain.
+- `src/lib`: helper format và className.
+
+## 5. Điều hướng hiện tại
+
+- Không dùng React Router.
+- `src/app/App.tsx` dùng local state:
+  - `screen`: `"login" | "class-detail" | SidebarScreen`.
+  - `selectedClassId`.
+  - `selectedYearId`.
+  - `classOverviews`.
+- Login thành công chuyển `screen` sang `"home"`.
+- Sau login, app render `AppShell` gồm `Header`, `Sidebar`, vùng nội dung chính.
+- Sidebar gọi `onNavigate(screen)` để đổi các màn hình global.
+- Trang Home mở chi tiết lớp bằng `onOpenClass(classId)`, set `selectedClassId` và `screen = "class-detail"`.
+- Nút quay lại trong `ClassDetailPage` gọi `onBack`, reset `selectedClassId` và về `"home"`.
+- Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
+- Logout reset `selectedClassId` và quay về `"login"`.
+
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab trong lớp. Các trang `Lịch học`, `Tổng hợp học phí`, `Sao lưu dữ liệu`, `Cài đặt` hiện là placeholder đơn giản.
+
+## 6. Danh sách màn hình/trang hiện có
+
+| Màn hình/trang | File/component chính | Mục đích | Trạng thái hiện tại | Ghi chú |
+|---|---|---|---|---|
+| Login | `src/features/auth/LoginPage.tsx` | Đăng nhập mock bằng mật khẩu | implemented | Mật khẩu không rỗng là hợp lệ |
+| App shell | `src/components/layout/AppShell.tsx` | Layout sau login | implemented | Header + sidebar + main scroll |
+| Tổng quan/Home | `src/features/home/HomePage.tsx` | Xem năm học, summary, danh sách lớp | implemented | Dữ liệu từ `classOverviews` local state |
+| Chi tiết lớp | `src/features/classes/ClassDetailPage.tsx` | Header lớp và tabs | implemented | Có sửa tên lớp, lịch học, học phí tháng |
+| Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh mock | implemented | Local state riêng trong tab |
+| Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Local state qua `useMockAttendance` |
+| Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Local state qua `useMockScores` |
+| Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | Local state trong tab |
+| Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
+| Tổng hợp học phí | `TuitionDashboardPage.tsx` | Placeholder dashboard học phí toàn app | placeholder | Summary card mock tĩnh |
+| Sao lưu dữ liệu | `BackupPage.tsx` | Placeholder backup/restore | placeholder | Button disabled |
+| Cài đặt | `SettingsPage.tsx` | Placeholder thiết lập | placeholder | Card mô tả tĩnh |
+
+## 7. Login flow hiện tại
+
+- UI gồm card giữa màn hình, icon sách, title `"Quản lý lớp học thêm"`, subtitle `"Ứng dụng quản lý lớp học thêm cho giáo viên dạy Văn"`, input mật khẩu, nút `"Đăng nhập"`, hint `"Bản thử nghiệm dùng dữ liệu mẫu."`
+- Validation: nếu password rỗng hoặc chỉ có khoảng trắng thì báo `"Vui lòng nhập mật khẩu."`
+- Bất kỳ password không rỗng đều đăng nhập được.
+- Sau login, `App.tsx` chuyển sang màn hình `"home"`.
+- Logout nằm ở `Header`, gọi `onLogout`, đưa app về login.
+- Không có lưu session, không có mã hóa mật khẩu, không có backend auth.
+
+## 8. Sidebar/Nav hiện tại
+
+Sidebar hiện có 5 item:
+
+| Item | Screen value | Component mở ra | Trạng thái |
+|---|---|---|---|
+| Tổng quan | `home` | `HomePage` | functional |
+| Lịch học | `schedule` | `SchedulePage` | placeholder |
+| Học phí | `tuition-dashboard` | `TuitionDashboardPage` | placeholder |
+| Sao lưu dữ liệu | `backup` | `BackupPage` | placeholder |
+| Cài đặt | `settings` | `SettingsPage` | placeholder |
+
+- Item global `"Học sinh"` không còn trong sidebar.
+- Sidebar chỉ đổi màn hình bằng local state, không đổi URL.
+- Khi click item trong sidebar lúc đang ở chi tiết lớp, app thoát khỏi chi tiết lớp vì `selectedClassId` bị reset.
+
+## 9. Home/Tổng quan hiện tại
+
+Đã có trong code:
+
+- Greeting `"Xin chào thầy"` và heading `"Hôm nay mình quản lý lớp nào?"`
+- Bộ chọn năm học `YearSelector`, dữ liệu từ `academicYears`.
+- Summary cards:
+  - Tổng số lớp
+  - Tổng số học sinh
+  - Chưa đóng học phí tháng này
+- Nút `"Tạo lớp mới"` mở `CreateClassDialog`.
+- Danh sách lớp dùng `ClassCard`.
+- Mỗi class card hiển thị:
+  - tên lớp
+  - lịch học đã parse/format qua `parseScheduleText` và `formatScheduleLines`
+  - số học sinh
+  - học phí tháng
+  - badge unpaid/paid theo `unpaidCount`
+- Nếu năm học không có lớp, dùng `EmptyState`.
+- Click class card gọi `onOpenClass(classId)` để mở `ClassDetailPage`.
+
+Create class hiện tại:
+
+- Dialog fields: `Tên lớp`, `Khối`, `Lịch học`, `Học phí tháng`, `Ghi chú`.
+- Khi lưu, tạo `ClassOverview` mới với id `mock-class-${Date.now()}`.
+- Dữ liệu chỉ append vào `classOverviews` state trong `App.tsx`.
+- `grade` không được lưu vào type class hiện tại.
+
+Hạn chế:
+
+- Không có sửa/xóa/archive lớp ở Home.
+- Lớp tạo mới không có học sinh thật.
+- Dữ liệu mất khi reload.
+
+## 10. Class Detail Header hiện tại
+
+Header chi tiết lớp hiển thị:
+
+- Nút quay lại danh sách lớp.
+- Tên lớp.
+- Lịch học.
+- Card học phí tháng.
+
+Có thể chỉnh sửa:
+
+- Tên lớp: icon bút cạnh tên; bấm vào đổi sang input, có nút lưu/hủy. Enter cũng lưu.
+- Lịch học: icon lịch mở `EditClassScheduleDialog`; chọn các ngày trong tuần và giờ bắt đầu/kết thúc.
+- Học phí tháng: icon bút trong card học phí; bấm vào đổi sang input, có nút lưu/hủy. Enter cũng lưu.
+
+Schedule behavior:
+
+- `classItem.schedule` là string.
+- Khi vào detail, string được parse thành `ClassScheduleItem[]` qua `parseScheduleText`.
+- Khi lưu lịch, `formatScheduleLines(scheduleItems).join(" / ")` được dùng để cập nhật lại string schedule trong `classOverviews`.
+- Nếu nhiều ngày có cùng giờ, `formatScheduleLines` gộp chung một dòng, ví dụ `"Thứ 3, Thứ 6 - 18:00 đến 20:00"`.
+- Nếu các ngày khác giờ, sẽ tách thành nhiều dòng.
+- Lịch học trong header được truyền xuống `AttendanceTab` bằng prop `scheduleItems`, nên cột điểm danh đồng bộ với lịch đang chỉnh trong phiên hiện tại.
+
+State/persistence:
+
+- Cập nhật tên, lịch, học phí gọi `onClassUpdate` ở `App.tsx`, merge vào `classOverviews`.
+- Chỉ local state; reload app sẽ quay về dữ liệu từ `mockData.ts`.
+
+Hạn chế:
+
+- Không có validation chi tiết cho giờ học ngoài việc input type time cung cấp.
+- Không có lưu lịch theo bảng riêng.
+- Không có lịch sử thay đổi học phí.
+
+## 11. Tab Danh sách học sinh hiện tại
+
+Table columns:
+
+- STT
+- Họ tên
+- Lớp ở trường
+- Trường
+- SĐT phụ huynh
+- Trạng thái
+- Ghi chú
+
+Search/filter:
+
+- Ô tìm kiếm lọc local theo tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú và nhãn trạng thái.
+- Không debounce, không gọi backend.
+
+Add student:
+
+- Nút `"Thêm học sinh"` không mở dialog.
+- Khi bấm, thêm một dòng mới trực tiếp vào table với fields rỗng, `status: "active"`, `classId` hiện tại.
+- Dòng mới tự đưa tab vào edit mode.
+- Dòng mới có icon thùng rác cạnh STT để xóa dòng mới.
+- Icon thùng rác chỉ xuất hiện cho các dòng mới, không xuất hiện với học sinh mock có sẵn.
+
+Edit/update:
+
+- Nút `"Cập nhật"` chuyển sang edit mode.
+- Trong edit mode có thể sửa: họ tên, lớp ở trường, trường, SĐT phụ huynh, trạng thái, ghi chú.
+- Nút đổi thành `"Lưu cập nhật"`; bấm lưu thoát edit mode và clear danh sách `newStudentIds`, khiến dòng mới thành dòng bình thường.
+
+Delete/archive/mark inactive:
+
+- Không có xóa học sinh hiện có.
+- Không có archive/hard delete học sinh hiện có.
+- Trạng thái học sinh có 2 giá trị trong type:
+  - `active`: hiển thị `"Đang học"`
+  - `paused`: hiển thị `"Đã nghỉ"` trong tab này
+
+Export:
+
+- Nút `"Xuất Excel"` chỉ hiển thị UI, chưa có behavior.
+
+State/data source:
+
+- Initial data từ `getStudentsByClassId(classId)`.
+- `StudentListTab` tự giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
+- Khi `classId` đổi, tab reset lại từ mock data.
+- Thay đổi không cập nhật `mockData.ts`, không cập nhật `classOverviews.studentCount`.
+
+## 12. Tab Điểm danh hiện tại
+
+Week navigation:
+
+- Có nút `"Tuần trước"`, nút range tuần, `"Tuần sau"`.
+- Range tuần dùng `formatDateRange(weekStart, getWeekEnd(weekStart))`.
+- Bấm vào range tuần mở mini calendar.
+- Mini calendar hiển thị tháng hiện tại, nút tháng trước/tháng sau, các tuần từ Thứ 2 đến Chủ nhật.
+- Tuần đang chọn được highlight; hover vào tuần khác highlight hàng tuần; bấm tuần nào thì chuyển sang tuần đó.
+
+Attendance columns:
+
+- Cột buổi học được sinh động từ `scheduleItems` nhận từ `ClassDetailPage`.
+- `getRegularSessionsForWeek(weekStart, scheduleItems)` tạo session theo ngày học trong tuần.
+- Buổi học bù được thêm vào `makeupSessions` và chỉ hiện nếu date nằm trong tuần đang xem.
+- Các session được sort theo ngày.
+
+Today/current day:
+
+- Nếu session date trùng hôm nay, header hiện badge `"Hôm nay"`.
+- Date hiển thị dạng `dd/MM`.
+
+Attendance statuses:
+
+- Type `AttendanceStatus = "present" | "absent" | "excused" | "makeup"`.
+- UI labels:
+  - `present`: Có mặt
+  - `absent`: Vắng
+  - `excused`: Có phép
+  - `makeup`: Học bù
+- Empty cell hiển thị `"Chưa điểm danh"`.
+- Trong code hiện tại, `"Học bù"` vừa là trạng thái điểm danh của học sinh (`makeup`), vừa có khái niệm session học bù (`session.isMakeup`). Hai khái niệm này là hai chỗ khác nhau trong code.
+
+Cell click behavior:
+
+- Mỗi cell là button.
+- Chỉ click được khi session đang unlocked và không bị cancel.
+- Chu kỳ trạng thái: empty -> Có mặt -> Vắng -> Có phép -> Học bù -> empty.
+
+Lock/unlock behavior:
+
+- `unlockedSessionIds` giữ danh sách session đang mở khóa.
+- Mặc định session bị khóa vì id chưa nằm trong `unlockedSessionIds`.
+- Nút `"Mở khóa"` thêm id vào `unlockedSessionIds`.
+- Nút `"Khóa"` xóa id khỏi `unlockedSessionIds`.
+- Khi session bị khóa, cell disabled và có opacity.
+
+Cancel session behavior:
+
+- Header session có icon `CalendarX`.
+- Bấm icon mở dialog xác nhận.
+- Nếu chưa nghỉ: dialog hỏi xác nhận lớp nghỉ; confirm gọi `cancelSession(sessionId)`.
+- `cancelSession` thêm session vào `cancelledSessionIds` và xóa khỏi `unlockedSessionIds`.
+- Khi session nghỉ, tất cả cell hiển thị badge `"Nghỉ"`; dữ liệu điểm danh cũ vẫn được giữ trong state.
+- Bấm icon lần nữa khi đã nghỉ mở dialog hủy trạng thái nghỉ; confirm gọi `restoreCancelledSession(sessionId)`, xóa khỏi cancelled và mở khóa session.
+
+Makeup session:
+
+- Nút `"Thêm buổi học bù"` mở `AddMakeupSessionDialog`.
+- Fields: ngày học bù, giờ học bù, bù cho buổi nào.
+- Khi lưu, thêm một `WeeklySession` local với id `makeup-${Date.now()}`, date, startTime/endTime, `isMakeup: true`, `makeupForSessionId`.
+- Nếu ngày học bù nằm trong tuần đang xem thì session hiện thành cột mới.
+- Header có badge `"Học bù"` nếu `session.isMakeup`.
+
+Quick action:
+
+- Nút `"Đánh dấu cả lớp đi học"` nằm cạnh `"Thêm buổi học bù"`.
+- Chỉ enabled nếu tuần đang xem có session trùng hôm nay.
+- Khi bấm, gọi `markSessionForStudents(todaySession.id, studentIds, "present")` để set tất cả học sinh thành `"present"` cho session hôm nay.
+- Nút này cũng xóa trạng thái cancelled của session đó nếu có.
+
+Export:
+
+- Nút `"Xuất Excel"` chỉ hiển thị UI, chưa có behavior.
+
+State/data source:
+
+- Students lấy trực tiếp từ `getStudentsByClassId(classId)`.
+- Attendance state nằm trong `useMockAttendance`: `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`.
+- Không dùng `attendanceSessions` và `attendanceRecords` trong `mockData.ts` cho UI AttendanceTab hiện tại.
+
+Hạn chế:
+
+- Không có lưu database.
+- Không phân biệt active/paused student khi điểm danh; code đang map tất cả student của class.
+- Không có note theo buổi hoặc theo record trong UI hiện tại.
+- Session quá khứ chỉ bị làm mờ bằng opacity trong header, không tự lock theo rule backend; hiện lock do `unlockedSessionIds`.
+
+## 13. Tab Nhập điểm hiện tại
+
+Month selector:
+
+- Có select tháng từ `scoreMonths`: `2026-05`, `2026-06`, `2026-07`, `2026-08`.
+- Default selected month là `scoreMonths[2]` tức `2026-07`.
+- Đổi tháng reset edit mode, reset draft từ saved state.
+
+Score table:
+
+- Columns:
+  - STT
+  - Họ tên
+  - dynamic score columns của tháng đang chọn
+- Không còn cột ghi chú trong UI ScoresTab hiện tại.
+
+Dynamic columns:
+
+- `useMockScores` tạo monthly sheets riêng theo tháng.
+- Với class `van-9a`, tháng 05/06/07 có dữ liệu mẫu.
+- Tháng 08 hoặc class khác có thể không có cột, sẽ hiện empty state.
+
+Add test behavior:
+
+- Nút `"Thêm bài kiểm tra"` gọi `addColumn`.
+- Không mở dialog.
+- Tạo cột mới id `score-column-${Date.now()}`, label `"Bài kiểm tra mới"`.
+- Tự chuyển sang edit mode.
+- Tạo ô điểm rỗng cho tất cả học sinh.
+
+View/edit mode:
+
+- View mode: cell điểm là text, empty hiển thị `"-"`.
+- Buttons view mode: `"Thêm bài kiểm tra"`, `"Cập nhật"`, `"Xuất bảng điểm"`.
+- Edit mode: header cột có input sửa tên bài kiểm tra và nút xóa cột; score cells là input.
+- Buttons edit mode: `"Lưu thay đổi"`, `"Hủy"`.
+
+Delete score column:
+
+- Trong edit mode, nút thùng rác ở header cột mở dialog.
+- Text xác nhận: `"Bạn có chắc muốn xóa cột điểm này? Toàn bộ điểm trong cột sẽ bị xóa."`
+- Confirm xóa cột khỏi draft sheet.
+
+Save/cancel:
+
+- `"Lưu thay đổi"` validate sheet hiện tại.
+- Nếu hợp lệ, normalize và lưu vào `savedSheets`, cập nhật `draftSheets`, thoát edit mode.
+- `"Hủy"` discard draft và quay lại saved state.
+
+Score validation:
+
+- Input chỉ nhận giá trị phù hợp regex trong `canUseScoreInput`.
+- Cho phép trống.
+- Điểm hợp lệ khi save: số từ 0 đến 10.
+- Cho phép thập phân, normalize dấu phẩy thành dấu chấm khi lưu.
+- Nếu invalid, hiển thị lỗi: `"Điểm phải là số từ 0 đến 10. Có thể để trống nếu chưa có điểm."`
+
+Export:
+
+- Nút `"Xuất bảng điểm"` chỉ hiển thị UI, chưa có behavior.
+
+State/data source:
+
+- Students lấy từ `getStudentsByClassId`.
+- Score sheet hiện tại không dùng `scoreColumns` và `scoreRecords` trong `mockData.ts`; nó dùng `createInitialScoreSheets` trong `features/classes/utils/scores.ts`.
+- State nằm trong `useMockScores`, mất khi reload hoặc đổi class reset theo mock.
+
+## 14. Tab Học phí hiện tại
+
+Month selector:
+
+- Select tháng từ `paymentMonths`: `2026-05`, `2026-06`, `2026-07`, `2026-08`.
+- Default `currentPaymentMonth = "2026-07"`.
+- Mỗi tháng có state riêng trong `paymentsByMonth`.
+
+Search:
+
+- Ô `"Tìm nhanh tên học sinh..."` lọc local theo `student.fullName`.
+
+Filter:
+
+- Select filter:
+  - Tất cả
+  - Chưa đóng
+  - Đã đóng
+  - Miễn giảm
+- Filter dùng `filterPaymentRows`.
+
+Summary cards:
+
+- Đã đóng
+- Chưa đóng
+- Miễn giảm
+- Tổng đã thu
+
+Lưu ý: type/helper `PaymentSummary` vẫn có `totalStudents`, nhưng UI hiện tại không render card tổng học sinh.
+
+Table columns:
+
+- STT
+- Họ tên
+- Trạng thái
+- Số tiền
+- Ngày đóng
+- Ghi chú
+
+Payment statuses:
+
+- Type `PaymentStatus = "paid" | "unpaid" | "waived"`.
+- UI labels:
+  - `paid`: Đã đóng
+  - `unpaid`: Chưa đóng
+  - `waived`: Miễn giảm
+- Select trạng thái tích hợp màu trong trigger qua `paymentSelectClasses`.
+
+Status change behavior:
+
+- Chọn `"Đã đóng"` không đổi ngay; mở `ConfirmPaidDialog`.
+- Dialog xác nhận gồm tên học sinh, tháng, học phí tháng của lớp.
+- Confirm set:
+  - `status: "paid"`
+  - `amount: monthlyFee`
+  - `paidAt: todayDateKey()`
+- Chọn `"Chưa đóng"` đổi ngay:
+  - `status: "unpaid"`
+  - `amount: 0`
+  - `paidAt: undefined`
+  - giữ nguyên note
+- Chọn `"Miễn giảm"` mở `TuitionWaiverDialog`.
+- Dialog miễn giảm hiển thị readonly: học sinh, tháng, học phí lớp.
+- Form miễn giảm gồm: số tiền thực thu, ghi chú.
+- Validation: amount >= 0 và <= monthlyFee.
+- Lưu miễn giảm set:
+  - `status: "waived"`
+  - `amount` theo input
+  - `note` theo input
+  - `paidAt` là hôm nay nếu amount > 0, ngược lại undefined.
+
+Amount behavior:
+
+- Dòng có payment trong mock dùng amount từ payment.
+- Dòng không có payment tạo unpaid payment với amount 0 bằng `createUnpaidPayment`.
+- Trong `mockData.ts`, có dòng unpaid tháng 07 của `s2` amount 700000; code hiện vẫn hiển thị amount đó cho payment tồn tại.
+
+Note behavior:
+
+- Cột ghi chú là input inline.
+- Gõ note gọi `updateNote`, cập nhật local state của tháng đang chọn.
+
+Export:
+
+- Nút `"Xuất Excel"` chỉ hiển thị UI, chưa có behavior.
+
+State/data source:
+
+- Initial data lấy từ `getPaymentsForClassMonth(classId, month)` cho từng month.
+- `PaymentsTab` giữ `paymentsByMonth` local.
+- `monthlyFee` lấy từ prop `monthlyFeeOverride` nếu có, fallback `getClassById(classId)?.monthlyFee`.
+- Thay đổi mất khi reload.
+
+## 15. Các trang/sidebar page khác hiện tại
+
+### Lịch học
+
+- File: `src/features/schedule/SchedulePage.tsx`.
+- UI: title `"Lịch học"`, description `"Lịch tổng hợp các lớp theo tháng/tuần sẽ được phát triển sau."`
+- Có card `"Buổi học sắp tới"` với 3 session mock tĩnh.
+- Không có tương tác thật.
+- Trạng thái: placeholder.
+
+### Học phí dashboard/global page
+
+- File: `src/features/tuition-dashboard/TuitionDashboardPage.tsx`.
+- UI: title `"Tổng hợp học phí"`, description `"Dashboard tổng hợp học phí theo tháng sẽ được phát triển sau."`
+- Có 4 summary card mock tĩnh: đã thu tháng này, chưa đóng, miễn giảm, số lớp theo dõi.
+- Không liên kết với `PaymentsTab`.
+- Trạng thái: placeholder.
+
+### Sao lưu dữ liệu
+
+- File: `src/features/backup/BackupPage.tsx`.
+- UI: title `"Sao lưu dữ liệu"`, description về sao lưu định kỳ.
+- Buttons disabled: `"Sao lưu dữ liệu"`, `"Khôi phục dữ liệu"`, `"Mở thư mục dữ liệu"`.
+- Không có behavior.
+- Trạng thái: placeholder.
+
+### Cài đặt
+
+- File: `src/features/settings/SettingsPage.tsx`.
+- UI: title `"Cài đặt"`, description `"Các thiết lập ứng dụng sẽ được phát triển sau."`
+- Card tĩnh:
+  - Đổi mật khẩu
+  - Năm học hiện tại
+  - Thông tin ứng dụng
+- Không có form hoặc behavior.
+- Trạng thái: placeholder.
+
+## 16. Mock data và type hiện tại
+
+### Academic year data
+
+- File data: `src/data/mockData.ts`.
+- Type: `AcademicYear` trong `src/types/academic-year.ts`.
+- Fields: `id`, `label`, `startsAt`, `endsAt`, `isCurrent`.
+- Mock có 3 năm: `2025-2026` current, `2024-2025`, `2026-2027`.
+- `getCurrentAcademicYearId()` trả năm current hoặc fallback năm đầu.
+
+### Class data
+
+- Type: `ExtraClass` trong `src/types/class.ts`.
+- Fields: `id`, `academicYearId`, `name`, `schedule`, `monthlyFee`, `room`, `note?`.
+- Type phụ:
+  - `WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6`
+  - `ClassScheduleItem = { weekday, startTime, endTime }`
+- Mock classes gồm `van-9a`, `van-8a`, `van-7a`, `van-9-old`.
+- `ClassOverview = ExtraClass & { studentCount, unpaidCount }`.
+- Quan hệ: class thuộc academic year qua `academicYearId`; student/payment/attendance liên kết class qua `classId`.
+
+### Student data
+
+- Type: `Student` trong `src/types/student.ts`.
+- Fields: `id`, `classId`, `fullName`, `schoolClass`, `school`, `parentPhone`, `status`, `note?`.
+- Status type: `"active" | "paused"`.
+- Mock có 9 học sinh trên các lớp.
+- Quan hệ hiện tại: mỗi student có đúng một `classId`.
+
+### Attendance data
+
+- Types trong `src/types/attendance.ts`:
+  - `AttendanceStatus = "present" | "absent" | "excused" | "makeup"`.
+  - `AttendanceSession = { id, classId, date, content?, note? }`.
+  - `AttendanceRecord = { id, sessionId, studentId, status, note? }`.
+- `mockData.ts` có `attendanceSessions` và `attendanceRecords`.
+- UI AttendanceTab hiện tại không dùng trực tiếp các array này; nó sinh session từ schedule và giữ record trong `useMockAttendance`.
+- `useMockAttendance` dùng key `${sessionId}:${studentId}` để lưu trạng thái.
+
+### Score data
+
+- Types trong `src/types/score.ts`:
+  - `ScoreType = "essay" | "short" | "oral" | "midterm" | "final" | "mock_exam" | "other"`.
+  - `ScoreColumn = { id, classId, label, type?, testDate?, weight?, note? }`.
+  - `ScoreRecord = { id, columnId, studentId, value, note? }`.
+- `mockData.ts` vẫn có `scoreColumns` và `scoreRecords` kiểu cũ.
+- ScoresTab hiện tại không dùng `ScoreType`, không dùng hệ số, không dùng formal score types.
+- ScoresTab dùng `MonthlyScoreSheet` local trong `features/classes/utils/scores.ts`:
+  - `MonthlyScoreColumn = { id, label }`
+  - `MonthlyScoreSheet = { columns, valuesByStudentId }`
+  - `MonthlyScoreSheets = Record<string, MonthlyScoreSheet>`
+- Months: `2026-05`, `2026-06`, `2026-07`, `2026-08`.
+
+### Payment data
+
+- Type: `Payment` trong `src/types/payment.ts`.
+- Fields: `id`, `studentId`, `classId`, `month`, `status`, `amount`, `paidAt?`, `note?`.
+- Status type: `"paid" | "unpaid" | "waived"`.
+- `currentPaymentMonth = "2026-07"`.
+- `paymentMonths = ["2026-05", "2026-06", "2026-07", "2026-08"]`.
+- Quan hệ: payment liên kết student và class qua `studentId`, `classId`, theo tháng `month`.
+
+### Settings/other data
+
+- Chưa có type/settings data riêng.
+- Settings page chỉ render card tĩnh trong component.
+- Backup page chỉ render action tĩnh disabled.
+
+## 17. Current state management
+
+- Không có global state library.
+- Không dùng React Router.
+- `src/app/App.tsx` giữ state cấp app:
+  - `screen`
+  - `selectedClassId`
+  - `selectedYearId`
+  - `classOverviews`
+- Home:
+  - nhận `classOverviews`, `selectedYearId` từ App.
+  - tạo lớp mới cập nhật `classOverviews` ở App.
+- ClassDetailPage:
+  - giữ local draft cho tên lớp, học phí, lịch học.
+  - lưu thay đổi gọi `onClassUpdate` để cập nhật `classOverviews` ở App.
+- StudentListTab:
+  - giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
+  - reset khi `classId` đổi.
+- AttendanceTab/useMockAttendance:
+  - `weekStart`, `weekPickerOpen`, `visibleCalendarMonth`, `pendingCancelSession` ở tab.
+  - `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions` ở hook.
+- ScoresTab/useMockScores:
+  - `selectedMonth`, `savedSheets`, `draftSheets`, `isEditing`, `errorMessage`.
+- PaymentsTab:
+  - `selectedMonth`, `filter`, `searchQuery`, `pendingPaidRow`, `pendingWaivedRow`, `paymentsByMonth`.
+- Tất cả state local/local app đều reset khi reload app.
+- Một số state reset khi đổi class hoặc đổi month.
+
+## 18. UI action inventory
+
+| UI action | Where it appears | Current implemented behavior | Current data affected | Persistence | Future DB note |
+|---|---|---|---|---|---|
+| Login | LoginPage | Password không rỗng thì vào Home | `screen` | local only | Cần auth/settings thật nếu muốn mật khẩu |
+| Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
+| Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
+| Select academic year | HomePage | Đổi năm đang xem | `selectedYearId` | local only | Cần lưu năm hiện tại trong settings |
+| Create class | CreateClassDialog | Thêm class overview local | `classOverviews` | local only | Insert `classes`, `class_schedules` |
+| Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
+| Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
+| Edit class name | ClassDetail header | Sửa tên bằng input, save cập nhật App state | `classOverviews.name` | local only | Update `classes.name` |
+| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, save cập nhật schedule string và AttendanceTab | `classOverviews.schedule`, local `scheduleItems` | local only | Cần bảng `class_schedules` |
+| Edit monthly fee | ClassDetail header | Sửa fee bằng input | `classOverviews.monthlyFee` | local only | Update class fee, cân nhắc lịch sử fee |
+| Search student | StudentListTab | Lọc table local | UI only | none | Query/filter frontend hoặc DB khi data lớn |
+| Add student | StudentListTab | Thêm dòng mới inline, vào edit mode | local `students` | local only | Insert `students`/`class_students` |
+| Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
+| Edit student | StudentListTab | Sửa fields và status trong edit mode | local `students` | local only | Update student/class membership/status |
+| Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
+| Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar | `weekStart` | local only | Có thể query session theo week |
+| Add makeup session | AttendanceTab/AddMakeupSessionDialog | Thêm session học bù local | `makeupSessions` | local only | Insert `attendance_sessions` type makeup |
+| Mark today present | AttendanceTab | Nếu có session hôm nay, set tất cả status present | `attendance` | local only | Batch update attendance_records |
+| Cancel/restored session | AttendanceTab | Dialog xác nhận nghỉ/hủy nghỉ, lock/unlock tương ứng | `cancelledSessionIds`, `unlockedSessionIds` | local only | Session status cancelled/restored |
+| Lock/unlock session | AttendanceTab | Toggle khả năng sửa cell | `unlockedSessionIds` | local only | Cần field locked hoặc rule theo date |
+| Tick attendance cell | AttendanceTab | Cycle empty/present/absent/excused/makeup | `attendance` | local only | Upsert attendance_record |
+| Export attendance Excel | AttendanceTab | Chưa có behavior | none | none | Export sheet theo week/class |
+| Change score month | ScoresTab | Chuyển sheet tháng, thoát edit | `selectedMonth`, draft | local only | Query score columns/values by month |
+| Add score column/test | ScoresTab | Thêm cột mới, vào edit mode | `draftSheets` | local only | Insert score column |
+| Edit score column label | ScoresTab | Input header trong edit mode | `draftSheets.columns` | local only | Update score column |
+| Delete score column | ScoresTab | Dialog confirm, xóa cột khỏi draft | `draftSheets` | local only | Delete/archive column and values |
+| Edit score value | ScoresTab | Input điểm trong edit mode | `draftSheets.valuesByStudentId` | local only | Upsert score_values |
+| Save scores | ScoresTab | Validate, normalize, save draft vào saved | `savedSheets`, `draftSheets` | local only | Transaction update columns/values |
+| Cancel score edit | ScoresTab | Discard draft | `draftSheets` | local only | Rollback client draft |
+| Export score Excel | ScoresTab | Chưa có behavior | none | none | Export score sheet |
+| Change payment month | PaymentsTab | Chuyển month state | `selectedMonth` | local only | Query payment_records by month |
+| Search payment student | PaymentsTab | Lọc tên học sinh local | UI only | none | Search/filter khi data lớn |
+| Filter payment status | PaymentsTab | Lọc rows local | UI only | none | Query/filter |
+| Change status to paid | PaymentsTab | Mở confirm, confirm set paid/amount/date | `paymentsByMonth` | local only | Update payment_records |
+| Change status to unpaid | PaymentsTab | Set unpaid, amount 0, clear paidAt | `paymentsByMonth` | local only | Update payment_records |
+| Change status to waived | PaymentsTab | Mở waiver dialog, save amount/note/date | `paymentsByMonth` | local only | Update payment_records with waiver info |
+| Edit payment note | PaymentsTab | Input inline cập nhật note | `paymentsByMonth` | local only | Update note field |
+| Export payment Excel | PaymentsTab | Chưa có behavior | none | none | Export payment sheet |
+| Backup buttons | BackupPage | Disabled | none | none | Implement backup/restore later |
+| Settings cards | SettingsPage | Static only | none | none | Implement settings later |
+
+## 19. Current limitations / chưa có
+
+- Chưa có SQLite/database.
+- Chưa có persistence thật; reload mất các thay đổi local.
+- Chưa có password thật, hashing, app lock, hoặc session.
+- Chưa có React Router.
+- Chưa có Excel export thật dù nhiều nút export đã hiện.
+- Chưa có backup/restore thật.
+- Trang Lịch học global chỉ là placeholder.
+- Trang Tổng hợp học phí global chỉ là placeholder.
+- Trang Cài đặt chỉ là placeholder.
+- Chưa có đồng bộ student thêm/sửa với Home summary hoặc các tab khác.
+- Chưa có phân quyền hoặc nhiều người dùng.
+- Chưa có xử lý hard delete/archive học sinh hiện có.
+- Chưa có lưu lịch sử học phí theo tháng.
+- Chưa có phân biệt rõ session học bù và trạng thái học sinh đi học bù ở backend.
+- Chưa có transaction hoặc optimistic update/error rollback vì chưa có backend.
+
+## 20. Future database candidates based on current code
+
+Đề xuất dựa trên UI hiện tại, chưa được implemented:
+
+| Entity đề xuất | Lý do cần theo UI hiện tại |
+|---|---|
+| `academic_years` | Home có bộ chọn năm học và class thuộc năm học |
+| `classes` | Lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
+| `class_schedules` | Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
+| `students` | Lưu thông tin học sinh: tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú |
+| `class_students` | Nên có nếu sau này một học sinh học nhiều lớp hoặc cần trạng thái theo từng lớp |
+| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù, ngày học |
+| `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session |
+| `score_columns` | Lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
+| `score_values` | Lưu điểm từng học sinh từng cột |
+| `payment_records` | Lưu học phí theo student/class/month/status/amount/paidAt/note |
+| `app_settings` | Lưu năm học hiện tại, mật khẩu/app lock, cấu hình đường dẫn dữ liệu |
+| `backup_logs` hoặc metadata backup | Nếu muốn hiển thị lịch sử sao lưu sau này |
+
+## 21. Suggested backend integration order
+
+1. SQLite/data access setup: cần nền tảng lưu dữ liệu trước khi nối UI.
+2. App settings/login: nhỏ, ít quan hệ, giúp có mật khẩu/năm học mặc định thật.
+3. Academic years/classes/class schedules: là dữ liệu gốc cho Home, ClassDetail và Attendance.
+4. Students/class membership: các tab đều phụ thuộc danh sách học sinh.
+5. Payments: cấu trúc theo tháng rõ, ít phụ thuộc lịch học, có flow confirm/waiver cụ thể.
+6. Scores: cần lưu cột động theo tháng và điểm theo học sinh.
+7. Attendance: phức tạp hơn vì liên quan lịch học, session phát sinh, lock/cancel/makeup.
+8. Backup/restore: nên làm sau khi schema ổn định.
+9. Excel export: làm sau khi nguồn dữ liệu thật ổn định để export đúng data.
+
+## 22. Questions to confirm before backend
+
+- Xóa học sinh sau này là hard delete, archive, hay chỉ chuyển trạng thái `"Đã nghỉ"`?
+- Một học sinh có được nằm trong nhiều lớp không?
+- Trạng thái `"Đã nghỉ"` là trạng thái toàn học sinh hay trạng thái theo từng lớp?
+- Tạo học sinh inline có cần validate bắt buộc họ tên/SĐT không?
+- Sửa lịch học có ảnh hưởng đến các buổi điểm danh đã qua không?
+- Có cần sinh sẵn `attendance_sessions` theo lịch hay chỉ sinh khi mở tuần/điểm danh?
+- Buổi nghỉ nên lưu như một trạng thái của session hay tạo attendance record `"Nghỉ"` cho từng học sinh?
+- Khi hủy trạng thái nghỉ, có giữ lại data điểm danh cũ không? Code hiện tại đang giữ.
+- Học bù là trạng thái của học sinh trong một buổi thường, hay là một session riêng, hay cả hai?
+- Button `"Đánh dấu cả lớp đi học"` có áp dụng cho học sinh `"Đã nghỉ"` không?
+- Buổi đã qua có tự khóa không, và ai được mở khóa?
+- Học phí `"Chưa đóng"` nên hiển thị amount là 0 hay học phí dự kiến?
+- Miễn giảm có bắt buộc ghi chú không?
+- Học phí có cần lưu theo mức phí tại thời điểm tháng đó không nếu sau này sửa học phí lớp?
+- Có cần lịch sử chỉnh sửa học phí/điểm danh/điểm không?
+- Có cần xác nhận khi đổi trạng thái điểm danh từng cell không, hay click đổi ngay là đủ?
+- Backup sẽ lưu vào thư mục nào, có cho người dùng chọn đường dẫn không?
+- Excel export cần mẫu file cố định hay chỉ xuất bảng đang xem?
