@@ -15,3 +15,17 @@ export type ExtraClass = {
   room: string;
   note?: string;
 };
+
+export type ClassOverview = ExtraClass & {
+  scheduleItems: ClassScheduleItem[];
+  studentCount: number;
+  unpaidCount: number;
+};
+
+export type CreateClassInput = {
+  academicYearId: string;
+  name: string;
+  monthlyFee: number;
+  note?: string;
+  scheduleItems: ClassScheduleItem[];
+};

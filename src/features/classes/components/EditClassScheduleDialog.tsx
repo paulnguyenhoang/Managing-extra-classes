@@ -18,7 +18,7 @@ import type { ClassScheduleItem, WeekdayIndex } from "@/types/class";
 
 type EditClassScheduleDialogProps = {
   scheduleItems: ClassScheduleItem[];
-  onSave: (scheduleItems: ClassScheduleItem[]) => void;
+  onSave: (scheduleItems: ClassScheduleItem[]) => void | Promise<void>;
 };
 
 export function EditClassScheduleDialog({
@@ -27,11 +27,14 @@ export function EditClassScheduleDialog({
 }: EditClassScheduleDialogProps) {
   const [open, setOpen] = useState(false);
   const [draftItems, setDraftItems] = useState<ClassScheduleItem[]>(scheduleItems);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const selectedWeekdays = new Set(draftItems.map((item) => item.weekday));
 
   useEffect(() => {
     if (open) {
       setDraftItems(scheduleItems);
+      setErrorMessage("");
     }
   }, [open, scheduleItems]);
 
@@ -55,9 +58,18 @@ export function EditClassScheduleDialog({
     );
   }
 
-  function handleSave() {
-    onSave(draftItems);
-    setOpen(false);
+  async function handleSave() {
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      await onSave(draftItems);
+      setOpen(false);
+    } catch {
+      setErrorMessage("Không lưu được lịch học. Thầy thử lại giúp em nhé.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -121,14 +133,22 @@ export function EditClassScheduleDialog({
           })}
         </div>
 
+        {errorMessage && (
+          <p className="text-sm text-red-600">{errorMessage}</p>
+        )}
+
         <DialogFooter>
           <DialogClose asChild>
-            <Button type="button" variant="outline">
+            <Button type="button" variant="outline" disabled={isSaving}>
               Hủy
             </Button>
           </DialogClose>
-          <Button type="button" disabled={draftItems.length === 0} onClick={handleSave}>
-            Lưu lịch học
+          <Button
+            type="button"
+            disabled={draftItems.length === 0 || isSaving}
+            onClick={handleSave}
+          >
+            {isSaving ? "Đang lưu..." : "Lưu lịch học"}
           </Button>
         </DialogFooter>
       </DialogContent>

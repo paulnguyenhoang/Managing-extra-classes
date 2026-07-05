@@ -1,4 +1,5 @@
 mod db;
+mod school;
 mod settings;
 
 use tauri::Manager;
@@ -26,6 +27,9 @@ pub fn run() {
                 database_status.applied_migrations.join(", ")
             );
 
+            school::seed_academic_class_data(&database)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+
             app.manage(database);
 
             Ok(())
@@ -36,7 +40,16 @@ pub fn run() {
             settings::is_password_set,
             settings::set_initial_password,
             settings::verify_password,
-            settings::change_password
+            settings::change_password,
+            school::list_academic_years,
+            school::get_current_academic_year_id,
+            school::set_current_academic_year,
+            school::list_class_overviews_by_year,
+            school::get_class_detail,
+            school::create_class,
+            school::update_class_name,
+            school::update_class_monthly_fee,
+            school::update_class_schedule
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

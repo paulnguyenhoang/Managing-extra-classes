@@ -2,20 +2,21 @@ import { BookOpenCheck, FolderOpen, Users, WalletCards } from "lucide-react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  academicYears,
-  type ClassOverview,
-} from "@/data/mockData";
 import { ClassCard } from "@/features/home/components/ClassCard";
 import { CreateClassDialog } from "@/features/home/components/CreateClassDialog";
 import { YearSelector } from "@/features/home/components/YearSelector";
+import type { AcademicYear } from "@/types/academic-year";
+import type { ClassOverview, CreateClassInput } from "@/types/class";
 
 type HomePageProps = {
+  academicYears: AcademicYear[];
   selectedYearId: string;
   classOverviews: ClassOverview[];
-  onYearChange: (yearId: string) => void;
+  isLoading?: boolean;
+  errorMessage?: string;
+  onYearChange: (yearId: string) => void | Promise<void>;
   onOpenClass: (classId: string) => void;
-  onCreateClass: (classItem: ClassOverview) => void;
+  onCreateClass: (input: CreateClassInput) => void | Promise<void>;
 };
 
 const summaryCards = [
@@ -25,8 +26,11 @@ const summaryCards = [
 ] as const;
 
 export function HomePage({
+  academicYears,
   selectedYearId,
   classOverviews,
+  isLoading = false,
+  errorMessage = "",
   onYearChange,
   onOpenClass,
   onCreateClass,
@@ -60,9 +64,16 @@ export function HomePage({
           <CreateClassDialog
             academicYearId={selectedYearId}
             onCreate={onCreateClass}
+            disabled={!selectedYearId}
           />
         </div>
       </section>
+
+      {(isLoading || errorMessage) && (
+        <div className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+          {isLoading ? "Đang tải dữ liệu lớp học..." : errorMessage}
+        </div>
+      )}
 
       <section className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         {summaryCards.map((item) => {
@@ -106,6 +117,7 @@ export function HomePage({
               <CreateClassDialog
                 academicYearId={selectedYearId}
                 onCreate={onCreateClass}
+                disabled={!selectedYearId}
               />
             }
           />

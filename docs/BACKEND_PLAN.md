@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Đây chỉ là kế hoạch, chưa triển khai database và chưa sửa app code.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-3 đã được triển khai một phần trong app code; các phase còn lại vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -656,6 +656,8 @@ Thứ tự triển khai đã chốt:
 
 ### Phase 1. SQLite setup only
 
+Trạng thái hiện tại: đã triển khai.
+
 Mục tiêu:
 
 - Thêm dependency SQLite ở Rust side.
@@ -673,6 +675,8 @@ Deliverables:
 
 ### Phase 2. App settings/local password
 
+Trạng thái hiện tại: đã triển khai cho password local và `current_academic_year_id`.
+
 Mục tiêu:
 
 - Lưu password local dạng hash + salt.
@@ -687,6 +691,8 @@ Deliverables:
 
 ### Phase 3. Academic years/classes/class schedules
 
+Trạng thái hiện tại: đã triển khai.
+
 Mục tiêu:
 
 - Lưu năm học, lớp, lịch học.
@@ -699,6 +705,7 @@ Deliverables:
 - Tạo lớp mới insert DB.
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
+- Lưu ý hiện tại: `studentCount` và `unpaidCount` trong class overview tạm trả `0` cho đến Phase 4/5.
 
 ### Phase 4. Students/class memberships
 

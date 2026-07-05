@@ -14,11 +14,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { ClassOverview } from "@/data/mockData";
+import { parseScheduleText } from "@/features/classes/utils/classSchedule";
+import type { CreateClassInput } from "@/types/class";
 
 type CreateClassDialogProps = {
   academicYearId: string;
-  onCreate: (classItem: ClassOverview) => void;
+  disabled?: boolean;
+  onCreate: (input: CreateClassInput) => void | Promise<void>;
 };
 
 const initialForm = {
@@ -29,37 +31,62 @@ const initialForm = {
   note: "",
 };
 
-export function CreateClassDialog({ academicYearId, onCreate }: CreateClassDialogProps) {
+export function CreateClassDialog({
+  academicYearId,
+  disabled = false,
+  onCreate,
+}: CreateClassDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    onCreate({
-      id: `mock-class-${Date.now()}`,
-      academicYearId,
-      name: form.name || `Lớp Văn ${form.grade || "mới"}`,
-      schedule: form.schedule || "Chưa có lịch học",
-      monthlyFee: Number(form.monthlyFee) || 0,
-      room: "Chưa chọn phòng",
-      note: form.note,
-      studentCount: 0,
-      unpaidCount: 0,
-    });
+    const name = form.name.trim();
+    const monthlyFee = Number(form.monthlyFee);
 
-    setForm(initialForm);
-    setOpen(false);
+    if (!name) {
+      setErrorMessage("Vui lòng nhập tên lớp.");
+      return;
+    }
+
+    if (!Number.isInteger(monthlyFee) || monthlyFee < 0) {
+      setErrorMessage("Học phí tháng phải là số nguyên không âm.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage("");
+
+    try {
+      await onCreate({
+        academicYearId,
+        name,
+        monthlyFee,
+        note: form.note.trim() || undefined,
+        scheduleItems: parseScheduleText(form.schedule),
+      });
+
+      setForm(initialForm);
+      setOpen(false);
+    } catch (error) {
+      console.warn("[create-class] failed", error);
+      setErrorMessage("Không lưu được lớp học mới. Thầy thử lại giúp em nhé.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="h-10 w-full gap-2 sm:w-auto">
+        <Button disabled={disabled} className="h-10 w-full gap-2 sm:w-auto">
           <Plus className="size-4" />
           <span className="hidden sm:inline">Tạo lớp mới</span>
         </Button>
@@ -117,13 +144,18 @@ export function CreateClassDialog({ academicYearId, onCreate }: CreateClassDialo
               />
             </div>
           </div>
+          {errorMessage && (
+            <p className="text-sm text-red-600">{errorMessage}</p>
+          )}
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline">
+              <Button type="button" variant="outline" disabled={isSubmitting}>
                 Hủy
               </Button>
             </DialogClose>
-            <Button type="submit">Lưu lớp</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Đang lưu..." : "Lưu lớp"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

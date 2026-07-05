@@ -1,12 +1,12 @@
 import { CalendarDays, Users, WalletCards } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import type { ClassOverview } from "@/data/mockData";
 import {
   formatScheduleLines,
   parseScheduleText,
 } from "@/features/classes/utils/classSchedule";
 import { formatCurrency } from "@/lib/format";
+import type { ClassOverview } from "@/types/class";
 
 type ClassCardProps = {
   classItem: ClassOverview;
@@ -14,7 +14,11 @@ type ClassCardProps = {
 };
 
 export function ClassCard({ classItem, onOpen }: ClassCardProps) {
-  const scheduleLines = formatScheduleLines(parseScheduleText(classItem.schedule));
+  const scheduleLines = formatScheduleLines(
+    classItem.scheduleItems?.length
+      ? classItem.scheduleItems
+      : parseScheduleText(classItem.schedule),
+  );
 
   return (
     <button

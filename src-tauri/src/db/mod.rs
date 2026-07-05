@@ -16,11 +16,18 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "001_init",
-    sql: include_str!("../../migrations/001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "001_init",
+        sql: include_str!("../../migrations/001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "002_academic_classes",
+        sql: include_str!("../../migrations/002_academic_classes.sql"),
+    },
+];
 
 pub struct AppDatabase {
     path: PathBuf,
@@ -114,6 +121,30 @@ impl AppDatabase {
         transaction
             .commit()
             .map_err(|error| format!("Không commit được settings transaction: {error}"))
+    }
+
+    pub fn with_connection<T>(
+        &self,
+        operation: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| "Không khóa được SQLite connection".to_string())?;
+
+        operation(&connection)
+    }
+
+    pub fn with_connection_mut<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "Không khóa được SQLite connection".to_string())?;
+
+        operation(&mut connection)
     }
 }
 

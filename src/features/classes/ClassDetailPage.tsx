@@ -5,7 +5,6 @@ import { Tabs as TabsPrimitive } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { ClassOverview } from "@/data/mockData";
 import { AttendanceTab } from "@/features/classes/components/AttendanceTab";
 import { EditClassScheduleDialog } from "@/features/classes/components/EditClassScheduleDialog";
 import { PaymentsTab } from "@/features/classes/components/PaymentsTab";
@@ -16,6 +15,13 @@ import {
   parseScheduleText,
 } from "@/features/classes/utils/classSchedule";
 import { formatCurrency } from "@/lib/format";
+import {
+  getClassDetail,
+  updateClassMonthlyFee,
+  updateClassName,
+  updateClassSchedule,
+} from "@/services/classApi";
+import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 
 type ClassDetailPageProps = {
   classItem: ClassOverview;
@@ -32,8 +38,11 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
   const [feeDraft, setFeeDraft] = useState(() => String(classItem?.monthlyFee ?? 0));
   const [isEditingFee, setIsEditingFee] = useState(false);
   const [scheduleItems, setScheduleItems] = useState(() =>
-    parseScheduleText(classItem?.schedule ?? ""),
+    classItem?.scheduleItems?.length
+      ? classItem.scheduleItems
+      : parseScheduleText(classItem?.schedule ?? ""),
   );
+  const [headerError, setHeaderError] = useState("");
   const scheduleLines = formatScheduleLines(scheduleItems);
 
   useEffect(() => {
@@ -43,10 +52,55 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
     setMonthlyFee(classItem?.monthlyFee ?? 0);
     setFeeDraft(String(classItem?.monthlyFee ?? 0));
     setIsEditingFee(false);
-    setScheduleItems(parseScheduleText(classItem?.schedule ?? ""));
+    setScheduleItems(
+      classItem?.scheduleItems?.length
+        ? classItem.scheduleItems
+        : parseScheduleText(classItem?.schedule ?? ""),
+    );
   }, [classItem]);
 
-  function saveClassName() {
+  useEffect(() => {
+    let cancelled = false;
+
+    getClassDetail(classId)
+      .then((detail) => {
+        if (cancelled) {
+          return;
+        }
+
+        setClassName(detail.name);
+        setClassNameDraft(detail.name);
+        setMonthlyFee(detail.monthlyFee);
+        setFeeDraft(String(detail.monthlyFee));
+        setScheduleItems(detail.scheduleItems);
+        setHeaderError("");
+        onClassUpdate(classId, detail);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        console.warn("[class-detail] load failed", error);
+        setHeaderError("Không tải được thông tin lớp học từ database.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [classId]);
+
+  function applyClassDetail(detail: ClassOverview) {
+    setClassName(detail.name);
+    setClassNameDraft(detail.name);
+    setMonthlyFee(detail.monthlyFee);
+    setFeeDraft(String(detail.monthlyFee));
+    setScheduleItems(detail.scheduleItems);
+    setHeaderError("");
+    onClassUpdate(classId, detail);
+  }
+
+  async function saveClassName() {
     const nextName = classNameDraft.trim();
     if (!nextName) {
       setClassNameDraft(className);
@@ -54,30 +108,40 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
       return;
     }
 
-    setClassName(nextName);
-    setClassNameDraft(nextName);
-    setIsEditingClassName(false);
-    onClassUpdate(classId, { name: nextName });
+    try {
+      applyClassDetail(await updateClassName(classId, nextName));
+      setIsEditingClassName(false);
+    } catch (error) {
+      console.warn("[class-detail] update name failed", error);
+      setHeaderError("Không lưu được tên lớp.");
+    }
   }
 
-  function saveMonthlyFee() {
+  async function saveMonthlyFee() {
     const nextFee = Number(feeDraft);
-    if (!Number.isFinite(nextFee) || nextFee < 0) {
+    if (!Number.isInteger(nextFee) || nextFee < 0) {
       setFeeDraft(String(monthlyFee));
       setIsEditingFee(false);
       return;
     }
 
-    setMonthlyFee(nextFee);
-    setFeeDraft(String(nextFee));
-    setIsEditingFee(false);
-    onClassUpdate(classId, { monthlyFee: nextFee });
+    try {
+      applyClassDetail(await updateClassMonthlyFee(classId, nextFee));
+      setIsEditingFee(false);
+    } catch (error) {
+      console.warn("[class-detail] update monthly fee failed", error);
+      setHeaderError("Không lưu được học phí tháng.");
+    }
   }
 
-  function saveSchedule(nextScheduleItems: typeof scheduleItems) {
-    const nextSchedule = formatScheduleLines(nextScheduleItems).join(" / ");
-    setScheduleItems(nextScheduleItems);
-    onClassUpdate(classId, { schedule: nextSchedule });
+  async function saveSchedule(nextScheduleItems: ClassScheduleItem[]) {
+    try {
+      applyClassDetail(await updateClassSchedule(classId, nextScheduleItems));
+    } catch (error) {
+      console.warn("[class-detail] update schedule failed", error);
+      setHeaderError("Không lưu được lịch học.");
+      throw error;
+    }
   }
 
   if (!classItem) {
@@ -165,6 +229,9 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
                 ))}
               </div>
             </div>
+            {headerError && (
+              <p className="mt-2 text-sm text-red-600">{headerError}</p>
+            )}
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
             <div className="min-w-0 rounded-lg bg-slate-50 p-4">

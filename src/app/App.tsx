@@ -3,11 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { AppShell } from "@/components/layout/AppShell";
 import type { SidebarScreen } from "@/components/layout/Sidebar";
-import {
-  type ClassOverview,
-  getAllClassOverviews,
-  getCurrentAcademicYearId,
-} from "@/data/mockData";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { BackupPage } from "@/features/backup/BackupPage";
 import { ClassDetailPage } from "@/features/classes/ClassDetailPage";
@@ -15,6 +10,17 @@ import { HomePage } from "@/features/home/HomePage";
 import { SchedulePage } from "@/features/schedule/SchedulePage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { TuitionDashboardPage } from "@/features/tuition-dashboard/TuitionDashboardPage";
+import {
+  getCurrentAcademicYearId,
+  listAcademicYears,
+  setCurrentAcademicYear,
+} from "@/services/academicYearApi";
+import {
+  createClass,
+  listClassOverviewsByYear,
+} from "@/services/classApi";
+import type { AcademicYear } from "@/types/academic-year";
+import type { ClassOverview, CreateClassInput } from "@/types/class";
 
 type Screen = "login" | "class-detail" | SidebarScreen;
 
@@ -27,8 +33,12 @@ type DatabaseReadyStatus = {
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  const [selectedYearId, setSelectedYearId] = useState(getCurrentAcademicYearId);
-  const [classOverviews, setClassOverviews] = useState(getAllClassOverviews);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [selectedYearId, setSelectedYearId] = useState("");
+  const [classOverviews, setClassOverviews] = useState<ClassOverview[]>([]);
+  const [isSchoolDataLoading, setIsSchoolDataLoading] = useState(false);
+  const [hasLoadedSchoolData, setHasLoadedSchoolData] = useState(false);
+  const [schoolDataError, setSchoolDataError] = useState("");
   const selectedClass = classOverviews.find((classItem) => classItem.id === selectedClassId);
 
   useEffect(() => {
@@ -44,6 +54,66 @@ function App() {
         console.warn("[database] readiness check failed", error);
       });
   }, []);
+
+  useEffect(() => {
+    if (
+      screen === "login" ||
+      hasLoadedSchoolData ||
+      academicYears.length > 0 ||
+      isSchoolDataLoading
+    ) {
+      return;
+    }
+
+    void loadInitialSchoolData();
+  }, [academicYears.length, hasLoadedSchoolData, isSchoolDataLoading, screen]);
+
+  async function loadInitialSchoolData() {
+    setIsSchoolDataLoading(true);
+    setSchoolDataError("");
+
+    try {
+      const [years, currentYearId] = await Promise.all([
+        listAcademicYears(),
+        getCurrentAcademicYearId(),
+      ]);
+      const nextYearId = currentYearId || years[0]?.id || "";
+
+      setAcademicYears(years);
+      setSelectedYearId(nextYearId);
+
+      if (nextYearId) {
+        setClassOverviews(await listClassOverviewsByYear(nextYearId));
+      } else {
+        setClassOverviews([]);
+      }
+    } catch (error) {
+      console.warn("[school-data] load failed", error);
+      setSchoolDataError("Không tải được dữ liệu năm học và lớp học từ database.");
+    } finally {
+      setHasLoadedSchoolData(true);
+      setIsSchoolDataLoading(false);
+    }
+  }
+
+  async function loadClassesForYear(yearId: string) {
+    if (!yearId) {
+      setClassOverviews([]);
+      return;
+    }
+
+    setIsSchoolDataLoading(true);
+    setSchoolDataError("");
+
+    try {
+      setClassOverviews(await listClassOverviewsByYear(yearId));
+    } catch (error) {
+      console.warn("[school-data] load classes failed", error);
+      setSchoolDataError("Không tải được danh sách lớp học.");
+    } finally {
+      setIsSchoolDataLoading(false);
+    }
+  }
 
   function handleOpenClass(classId: string) {
     setSelectedClassId(classId);
@@ -65,8 +135,22 @@ function App() {
     setScreen("login");
   }
 
-  function handleCreateClass(classItem: ClassOverview) {
-    setClassOverviews((current) => [...current, classItem]);
+  async function handleYearChange(yearId: string) {
+    setSelectedYearId(yearId);
+
+    try {
+      await setCurrentAcademicYear(yearId);
+    } catch (error) {
+      console.warn("[school-data] set current year failed", error);
+      setSchoolDataError("Không lưu được năm học hiện tại.");
+    }
+
+    await loadClassesForYear(yearId);
+  }
+
+  async function handleCreateClass(input: CreateClassInput) {
+    const createdClass = await createClass(input);
+    setClassOverviews((current) => [...current, createdClass]);
   }
 
   function handleUpdateClass(classId: string, updates: Partial<ClassOverview>) {
@@ -106,9 +190,12 @@ function App() {
 
     return (
       <HomePage
+        academicYears={academicYears}
         selectedYearId={selectedYearId}
         classOverviews={classOverviews}
-        onYearChange={setSelectedYearId}
+        isLoading={isSchoolDataLoading}
+        errorMessage={schoolDataError}
+        onYearChange={handleYearChange}
         onOpenClass={handleOpenClass}
         onCreateClass={handleCreateClass}
       />

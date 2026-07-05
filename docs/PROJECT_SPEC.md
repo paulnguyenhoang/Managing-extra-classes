@@ -10,9 +10,9 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 
 - App type: ứng dụng desktop Tauri dùng React + TypeScript.
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
-- Trạng thái frontend: đã có skeleton chính, login mock, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
-- Trạng thái persistence: chưa có database, chưa có SQLite, chưa có lưu file thật.
-- Trạng thái mock/local state: dữ liệu gốc lấy từ `src/data/mockData.ts`; nhiều thao tác chỉ cập nhật React state trong phiên chạy hiện tại và mất khi reload app.
+- Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
+- Trạng thái persistence: đã có SQLite local qua Rust commands. Phase 1-3 hiện lưu được app settings/password, academic years, classes và class schedules.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho học sinh, điểm danh, điểm, học phí và vài placeholder. Các tab lõi trong lớp chưa nối DB, trừ header lớp/lịch/học phí tháng.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -97,6 +97,9 @@ src/
       SettingsPage.tsx
     tuition-dashboard/
       TuitionDashboardPage.tsx
+  services/
+    academicYearApi.ts
+    classApi.ts
   lib/
     format.ts
     utils.ts
@@ -116,6 +119,7 @@ src/
 - `src/features/home`: trang tổng quan và card lớp.
 - `src/features/classes`: trang chi tiết lớp, 4 tab lõi, hooks/utils cho điểm danh, điểm, học phí, lịch học.
 - `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/backup`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/services`: wrapper gọi Tauri commands cho dữ liệu đã nối SQLite.
 - `src/data/mockData.ts`: dữ liệu mẫu và selector/helper lấy dữ liệu.
 - `src/types`: type dữ liệu domain.
 - `src/lib`: helper format và className.
@@ -127,7 +131,9 @@ src/
   - `screen`: `"login" | "class-detail" | SidebarScreen`.
   - `selectedClassId`.
   - `selectedYearId`.
+  - `academicYears`.
   - `classOverviews`.
+  - loading/error cho dữ liệu năm học/lớp.
 - Login thành công chuyển `screen` sang `"home"`.
 - Sau login, app render `AppShell` gồm `Header`, `Sidebar`, vùng nội dung chính.
 - Sidebar gọi `onNavigate(screen)` để đổi các màn hình global.
@@ -142,10 +148,10 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 
 | Màn hình/trang | File/component chính | Mục đích | Trạng thái hiện tại | Ghi chú |
 |---|---|---|---|---|
-| Login | `src/features/auth/LoginPage.tsx` | Đăng nhập mock bằng mật khẩu | implemented | Mật khẩu không rỗng là hợp lệ |
+| Login | `src/features/auth/LoginPage.tsx` | Tạo/đăng nhập bằng mật khẩu local | implemented | Hash/salt lưu trong `app_settings` |
 | App shell | `src/components/layout/AppShell.tsx` | Layout sau login | implemented | Header + sidebar + main scroll |
-| Tổng quan/Home | `src/features/home/HomePage.tsx` | Xem năm học, summary, danh sách lớp | implemented | Dữ liệu từ `classOverviews` local state |
-| Chi tiết lớp | `src/features/classes/ClassDetailPage.tsx` | Header lớp và tabs | implemented | Có sửa tên lớp, lịch học, học phí tháng |
+| Tổng quan/Home | `src/features/home/HomePage.tsx` | Xem năm học, summary, danh sách lớp | implemented | Năm học/lớp/lịch học lấy từ SQLite |
+| Chi tiết lớp | `src/features/classes/ClassDetailPage.tsx` | Header lớp và tabs | implemented | Header lớp lưu tên, lịch học, học phí tháng vào SQLite |
 | Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh mock | implemented | Local state riêng trong tab |
 | Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Local state qua `useMockAttendance` |
 | Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Local state qua `useMockScores` |
@@ -157,12 +163,13 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 
 ## 7. Login flow hiện tại
 
-- UI gồm card giữa màn hình, icon sách, title `"Quản lý lớp học thêm"`, subtitle `"Ứng dụng quản lý lớp học thêm cho giáo viên dạy Văn"`, input mật khẩu, nút `"Đăng nhập"`, hint `"Bản thử nghiệm dùng dữ liệu mẫu."`
-- Validation: nếu password rỗng hoặc chỉ có khoảng trắng thì báo `"Vui lòng nhập mật khẩu."`
-- Bất kỳ password không rỗng đều đăng nhập được.
+- UI gồm card giữa màn hình, icon sách, title đăng nhập hoặc tạo mật khẩu, input mật khẩu, nút hành động, hint `"Bản thử nghiệm dùng dữ liệu mẫu."`
+- Lần đầu mở app nếu chưa có mật khẩu trong `app_settings`, UI hiển thị chế độ `"Tạo mật khẩu"` với nhập lại mật khẩu.
+- Mật khẩu được lưu bằng hash + salt trong SQLite, không lưu plaintext.
+- Khi đã có mật khẩu, LoginPage gọi `verify_password`; mật khẩu sai hiển thị lỗi tiếng Việt.
 - Sau login, `App.tsx` chuyển sang màn hình `"home"`.
 - Logout nằm ở `Header`, gọi `onLogout`, đưa app về login.
-- Không có lưu session, không có mã hóa mật khẩu, không có backend auth.
+- Không persist login session sau restart; mở lại app cần nhập mật khẩu lại.
 
 ## 8. Sidebar/Nav hiện tại
 
@@ -185,7 +192,7 @@ Sidebar hiện có 5 item:
 Đã có trong code:
 
 - Greeting `"Xin chào thầy"` và heading `"Hôm nay mình quản lý lớp nào?"`
-- Bộ chọn năm học `YearSelector`, dữ liệu từ `academicYears`.
+- Bộ chọn năm học `YearSelector`, dữ liệu từ SQLite qua command `list_academic_years`.
 - Summary cards:
   - Tổng số lớp
   - Tổng số học sinh
@@ -194,7 +201,7 @@ Sidebar hiện có 5 item:
 - Danh sách lớp dùng `ClassCard`.
 - Mỗi class card hiển thị:
   - tên lớp
-  - lịch học đã parse/format qua `parseScheduleText` và `formatScheduleLines`
+  - lịch học từ `class_schedules`, format qua `formatScheduleLines`
   - số học sinh
   - học phí tháng
   - badge unpaid/paid theo `unpaidCount`
@@ -204,15 +211,15 @@ Sidebar hiện có 5 item:
 Create class hiện tại:
 
 - Dialog fields: `Tên lớp`, `Khối`, `Lịch học`, `Học phí tháng`, `Ghi chú`.
-- Khi lưu, tạo `ClassOverview` mới với id `mock-class-${Date.now()}`.
-- Dữ liệu chỉ append vào `classOverviews` state trong `App.tsx`.
-- `grade` không được lưu vào type class hiện tại.
+- Khi lưu, gọi command `create_class`, insert vào bảng `classes` và `class_schedules`.
+- Class mới được append vào `classOverviews` ở `App.tsx` từ response DB.
+- `grade` hiện vẫn là field UI-only, chưa lưu vào schema Phase 3.
 
 Hạn chế:
 
 - Không có sửa/xóa/archive lớp ở Home.
-- Lớp tạo mới không có học sinh thật.
-- Dữ liệu mất khi reload.
+- Lớp tạo mới chưa có học sinh thật vì students/memberships chưa nối DB.
+- `studentCount` và `unpaidCount` từ DB hiện tạm là `0` cho đến các phase students/payments.
 
 ## 10. Class Detail Header hiện tại
 
@@ -231,22 +238,22 @@ Có thể chỉnh sửa:
 
 Schedule behavior:
 
-- `classItem.schedule` là string.
-- Khi vào detail, string được parse thành `ClassScheduleItem[]` qua `parseScheduleText`.
-- Khi lưu lịch, `formatScheduleLines(scheduleItems).join(" / ")` được dùng để cập nhật lại string schedule trong `classOverviews`.
+- `classItem.scheduleItems` là dữ liệu chính từ bảng `class_schedules`; `classItem.schedule` là text đã format để hiển thị/fallback.
+- Khi vào detail, `ClassDetailPage` gọi `get_class_detail` để lấy bản DB mới nhất.
+- Khi lưu lịch, gọi command `update_class_schedule`, xóa/ghi lại các row `class_schedules` của lớp hiện tại.
 - Nếu nhiều ngày có cùng giờ, `formatScheduleLines` gộp chung một dòng, ví dụ `"Thứ 3, Thứ 6 - 18:00 đến 20:00"`.
 - Nếu các ngày khác giờ, sẽ tách thành nhiều dòng.
 - Lịch học trong header được truyền xuống `AttendanceTab` bằng prop `scheduleItems`, nên cột điểm danh đồng bộ với lịch đang chỉnh trong phiên hiện tại.
 
 State/persistence:
 
-- Cập nhật tên, lịch, học phí gọi `onClassUpdate` ở `App.tsx`, merge vào `classOverviews`.
-- Chỉ local state; reload app sẽ quay về dữ liệu từ `mockData.ts`.
+- Cập nhật tên, lịch, học phí gọi các command `update_class_name`, `update_class_schedule`, `update_class_monthly_fee`.
+- Response DB được merge vào `classOverviews` ở `App.tsx`, nên Home và ClassDetail đồng bộ trong phiên chạy.
+- Các thay đổi header lớp persist trong SQLite sau restart.
 
 Hạn chế:
 
 - Không có validation chi tiết cho giờ học ngoài việc input type time cung cấp.
-- Không có lưu lịch theo bảng riêng.
 - Không có lịch sử thay đổi học phí.
 
 ## 11. Tab Danh sách học sinh hiện tại
@@ -622,26 +629,27 @@ State/data source:
 - Không có form hoặc behavior.
 - Trạng thái: placeholder.
 
-## 16. Mock data và type hiện tại
+## 16. Data và type hiện tại
 
 ### Academic year data
 
-- File data: `src/data/mockData.ts`.
+- File seed/mock cũ: `src/data/mockData.ts`.
 - Type: `AcademicYear` trong `src/types/academic-year.ts`.
 - Fields: `id`, `label`, `startsAt`, `endsAt`, `isCurrent`.
-- Mock có 3 năm: `2025-2026` current, `2024-2025`, `2026-2027`.
-- `getCurrentAcademicYearId()` trả năm current hoặc fallback năm đầu.
+- SQLite Phase 3 có bảng `academic_years`; seed có 3 năm: `2025-2026` current, `2024-2025`, `2026-2027`.
+- Frontend hiện gọi `list_academic_years` và `get_current_academic_year_id`.
 
 ### Class data
 
-- Type: `ExtraClass` trong `src/types/class.ts`.
-- Fields: `id`, `academicYearId`, `name`, `schedule`, `monthlyFee`, `room`, `note?`.
+- Type: `ExtraClass` và `ClassOverview` trong `src/types/class.ts`.
+- Fields: `id`, `academicYearId`, `name`, `schedule`, `scheduleItems`, `monthlyFee`, `room`, `note?`, `studentCount`, `unpaidCount`.
 - Type phụ:
   - `WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6`
   - `ClassScheduleItem = { weekday, startTime, endTime }`
-- Mock classes gồm `van-9a`, `van-8a`, `van-7a`, `van-9-old`.
-- `ClassOverview = ExtraClass & { studentCount, unpaidCount }`.
-- Quan hệ: class thuộc academic year qua `academicYearId`; student/payment/attendance liên kết class qua `classId`.
+- SQLite Phase 3 có bảng `classes` và `class_schedules`.
+- Seed DB hiện tạo các lớp `van-9a`, `van-8a`, `van-7a`, `van-9-old` nếu bảng năm học/lớp đang rỗng.
+- `studentCount` và `unpaidCount` trong class overview hiện tạm trả `0` vì students/payments chưa nối DB.
+- Quan hệ: class thuộc academic year qua `academicYearId`; class có nhiều `class_schedules`; student/payment/attendance vẫn dùng mock theo `classId` trong các tab chưa nối DB.
 
 ### Student data
 
@@ -703,7 +711,7 @@ State/data source:
 
 ### Settings/other data
 
-- Chưa có type/settings data riêng.
+- SQLite `app_settings` hiện lưu password hash/salt và `current_academic_year_id`.
 - Settings page chỉ render card tĩnh trong component.
 - Backup page chỉ render action tĩnh disabled.
 
@@ -715,13 +723,17 @@ State/data source:
   - `screen`
   - `selectedClassId`
   - `selectedYearId`
+  - `academicYears`
   - `classOverviews`
+  - loading/error cho school data
 - Home:
-  - nhận `classOverviews`, `selectedYearId` từ App.
-  - tạo lớp mới cập nhật `classOverviews` ở App.
+  - nhận `academicYears`, `classOverviews`, `selectedYearId` từ App.
+  - đổi năm học gọi command lưu năm hiện tại rồi load lại lớp theo năm.
+  - tạo lớp mới gọi `create_class`, sau đó cập nhật `classOverviews` ở App.
 - ClassDetailPage:
   - giữ local draft cho tên lớp, học phí, lịch học.
-  - lưu thay đổi gọi `onClassUpdate` để cập nhật `classOverviews` ở App.
+  - khi mở detail gọi `get_class_detail`.
+  - lưu thay đổi gọi command DB, sau đó gọi `onClassUpdate` để cập nhật `classOverviews` ở App.
 - StudentListTab:
   - giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
   - reset khi `classId` đổi.
@@ -732,23 +744,24 @@ State/data source:
   - `selectedMonth`, `savedSheets`, `draftSheets`, `isEditing`, `errorMessage`.
 - PaymentsTab:
   - `selectedMonth`, `filter`, `searchQuery`, `pendingPaidRow`, `pendingWaivedRow`, `paymentsByMonth`.
-- Tất cả state local/local app đều reset khi reload app.
+- State của năm học/lớp/lịch học được load lại từ SQLite sau restart.
+- State của học sinh, điểm danh, điểm, học phí trong các tab vẫn là local/mock và reset khi reload/restart.
 - Một số state reset khi đổi class hoặc đổi month.
 
 ## 18. UI action inventory
 
 | UI action | Where it appears | Current implemented behavior | Current data affected | Persistence | Future DB note |
 |---|---|---|---|---|---|
-| Login | LoginPage | Password không rỗng thì vào Home | `screen` | local only | Cần auth/settings thật nếu muốn mật khẩu |
+| Login | LoginPage | Tạo/verify mật khẩu qua command settings | `screen`, `app_settings` | SQLite | Không persist session sau restart |
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
-| Select academic year | HomePage | Đổi năm đang xem | `selectedYearId` | local only | Cần lưu năm hiện tại trong settings |
-| Create class | CreateClassDialog | Thêm class overview local | `classOverviews` | local only | Insert `classes`, `class_schedules` |
+| Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | Students/payments chưa ảnh hưởng summary |
+| Create class | CreateClassDialog | Gọi `create_class`, insert class + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | `grade` hiện UI-only |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
-| Edit class name | ClassDetail header | Sửa tên bằng input, save cập nhật App state | `classOverviews.name` | local only | Update `classes.name` |
-| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, save cập nhật schedule string và AttendanceTab | `classOverviews.schedule`, local `scheduleItems` | local only | Cần bảng `class_schedules` |
-| Edit monthly fee | ClassDetail header | Sửa fee bằng input | `classOverviews.monthlyFee` | local only | Update class fee, cân nhắc lịch sử fee |
+| Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
+| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance records chưa nối DB |
+| Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment records chưa nối DB |
 | Search student | StudentListTab | Lọc table local | UI only | none | Query/filter frontend hoặc DB khi data lớn |
 | Add student | StudentListTab | Thêm dòng mới inline, vào edit mode | local `students` | local only | Insert `students`/`class_students` |
 | Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
@@ -785,9 +798,9 @@ State/data source:
 
 ## 19. Current limitations / chưa có
 
-- Chưa có SQLite/database.
-- Chưa có persistence thật; reload mất các thay đổi local.
-- Chưa có password thật, hashing, app lock, hoặc session.
+- SQLite/database đã có cho settings/password, academic years, classes và class schedules; các domain còn lại chưa nối DB.
+- Học sinh, điểm danh, điểm, học phí vẫn là mock/local; reload/restart mất các thay đổi trong các tab đó.
+- Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Chưa có Excel export thật dù nhiều nút export đã hiện.
 - Chưa có backup/restore thật.
@@ -803,19 +816,20 @@ State/data source:
 - Student-level makeup hiện đã có flow chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận, nhưng chưa có persistence thật.
 - Danh sách lớp/buổi đủ điều kiện học bù lấy từ `classes` mock trong `mockData.ts`, cùng năm học và cùng thứ tự buổi trong tuần; chưa dùng dữ liệu database hoặc class được thêm local ngoài mock.
 - Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
-- Chưa có transaction hoặc optimistic update/error rollback vì chưa có backend.
+- Chưa có transaction/service backend cho students, payments, scores, attendance.
 
-## 20. Future database candidates based on current code
+## 20. Database status / future candidates based on current code
 
-Đề xuất dựa trên UI hiện tại, chưa được implemented:
+Một phần đã implemented ở SQLite Phase 1-3, các phần còn lại vẫn là candidate cho phase sau:
 
-| Entity đề xuất | Lý do cần theo UI hiện tại |
+| Entity | Trạng thái hiện tại |
 |---|---|
-| `academic_years` | Home có bộ chọn năm học và class thuộc năm học |
-| `classes` | Lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
-| `class_schedules` | Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
+| `app_settings` | Implemented: lưu password hash/salt và năm học hiện tại |
+| `academic_years` | Implemented Phase 3: Home có bộ chọn năm học và class thuộc năm học |
+| `classes` | Implemented Phase 3: lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
+| `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
 | `students` | Lưu thông tin học sinh: tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú |
-| `class_students` | Nên có nếu sau này một học sinh học nhiều lớp hoặc cần trạng thái theo từng lớp |
+| `class_memberships` | Nên có vì một học sinh có thể học nhiều lớp và trạng thái active/paused thuộc membership |
 | `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, lock/cancel state, link optional tới buổi gốc |
 | `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
 | `student_makeup_records` | Lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần; hoặc gộp vào attendance schema nếu thiết kế khác |
@@ -823,14 +837,13 @@ State/data source:
 | `score_columns` | Lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
 | `score_values` | Lưu điểm từng học sinh từng cột |
 | `payment_records` | Lưu học phí theo student/class/month/status/amount/paidAt/note |
-| `app_settings` | Lưu năm học hiện tại, mật khẩu/app lock, cấu hình đường dẫn dữ liệu |
 | `backup_logs` hoặc metadata backup | Nếu muốn hiển thị lịch sử sao lưu sau này |
 
 ## 21. Suggested backend integration order
 
-1. SQLite/data access setup: cần nền tảng lưu dữ liệu trước khi nối UI.
-2. App settings/login: nhỏ, ít quan hệ, giúp có mật khẩu/năm học mặc định thật.
-3. Academic years/classes/class schedules: là dữ liệu gốc cho Home, ClassDetail và Attendance.
+1. SQLite/data access setup: đã triển khai Phase 1.
+2. App settings/login: đã triển khai Phase 2 cho password local và current academic year.
+3. Academic years/classes/class schedules: đã triển khai Phase 3 cho Home, ClassDetail header và AttendanceTab schedule props.
 4. Students/class membership: các tab đều phụ thuộc danh sách học sinh.
 5. Payments: cấu trúc theo tháng rõ, ít phụ thuộc lịch học, có flow confirm/waiver cụ thể.
 6. Scores: cần lưu cột động theo tháng và điểm theo học sinh.
