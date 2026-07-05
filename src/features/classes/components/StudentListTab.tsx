@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,11 +19,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getStudentsByClassId } from "@/data/mockData";
-import type { Student, StudentStatus } from "@/types/student";
+import {
+  createStudentForClass,
+  listStudentsByClass,
+  updateClassMembershipStatus,
+  updateStudent,
+} from "@/services/studentApi";
+import type { StudentListItem, StudentStatus } from "@/types/student";
 
 type StudentListTabProps = {
-  classId: string;
+  classId: number;
+  onStudentsChanged?: () => void | Promise<void>;
 };
 
 type EditableStudentField = "fullName" | "schoolClass" | "school" | "parentPhone" | "note";
@@ -42,11 +48,14 @@ const studentStatusConfig: Record<
   },
 };
 
-export function StudentListTab({ classId }: StudentListTabProps) {
-  const [students, setStudents] = useState<Student[]>(() => getStudentsByClassId(classId));
+export function StudentListTab({ classId, onStudentsChanged }: StudentListTabProps) {
+  const [students, setStudents] = useState<StudentListItem[]>([]);
   const [newStudentIds, setNewStudentIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredStudents = normalizedQuery
     ? students.filter((student) =>
@@ -64,11 +73,26 @@ export function StudentListTab({ classId }: StudentListTabProps) {
       )
     : students;
 
+  const loadStudents = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      setStudents(await listStudentsByClass(classId));
+    } catch (error) {
+      console.warn("[students] load failed", error);
+      setErrorMessage("Không tải được danh sách học sinh từ database.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [classId]);
+
   useEffect(() => {
-    setStudents(getStudentsByClassId(classId));
+    setStudents([]);
     setNewStudentIds([]);
     setIsEditing(false);
-  }, [classId]);
+    loadStudents();
+  }, [classId, loadStudents]);
 
   function updateStudentField(
     studentId: string,
@@ -77,24 +101,28 @@ export function StudentListTab({ classId }: StudentListTabProps) {
   ) {
     setStudents((current) =>
       current.map((student) =>
-        student.id === studentId ? { ...student, [field]: value } : student,
+        String(student.id) === studentId ? { ...student, [field]: value } : student,
       ),
     );
   }
 
   function updateStudentStatus(studentId: string, status: StudentStatus) {
     setStudents((current) =>
-      current.map((student) => (student.id === studentId ? { ...student, status } : student)),
+      current.map((student) =>
+        String(student.id) === studentId ? { ...student, status } : student,
+      ),
     );
   }
 
   function addInlineStudent() {
-    const newStudentId = `mock-student-${Date.now()}`;
+    const newStudentId = `draft-student-${Date.now()}`;
 
     setStudents((current) => [
       ...current,
       {
         id: newStudentId,
+        studentId: newStudentId,
+        membershipId: `draft-membership-${Date.now()}`,
         classId,
         fullName: "",
         schoolClass: "",
@@ -109,17 +137,69 @@ export function StudentListTab({ classId }: StudentListTabProps) {
   }
 
   function removeNewStudent(studentId: string) {
-    setStudents((current) => current.filter((student) => student.id !== studentId));
+    setStudents((current) => current.filter((student) => String(student.id) !== studentId));
     setNewStudentIds((current) => current.filter((id) => id !== studentId));
+  }
+
+  async function saveStudents() {
+    const invalidStudent = students.find((student) => !student.fullName.trim());
+    if (invalidStudent) {
+      setErrorMessage("Vui lòng nhập họ tên học sinh trước khi lưu.");
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      for (const student of students) {
+        const input = {
+          fullName: student.fullName,
+          schoolClass: student.schoolClass,
+          school: student.school,
+          parentPhone: student.parentPhone,
+          note: student.note,
+        };
+
+        if (newStudentIds.includes(String(student.id))) {
+          const createdStudent = await createStudentForClass({
+            classId,
+            ...input,
+          });
+
+          if (student.status !== "active") {
+            await updateClassMembershipStatus(Number(createdStudent.membershipId), student.status);
+          }
+        } else {
+          await updateStudent({
+            studentId: Number(student.studentId),
+            ...input,
+          });
+          await updateClassMembershipStatus(Number(student.membershipId), student.status);
+        }
+      }
+
+      setNewStudentIds([]);
+      setIsEditing(false);
+      await loadStudents();
+      await onStudentsChanged?.();
+    } catch (error) {
+      console.warn("[students] save failed", error);
+      setErrorMessage(
+        typeof error === "string" ? error : "Không lưu được danh sách học sinh.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function toggleEditing() {
     if (isEditing) {
-      setNewStudentIds([]);
-      setIsEditing(false);
+      saveStudents();
       return;
     }
 
+    setErrorMessage("");
     setIsEditing(true);
   }
 
@@ -141,11 +221,19 @@ export function StudentListTab({ classId }: StudentListTabProps) {
             variant={isEditing ? "default" : "outline"}
             className="gap-2"
             onClick={toggleEditing}
+            disabled={isLoading || isSaving}
           >
             {isEditing ? <Check className="size-4" /> : <Pencil className="size-4" />}
-            <span className="hidden sm:inline">{isEditing ? "Lưu cập nhật" : "Cập nhật"}</span>
+            <span className="hidden sm:inline">
+              {isSaving ? "Đang lưu..." : isEditing ? "Lưu cập nhật" : "Cập nhật"}
+            </span>
           </Button>
-          <Button type="button" className="gap-2" onClick={addInlineStudent}>
+          <Button
+            type="button"
+            className="gap-2"
+            onClick={addInlineStudent}
+            disabled={isLoading || isSaving}
+          >
             <Plus className="size-4" />
             <span className="hidden sm:inline">Thêm học sinh</span>
           </Button>
@@ -155,6 +243,14 @@ export function StudentListTab({ classId }: StudentListTabProps) {
           </Button>
         </div>
       </div>
+      {isLoading && (
+        <p className="text-sm text-slate-600">Đang tải danh sách học sinh...</p>
+      )}
+      {errorMessage && (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {errorMessage}
+        </p>
+      )}
 
       <div className="min-w-0 rounded-lg border bg-white">
         <Table className="min-w-[1040px]">
@@ -171,7 +267,8 @@ export function StudentListTab({ classId }: StudentListTabProps) {
           </TableHeader>
           <TableBody>
             {filteredStudents.map((student, index) => {
-              const isNewStudent = newStudentIds.includes(student.id);
+              const studentRowId = String(student.id);
+              const isNewStudent = newStudentIds.includes(studentRowId);
               const canEditRow = isEditing || isNewStudent;
 
               return (
@@ -185,7 +282,7 @@ export function StudentListTab({ classId }: StudentListTabProps) {
                           size="icon-sm"
                           variant="ghost"
                           className="text-red-700 hover:bg-red-50 hover:text-red-800"
-                          onClick={() => removeNewStudent(student.id)}
+                          onClick={() => removeNewStudent(studentRowId)}
                         >
                           <Trash2 className="size-4" />
                           <span className="sr-only">Xóa dòng học sinh mới</span>
@@ -198,37 +295,37 @@ export function StudentListTab({ classId }: StudentListTabProps) {
                     value={student.fullName}
                     className="font-medium text-slate-950"
                     placeholder="Nhập họ tên"
-                    onChange={(value) => updateStudentField(student.id, "fullName", value)}
+                    onChange={(value) => updateStudentField(studentRowId, "fullName", value)}
                   />
                   <EditableCell
                     isEditing={canEditRow}
                     value={student.schoolClass}
                     placeholder="Ví dụ: 9A1"
-                    onChange={(value) => updateStudentField(student.id, "schoolClass", value)}
+                    onChange={(value) => updateStudentField(studentRowId, "schoolClass", value)}
                   />
                   <EditableCell
                     isEditing={canEditRow}
                     value={student.school}
                     placeholder="Tên trường"
-                    onChange={(value) => updateStudentField(student.id, "school", value)}
+                    onChange={(value) => updateStudentField(studentRowId, "school", value)}
                   />
                   <EditableCell
                     isEditing={canEditRow}
                     value={student.parentPhone}
                     placeholder="SĐT phụ huynh"
-                    onChange={(value) => updateStudentField(student.id, "parentPhone", value)}
+                    onChange={(value) => updateStudentField(studentRowId, "parentPhone", value)}
                   />
                   <EditableStatusCell
                     isEditing={canEditRow}
                     status={student.status}
-                    onChange={(status) => updateStudentStatus(student.id, status)}
+                    onChange={(status) => updateStudentStatus(studentRowId, status)}
                   />
                   <EditableCell
                     isEditing={canEditRow}
                     value={student.note ?? ""}
                     className="max-w-56 whitespace-normal text-slate-950"
                     placeholder="Ghi chú"
-                    onChange={(value) => updateStudentField(student.id, "note", value)}
+                    onChange={(value) => updateStudentField(studentRowId, "note", value)}
                   />
                 </TableRow>
               );

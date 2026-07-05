@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS academic_years (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   label TEXT NOT NULL,
   starts_at TEXT NOT NULL,
   ends_at TEXT NOT NULL,
@@ -13,8 +13,8 @@ ON academic_years (is_current)
 WHERE is_current = 1;
 
 CREATE TABLE IF NOT EXISTS classes (
-  id TEXT PRIMARY KEY,
-  academic_year_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  academic_year_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   monthly_fee INTEGER NOT NULL DEFAULT 0,
   room TEXT,
@@ -29,8 +29,8 @@ CREATE INDEX IF NOT EXISTS idx_classes_academic_year_id
 ON classes (academic_year_id);
 
 CREATE TABLE IF NOT EXISTS class_schedules (
-  id TEXT PRIMARY KEY,
-  class_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER NOT NULL,
   weekday INTEGER NOT NULL CHECK (weekday >= 0 AND weekday <= 6),
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,

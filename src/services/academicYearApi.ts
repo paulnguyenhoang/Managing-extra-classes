@@ -7,9 +7,9 @@ export function listAcademicYears() {
 }
 
 export function getCurrentAcademicYearId() {
-  return invoke<string>("get_current_academic_year_id");
+  return invoke<number>("get_current_academic_year_id");
 }
 
-export function setCurrentAcademicYear(academicYearId: string) {
+export function setCurrentAcademicYear(academicYearId: number) {
   return invoke<void>("set_current_academic_year", { academicYearId });
 }

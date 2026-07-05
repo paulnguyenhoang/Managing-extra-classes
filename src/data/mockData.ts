@@ -1,4 +1,3 @@
-import type { AcademicYear } from "@/types/academic-year";
 import type {
   AttendanceRecord,
   AttendanceSession,
@@ -9,11 +8,19 @@ import type { Payment } from "@/types/payment";
 import type { ScoreColumn, ScoreRecord } from "@/types/score";
 import type { Student } from "@/types/student";
 
+type MockAcademicYear = {
+  id: string;
+  label: string;
+  startsAt: string;
+  endsAt: string;
+  isCurrent: boolean;
+};
+
 export const currentPaymentMonth = "2026-07";
 
 export const paymentMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
 
-export const academicYears: AcademicYear[] = [
+export const academicYears: MockAcademicYear[] = [
   {
     id: "2025-2026",
     label: "Năm học 2025 - 2026",

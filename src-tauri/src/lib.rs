@@ -1,6 +1,7 @@
 mod db;
 mod school;
 mod settings;
+mod students;
 
 use tauri::Manager;
 
@@ -29,6 +30,8 @@ pub fn run() {
 
             school::seed_academic_class_data(&database)
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            students::seed_student_data(&database)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
 
             app.manage(database);
 
@@ -49,7 +52,11 @@ pub fn run() {
             school::create_class,
             school::update_class_name,
             school::update_class_monthly_fee,
-            school::update_class_schedule
+            school::update_class_schedule,
+            students::list_students_by_class,
+            students::create_student_for_class,
+            students::update_student,
+            students::update_class_membership_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

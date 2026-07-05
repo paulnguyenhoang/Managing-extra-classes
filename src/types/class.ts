@@ -16,14 +16,16 @@ export type ExtraClass = {
   note?: string;
 };
 
-export type ClassOverview = ExtraClass & {
+export type ClassOverview = Omit<ExtraClass, "id" | "academicYearId"> & {
+  id: number;
+  academicYearId: number;
   scheduleItems: ClassScheduleItem[];
   studentCount: number;
   unpaidCount: number;
 };
 
 export type CreateClassInput = {
-  academicYearId: string;
+  academicYearId: number;
   name: string;
   monthlyFee: number;
   note?: string;

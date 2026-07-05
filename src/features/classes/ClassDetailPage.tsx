@@ -26,11 +26,12 @@ import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 type ClassDetailPageProps = {
   classItem: ClassOverview;
   onBack: () => void;
-  onClassUpdate: (classId: string, updates: Partial<ClassOverview>) => void;
+  onClassUpdate: (classId: number, updates: Partial<ClassOverview>) => void;
 };
 
 export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetailPageProps) {
   const classId = classItem.id;
+  const mockClassId = getMockClassIdForClass(classItem);
   const [className, setClassName] = useState(() => classItem?.name ?? "");
   const [classNameDraft, setClassNameDraft] = useState(() => classItem?.name ?? "");
   const [isEditingClassName, setIsEditingClassName] = useState(false);
@@ -98,6 +99,15 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
     setScheduleItems(detail.scheduleItems);
     setHeaderError("");
     onClassUpdate(classId, detail);
+  }
+
+  async function refreshClassDetail() {
+    try {
+      applyClassDetail(await getClassDetail(classId));
+    } catch (error) {
+      console.warn("[class-detail] refresh failed", error);
+      setHeaderError("Không tải lại được thông tin lớp học.");
+    }
   }
 
   async function saveClassName() {
@@ -321,18 +331,52 @@ export function ClassDetailPage({ classItem, onBack, onClassUpdate }: ClassDetai
           </TabsPrimitive.Trigger>
         </TabsPrimitive.List>
         <TabsPrimitive.Content value="students" className="outline-none">
-          <StudentListTab classId={classId} />
+          <StudentListTab classId={classId} onStudentsChanged={refreshClassDetail} />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="attendance" className="outline-none">
-          <AttendanceTab classId={classId} scheduleItems={scheduleItems} />
+          <AttendanceTab classId={mockClassId} scheduleItems={scheduleItems} />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="scores" className="outline-none">
-          <ScoresTab classId={classId} />
+          <ScoresTab classId={mockClassId} />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="payments" className="outline-none">
-          <PaymentsTab classId={classId} monthlyFeeOverride={monthlyFee} />
+          <PaymentsTab classId={mockClassId} monthlyFeeOverride={monthlyFee} />
         </TabsPrimitive.Content>
       </TabsPrimitive.Root>
     </div>
   );
+}
+
+function getMockClassIdForClass(classItem: ClassOverview) {
+  const weekdays = new Set(classItem.scheduleItems.map((item) => item.weekday));
+
+  if (classItem.monthlyFee === 700_000 && weekdays.has(2) && weekdays.has(5)) {
+    return "van-9a";
+  }
+
+  if (classItem.monthlyFee === 600_000 && weekdays.has(1) && weekdays.has(4)) {
+    return "van-8a";
+  }
+
+  if (classItem.monthlyFee === 550_000 && weekdays.has(0) && weekdays.has(3)) {
+    return "van-7a";
+  }
+
+  if (classItem.name.includes("Văn 9 - Ôn thi")) {
+    return "van-9a";
+  }
+
+  if (classItem.name.includes("Văn 8 - Nâng cao")) {
+    return "van-8a";
+  }
+
+  if (classItem.name.includes("Văn 7 - Cơ bản")) {
+    return "van-7a";
+  }
+
+  if (classItem.name.includes("Khóa trước")) {
+    return "van-9-old";
+  }
+
+  return String(classItem.id);
 }

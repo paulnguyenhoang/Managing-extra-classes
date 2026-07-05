@@ -28,11 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  classes,
-  getStudentsByClassId,
-  students as allMockStudents,
-} from "@/data/mockData";
+import { classes, getStudentsByClassId, students as allMockStudents } from "@/data/mockData";
 import { AddMakeupSessionDialog } from "@/features/classes/components/AddMakeupSessionDialog";
 import { useMockAttendance } from "@/features/classes/hooks/useMockAttendance";
 import {
@@ -81,11 +77,7 @@ const miniCalendarWeekdays = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 
 function AttendanceStatusBadge({ status }: { status: AttendanceCellStatus }) {
   if (!status) {
-    return (
-      <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
-        Chưa điểm danh
-      </Badge>
-    );
+    return <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">Chưa điểm danh</Badge>;
   }
 
   return <Badge className={attendanceBadgeClasses[status]}>{attendanceStatusLabel(status)}</Badge>;
@@ -134,15 +126,15 @@ function SessionHeader({
           <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">Hôm nay</Badge>
         ) : null}
         {session.isMakeup ? (
-          <Badge className="bg-violet-100 text-violet-900 hover:bg-violet-100">
-            Học bù cả lớp
-          </Badge>
+          <Badge className="bg-violet-100 text-violet-900 hover:bg-violet-100">Học bù cả lớp</Badge>
         ) : null}
         {isCancelled ? (
           <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">Nghỉ</Badge>
         ) : null}
       </div>
-      <div className="text-center text-sm text-muted-foreground">{formatDayMonth(session.date)}</div>
+      <div className="text-center text-sm text-muted-foreground">
+        {formatDayMonth(session.date)}
+      </div>
       <div className="flex justify-center gap-1">
         <Button
           type="button"
@@ -282,8 +274,9 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [visibleCalendarMonth, setVisibleCalendarMonth] = useState(() => weekStart);
   const [pendingCancelSession, setPendingCancelSession] = useState<WeeklySession | null>(null);
-  const [pendingStudentMakeup, setPendingStudentMakeup] =
-    useState<PendingStudentMakeup | null>(null);
+  const [pendingStudentMakeup, setPendingStudentMakeup] = useState<PendingStudentMakeup | null>(
+    null,
+  );
   const [selectedStudentMakeupSessionId, setSelectedStudentMakeupSessionId] = useState("");
   const students = getStudentsByClassId(classId);
   const currentClassName = classes.find((classItem) => classItem.id === classId)?.name ?? "";
@@ -498,8 +491,8 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
       </section>
 
       <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <span className="font-medium text-slate-900">Chú thích:</span>{" "}
-        Chưa điểm danh, Có học, Nghỉ, Học bù
+        <span className="font-medium text-slate-900">Chú thích:</span> Chưa điểm danh, Có học, Nghỉ,
+        Học bù
       </div>
 
       <div className="min-w-0 rounded-lg border bg-white">
@@ -532,7 +525,9 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                   const isUnlocked = unlockedSessionIds.includes(session.id);
                   const status = getStatus(session.id, student.id);
                   const makeupRecord =
-                    status === "makeup" ? getStudentMakeupRecord(student.id, session.id) : undefined;
+                    status === "makeup"
+                      ? getStudentMakeupRecord(student.id, session.id)
+                      : undefined;
                   const makeupDetail = makeupRecord
                     ? `Học bù tại ${makeupRecord.receivingClassName} - ${makeupRecord.receivingSessionDate}`
                     : "";
@@ -549,9 +544,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                           disabled={!isUnlocked}
                           className={[
                             "rounded-md outline-none transition focus-visible:ring-3 focus-visible:ring-ring/50",
-                            isUnlocked
-                              ? "hover:scale-[1.02]"
-                              : "cursor-not-allowed opacity-75",
+                            isUnlocked ? "hover:scale-[1.02]" : "cursor-not-allowed opacity-75",
                           ].join(" ")}
                           onClick={() => handleAttendanceCellClick(student, session, status)}
                           title={
@@ -620,9 +613,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                                       ? "hover:scale-[1.02]"
                                       : "cursor-not-allowed opacity-75",
                                   ].join(" ")}
-                                  onClick={() =>
-                                    cycleMakeupStudentStatus(session.id, record.id)
-                                  }
+                                  onClick={() => cycleMakeupStudentStatus(session.id, record.id)}
                                   title={
                                     isUnlocked
                                       ? "Bấm để đổi trạng thái học bù"
@@ -658,15 +649,13 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {pendingCancelSession &&
-              cancelledSessionIds.includes(pendingCancelSession.id)
+              {pendingCancelSession && cancelledSessionIds.includes(pendingCancelSession.id)
                 ? "Hủy trạng thái nghỉ?"
                 : "Xác nhận lớp nghỉ?"}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {pendingCancelSession &&
-            cancelledSessionIds.includes(pendingCancelSession.id)
+            {pendingCancelSession && cancelledSessionIds.includes(pendingCancelSession.id)
               ? `Hủy nghỉ buổi ${weekdayLabel(pendingCancelSession.date)} ${formatDayMonth(
                   pendingCancelSession.date,
                 )}? Buổi học sẽ trở lại bình thường và được mở khóa để chỉnh sửa.`

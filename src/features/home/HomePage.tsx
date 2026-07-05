@@ -10,12 +10,12 @@ import type { ClassOverview, CreateClassInput } from "@/types/class";
 
 type HomePageProps = {
   academicYears: AcademicYear[];
-  selectedYearId: string;
+  selectedYearId: number | null;
   classOverviews: ClassOverview[];
   isLoading?: boolean;
   errorMessage?: string;
-  onYearChange: (yearId: string) => void | Promise<void>;
-  onOpenClass: (classId: string) => void;
+  onYearChange: (yearId: number) => void | Promise<void>;
+  onOpenClass: (classId: number) => void;
   onCreateClass: (input: CreateClassInput) => void | Promise<void>;
 };
 
@@ -36,7 +36,7 @@ export function HomePage({
   onCreateClass,
 }: HomePageProps) {
   const visibleClassOverviews = classOverviews.filter(
-    (classItem) => classItem.academicYearId === selectedYearId,
+    (classItem) => selectedYearId !== null && classItem.academicYearId === selectedYearId,
   );
   const summary = {
     totalClasses: visibleClassOverviews.length,
@@ -64,7 +64,7 @@ export function HomePage({
           <CreateClassDialog
             academicYearId={selectedYearId}
             onCreate={onCreateClass}
-            disabled={!selectedYearId}
+            disabled={selectedYearId === null}
           />
         </div>
       </section>
@@ -117,7 +117,7 @@ export function HomePage({
               <CreateClassDialog
                 academicYearId={selectedYearId}
                 onCreate={onCreateClass}
-                disabled={!selectedYearId}
+                disabled={selectedYearId === null}
               />
             }
           />

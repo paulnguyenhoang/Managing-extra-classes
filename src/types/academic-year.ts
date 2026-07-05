@@ -1,5 +1,5 @@
 export type AcademicYear = {
-  id: string;
+  id: number;
   label: string;
   startsAt: string;
   endsAt: string;

@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-3 đã được triển khai một phần trong app code; các phase còn lại vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-4 đã được triển khai một phần trong app code; các phase còn lại vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -28,6 +28,7 @@ Mục tiêu backend cho MVP:
   - Học bù theo học sinh
 - Hỗ trợ sao lưu/khôi phục file database sau khi schema ổn định.
 - Chuẩn bị nền tảng để export Excel từ dữ liệu thật.
+- Chuẩn bị import Excel theo template cố định, ưu tiên danh sách học sinh.
 
 Nguyên tắc dữ liệu đã chốt:
 
@@ -95,7 +96,80 @@ Vị trí database gợi ý:
 - Không đặt database trong thư mục source code.
 - Backup/restore sau này sẽ copy/replace file database có kiểm tra version.
 
-## 3. Final database entities
+## 3. Local support, Excel, and ID strategy
+
+### Local-only strategy
+
+- App phục vụ một giáo viên dùng trên một máy tính Windows.
+- MVP không có cloud/server sync.
+- SQLite local database là nguồn dữ liệu chính thức duy nhất.
+- File database nằm trên máy tính của giáo viên trong app data directory của Tauri.
+- Backup/restore là cơ chế chính để bảo vệ dữ liệu và hỗ trợ khi có sự cố.
+
+### Support strategy
+
+- Giáo viên có thể tạo gói sao lưu từ app.
+- Khi cần hỗ trợ, giáo viên có thể gửi file backup cho developer.
+- Developer có thể mở SQLite database bằng công cụ local, kiểm tra lỗi dữ liệu, sửa nếu cần, rồi gửi lại gói backup đã sửa.
+- Giáo viên restore gói backup đã sửa trong app.
+- Gói hỗ trợ/backup sau này có thể gồm:
+  - `data.sqlite`
+  - metadata backup
+  - app version
+  - schema version
+  - error logs gần đây nếu app có logging sau này
+
+### Excel strategy
+
+- Excel import/export là workflow quan trọng vì thân thiện với giáo viên và gần với cách các hệ thống trường học như VNEDU thường vận hành.
+- Excel export nên hỗ trợ:
+  - danh sách học sinh
+  - báo cáo học phí
+  - bảng điểm
+  - bảng điểm danh
+- Excel import nên cân nhắc sau, bắt đầu từ import danh sách học sinh theo template cố định.
+- Excel không phải database chính. SQLite vẫn là nguồn sự thật; Excel chỉ là kênh nhập/xuất dữ liệu.
+
+### ID strategy
+
+- Vì app là local single-user và không sync cloud, domain tables dùng `INTEGER PRIMARY KEY AUTOINCREMENT`.
+- Không dùng UUID/TEXT IDs cho MVP domain tables.
+- Numeric IDs dễ đọc, dễ dò và dễ sửa khi cần inspect bằng DB Browser for SQLite.
+- `app_settings` giữ dạng key-value với `key TEXT PRIMARY KEY`.
+- `schema_migrations` giữ cách tracking hiện tại, ví dụ version integer + migration name.
+- ID chỉ là định danh nội bộ của database, không phải số thứ tự hiển thị cho giáo viên.
+- ID có thể bị nhảy số/gap sau khi xóa hoặc rollback; đó là bình thường.
+- Không bao giờ renumber database IDs chỉ để nhìn liên tục hơn.
+
+Domain tables dự kiến dùng `INTEGER PRIMARY KEY AUTOINCREMENT`:
+
+- `academic_years`
+- `classes`
+- `class_schedules`
+- `students`
+- `class_memberships`
+- `payments`
+- `score_columns`
+- `score_values`
+- `attendance_sessions`
+- `attendance_records`
+- `student_makeup_records`
+- `backup_logs` nếu triển khai
+
+### UI numbering rule
+
+- Database ID không phải STT hiển thị.
+- STT trong frontend table luôn tính từ row đang hiển thị:
+  - `STT = index + 1`
+- Quy tắc này áp dụng cho:
+  - StudentListTab
+  - PaymentsTab sau này
+  - ScoresTab sau này
+  - AttendanceTab sau này
+  - Excel export sau này
+- Không dùng database ID làm số thứ tự nhìn thấy trong UI hoặc file Excel.
+
+## 4. Final database entities
 
 Entities chính cho MVP:
 
@@ -121,13 +195,15 @@ Entities có thể để sau:
 - fee_history: lịch sử học phí lớp nếu cần thống kê sâu.
 - export_jobs: nếu export phức tạp hoặc cần lưu lịch sử file.
 
-## 4. Proposed schema tables
+## 5. Proposed schema tables
 
 SQLite dùng kiểu cơ bản:
 
-- `TEXT` cho id, ngày ISO, datetime ISO, enum string.
+- `INTEGER PRIMARY KEY AUTOINCREMENT` cho ID nội bộ của domain tables.
+- `TEXT` cho ngày ISO, datetime ISO, enum string và settings key/value.
 - `INTEGER` cho tiền, boolean `0/1`, sort order.
 - `REAL` cho điểm nếu cần, nhưng điểm cũng có thể lưu `TEXT` đã normalize để giữ input thập phân chính xác. MVP nên dùng `REAL`.
+- Không dùng UUID/TEXT ID cho domain tables trong MVP local-only.
 
 ### app_settings
 
@@ -150,7 +226,7 @@ Keys gợi ý:
 
 ```sql
 CREATE TABLE academic_years (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   label TEXT NOT NULL,
   starts_at TEXT NOT NULL,
   ends_at TEXT NOT NULL,
@@ -174,8 +250,8 @@ WHERE is_current = 1;
 
 ```sql
 CREATE TABLE classes (
-  id TEXT PRIMARY KEY,
-  academic_year_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  academic_year_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   monthly_fee INTEGER NOT NULL DEFAULT 0,
   room TEXT,
@@ -191,8 +267,8 @@ CREATE TABLE classes (
 
 ```sql
 CREATE TABLE class_schedules (
-  id TEXT PRIMARY KEY,
-  class_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER NOT NULL,
   weekday INTEGER NOT NULL,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
@@ -213,7 +289,7 @@ Notes:
 
 ```sql
 CREATE TABLE students (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   full_name TEXT NOT NULL,
   school_class TEXT,
   school TEXT,
@@ -235,9 +311,9 @@ Notes:
 
 ```sql
 CREATE TABLE class_memberships (
-  id TEXT PRIMARY KEY,
-  class_id TEXT NOT NULL,
-  student_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   joined_at TEXT,
   left_at TEXT,
@@ -270,10 +346,10 @@ Notes:
 
 ```sql
 CREATE TABLE payments (
-  id TEXT PRIMARY KEY,
-  membership_id TEXT NOT NULL,
-  class_id TEXT NOT NULL,
-  student_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  membership_id INTEGER NOT NULL,
+  class_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
   month TEXT NOT NULL,
   status TEXT NOT NULL,
   amount INTEGER NOT NULL DEFAULT 0,
@@ -313,8 +389,8 @@ Rules:
 
 ```sql
 CREATE TABLE score_columns (
-  id TEXT PRIMARY KEY,
-  class_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER NOT NULL,
   month TEXT NOT NULL,
   label TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
@@ -333,10 +409,10 @@ Notes:
 
 ```sql
 CREATE TABLE score_values (
-  id TEXT PRIMARY KEY,
-  column_id TEXT NOT NULL,
-  membership_id TEXT NOT NULL,
-  student_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  column_id INTEGER NOT NULL,
+  membership_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
   value REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -362,8 +438,8 @@ Rules:
 
 ```sql
 CREATE TABLE attendance_sessions (
-  id TEXT PRIMARY KEY,
-  class_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  class_id INTEGER NOT NULL,
   session_date TEXT NOT NULL,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
@@ -371,7 +447,7 @@ CREATE TABLE attendance_sessions (
   type TEXT NOT NULL DEFAULT 'regular',
   status TEXT NOT NULL DEFAULT 'active',
   is_locked INTEGER NOT NULL DEFAULT 1,
-  makeup_for_session_id TEXT,
+  makeup_for_session_id INTEGER,
   content TEXT,
   note TEXT,
   created_at TEXT NOT NULL,
@@ -402,10 +478,10 @@ Rules:
 
 ```sql
 CREATE TABLE attendance_records (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  membership_id TEXT NOT NULL,
-  student_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  membership_id INTEGER NOT NULL,
+  student_id INTEGER NOT NULL,
   status TEXT,
   note TEXT,
   created_at TEXT NOT NULL,
@@ -440,13 +516,13 @@ Rules:
 
 ```sql
 CREATE TABLE student_makeup_records (
-  id TEXT PRIMARY KEY,
-  student_id TEXT NOT NULL,
-  original_membership_id TEXT NOT NULL,
-  original_class_id TEXT NOT NULL,
-  original_session_id TEXT NOT NULL,
-  receiving_class_id TEXT NOT NULL,
-  receiving_session_id TEXT NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  original_membership_id INTEGER NOT NULL,
+  original_class_id INTEGER NOT NULL,
+  original_session_id INTEGER NOT NULL,
+  receiving_class_id INTEGER NOT NULL,
+  receiving_session_id INTEGER NOT NULL,
   session_index_in_week INTEGER NOT NULL,
   receiving_attendance_status TEXT,
   note TEXT,
@@ -485,7 +561,7 @@ Rules:
 
 ```sql
 CREATE TABLE backup_logs (
-  id TEXT PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   action TEXT NOT NULL,
   file_path TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -504,7 +580,7 @@ Allowed `status`:
 - `success`
 - `failed`
 
-## 5. Relationships
+## 6. Relationships
 
 Quan hệ chính:
 
@@ -531,7 +607,7 @@ Quan hệ nghiệp vụ cần lưu ý:
 - Student-level makeup không tạo membership ở lớp nhận.
 - Class-level makeup là một attendance session riêng.
 
-## 6. Migration/seed strategy
+## 7. Migration/seed strategy
 
 Migration strategy:
 
@@ -543,6 +619,11 @@ Migration strategy:
 - Lưu version đã chạy trong bảng metadata hoặc dùng migration tool của crate được chọn.
 - Migration phải chạy khi app khởi động, trước khi frontend gọi dữ liệu.
 - Migration phải idempotent ở mức ứng dụng: migration đã chạy thì không chạy lại.
+- Schema dev hiện đã áp dụng ID integer theo chiến lược cuối cho các bảng đã triển khai:
+  - `INTEGER PRIMARY KEY AUTOINCREMENT` cho `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`.
+  - Foreign keys liên quan đã chuyển sang `INTEGER`.
+  - Nếu database dev đã chạy migration TEXT ID cũ, nên reset `data.sqlite`, `data.sqlite-wal`, `data.sqlite-shm` rồi chạy lại app để tạo schema mới.
+- Không renumber ID sau migration chỉ để làm đẹp dữ liệu; ID nội bộ có gap là bình thường.
 
 Seed strategy:
 
@@ -563,7 +644,7 @@ Data migration từ mock sang DB:
 - Sau khi DB ổn, frontend không nên đọc trực tiếp `mockData.ts` nữa.
 - Không cần migrate local state runtime hiện tại vì đó chỉ là mock.
 
-## 7. Repository/service architecture
+## 8. Repository/service architecture
 
 Kiến trúc khuyến nghị:
 
@@ -650,7 +731,7 @@ Ví dụ service rules:
   - Lock session.
   - Không xóa attendance records cũ.
 
-## 8. Implementation phases
+## 9. Implementation phases
 
 Thứ tự triển khai đã chốt:
 
@@ -705,9 +786,11 @@ Deliverables:
 - Tạo lớp mới insert DB.
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
-- Lưu ý hiện tại: `studentCount` và `unpaidCount` trong class overview tạm trả `0` cho đến Phase 4/5.
+- Lưu ý hiện tại: sau Phase 4 và refactor ID local, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` vẫn tạm trả `0` cho đến Phase 5.
 
 ### Phase 4. Students/class memberships
+
+Trạng thái hiện tại: đã triển khai.
 
 Mục tiêu:
 
@@ -719,8 +802,15 @@ Deliverables:
 
 - StudentListTab đọc/ghi từ DB.
 - Thêm học sinh tạo `students` + `class_memberships`.
-- Nếu học sinh có sẵn, sau này có thể gán vào lớp khác.
 - Cập nhật trạng thái membership.
+- Seed 9 học sinh mock ban đầu vào DB khi bảng `students` và `class_memberships` đang trống.
+- Class overview/Home đếm `studentCount` theo membership `active`.
+
+Chưa làm trong Phase 4:
+
+- Gán một học sinh đã có vào lớp khác từ UI.
+- Archive/hard delete học sinh hiện có.
+- Nối Attendance/Scores/Payments sang danh sách học sinh DB; các tab này vẫn dùng mock/local cho đến phase riêng.
 
 ### Phase 5. Payments
 
@@ -778,19 +868,22 @@ Mục tiêu:
 - Sao lưu database file.
 - Khôi phục database file an toàn.
 - Ghi log backup/restore.
+- Tạo gói support để developer có thể inspect/fix database local rồi gửi lại cho giáo viên restore.
 
 Deliverables:
 
 - Button sao lưu hoạt động.
 - Button khôi phục có confirm và kiểm tra file hợp lệ.
 - Mở thư mục dữ liệu.
+- Gói backup/support có thể chứa `data.sqlite`, metadata backup, app version, schema version và error logs nếu có.
 
-### Phase 9. Excel export
+### Phase 9. Excel import/export
 
 Mục tiêu:
 
 - Export từ dữ liệu DB thật.
 - Ưu tiên export từng tab trước.
+- Import Excel theo template cố định sau khi export ổn định.
 
 Deliverables:
 
@@ -798,8 +891,10 @@ Deliverables:
 - Export học phí theo tháng.
 - Export bảng điểm theo tháng.
 - Export điểm danh theo tuần/tháng.
+- Import danh sách học sinh từ template cố định là ứng viên đầu tiên.
+- Không coi Excel là database chính; import chỉ ghi dữ liệu đã validate vào SQLite.
 
-## 9. Testing checklist
+## 10. Testing checklist
 
 SQLite/setup:
 
@@ -878,20 +973,34 @@ Backup/restore:
 - Có confirm trước restore.
 - Có log success/failed.
 
-Excel export:
+Excel import/export:
 
 - Export không làm thay đổi DB.
 - File mở được bằng Excel.
 - Tiếng Việt không lỗi font.
 - Dữ liệu export khớp filter/tháng/tuần đang xem.
+- Import danh sách học sinh chỉ nhận đúng template đã định nghĩa.
+- Import phải validate dữ liệu trước khi ghi DB.
+- Import không dùng database ID làm STT; STT trong Excel chỉ là số thứ tự hiển thị.
 
-## 10. Risks and decisions
+## 11. Risks and decisions
 
 ### Decisions đã chốt
 
 - Dữ liệu lưu local bằng SQLite.
+- App là single-user local desktop app cho một giáo viên trên một máy Windows.
+- Không có cloud/server sync trong MVP.
+- SQLite local database là source of truth.
+- Backup/restore là cơ chế chính cho an toàn dữ liệu và hỗ trợ kỹ thuật.
+- Developer có thể nhận backup database, inspect/fix local, rồi gửi lại gói backup đã sửa để giáo viên restore.
 - Dùng Rust commands + `rusqlite` cho SQLite.
 - Không dùng Tauri SQL plugin cho MVP.
+- Domain table IDs dùng `INTEGER PRIMARY KEY AUTOINCREMENT` trong chiến lược schema cuối cho MVP.
+- Không dùng UUID/TEXT IDs cho domain tables trong MVP local-only.
+- `app_settings` vẫn dùng key-value với `key TEXT PRIMARY KEY`.
+- `schema_migrations` giữ cơ chế tracking migration hiện tại.
+- Database IDs là internal identifiers, có thể có gap, không renumber để làm đẹp.
+- STT trong UI/Excel luôn tính từ row hiển thị bằng `index + 1`, không dùng database ID.
 - Không hard-delete học sinh trong normal use.
 - Một học sinh có thể thuộc nhiều lớp.
 - Student status lưu theo `class_memberships`.
@@ -907,6 +1016,8 @@ Excel export:
 - Payment amount lưu theo từng tháng.
 - Payment `unpaid` lưu `amount = 0` trong DB; UI có thể hiển thị riêng học phí dự kiến nếu cần.
 - Miễn giảm học phí cần note.
+- Excel export/import là workflow quan trọng, nhưng Excel không phải database chính.
+- Excel import nên bắt đầu từ danh sách học sinh theo template cố định.
 
 ### Decisions cần chốt thêm
 
@@ -915,6 +1026,7 @@ Excel export:
 - Student-level makeup có bắt buộc cùng năm học không.
 - Student-level makeup có được override khác `session_index_in_week` không.
 - Khi restore cancelled session, có giữ toàn bộ attendance cũ không. Hiện spec đang nghiêng về giữ.
+- Đã chốt và áp dụng cho schema dev: domain IDs dùng `INTEGER PRIMARY KEY AUTOINCREMENT`; nếu gặp DB dev cũ còn TEXT IDs thì reset file database trước khi test tiếp Phase 5.
 
 ### Risks
 

@@ -10,7 +10,7 @@ import type { ClassOverview } from "@/types/class";
 
 type ClassCardProps = {
   classItem: ClassOverview;
-  onOpen: (classId: string) => void;
+  onOpen: (classId: number) => void;
 };
 
 export function ClassCard({ classItem, onOpen }: ClassCardProps) {

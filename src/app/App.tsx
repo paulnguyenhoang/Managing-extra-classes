@@ -32,9 +32,9 @@ type DatabaseReadyStatus = {
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
-  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [selectedYearId, setSelectedYearId] = useState("");
+  const [selectedYearId, setSelectedYearId] = useState<number | null>(null);
   const [classOverviews, setClassOverviews] = useState<ClassOverview[]>([]);
   const [isSchoolDataLoading, setIsSchoolDataLoading] = useState(false);
   const [hasLoadedSchoolData, setHasLoadedSchoolData] = useState(false);
@@ -77,12 +77,12 @@ function App() {
         listAcademicYears(),
         getCurrentAcademicYearId(),
       ]);
-      const nextYearId = currentYearId || years[0]?.id || "";
+      const nextYearId = currentYearId || years[0]?.id || null;
 
       setAcademicYears(years);
       setSelectedYearId(nextYearId);
 
-      if (nextYearId) {
+      if (nextYearId !== null) {
         setClassOverviews(await listClassOverviewsByYear(nextYearId));
       } else {
         setClassOverviews([]);
@@ -96,8 +96,8 @@ function App() {
     }
   }
 
-  async function loadClassesForYear(yearId: string) {
-    if (!yearId) {
+  async function loadClassesForYear(yearId: number | null) {
+    if (yearId === null) {
       setClassOverviews([]);
       return;
     }
@@ -115,7 +115,7 @@ function App() {
     }
   }
 
-  function handleOpenClass(classId: string) {
+  function handleOpenClass(classId: number) {
     setSelectedClassId(classId);
     setScreen("class-detail");
   }
@@ -135,7 +135,7 @@ function App() {
     setScreen("login");
   }
 
-  async function handleYearChange(yearId: string) {
+  async function handleYearChange(yearId: number) {
     setSelectedYearId(yearId);
 
     try {
@@ -153,7 +153,7 @@ function App() {
     setClassOverviews((current) => [...current, createdClass]);
   }
 
-  function handleUpdateClass(classId: string, updates: Partial<ClassOverview>) {
+  function handleUpdateClass(classId: number, updates: Partial<ClassOverview>) {
     setClassOverviews((current) =>
       current.map((classItem) =>
         classItem.id === classId ? { ...classItem, ...updates } : classItem,

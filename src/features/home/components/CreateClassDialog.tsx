@@ -18,7 +18,7 @@ import { parseScheduleText } from "@/features/classes/utils/classSchedule";
 import type { CreateClassInput } from "@/types/class";
 
 type CreateClassDialogProps = {
-  academicYearId: string;
+  academicYearId: number | null;
   disabled?: boolean;
   onCreate: (input: CreateClassInput) => void | Promise<void>;
 };
@@ -66,7 +66,7 @@ export function CreateClassDialog({
 
     try {
       await onCreate({
-        academicYearId,
+        academicYearId: academicYearId ?? 0,
         name,
         monthlyFee,
         note: form.note.trim() || undefined,

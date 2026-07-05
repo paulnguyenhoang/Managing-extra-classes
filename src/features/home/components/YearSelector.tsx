@@ -9,19 +9,19 @@ import {
 
 type YearSelectorProps = {
   years: AcademicYear[];
-  value: string;
-  onChange: (yearId: string) => void;
+  value: number | null;
+  onChange: (yearId: number) => void;
 };
 
 export function YearSelector({ years, value, onChange }: YearSelectorProps) {
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={value === null ? "" : String(value)} onValueChange={(nextValue) => onChange(Number(nextValue))}>
       <SelectTrigger className="h-10 w-full bg-white text-base sm:min-w-72">
         <SelectValue placeholder="Chọn năm học" />
       </SelectTrigger>
       <SelectContent>
         {years.map((year) => (
-          <SelectItem key={year.id} value={year.id}>
+          <SelectItem key={year.id} value={String(year.id)}>
             {year.label}
           </SelectItem>
         ))}

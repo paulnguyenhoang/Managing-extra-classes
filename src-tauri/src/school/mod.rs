@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ const CURRENT_ACADEMIC_YEAR_KEY: &str = "current_academic_year_id";
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcademicYearDto {
-    id: String,
+    id: i64,
     label: String,
     starts_at: String,
     ends_at: String,
@@ -28,8 +28,8 @@ pub struct ClassScheduleItemDto {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassOverviewDto {
-    id: String,
-    academic_year_id: String,
+    id: i64,
+    academic_year_id: i64,
     name: String,
     schedule: String,
     schedule_items: Vec<ClassScheduleItemDto>,
@@ -43,7 +43,7 @@ pub struct ClassOverviewDto {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateClassRequest {
-    academic_year_id: String,
+    academic_year_id: i64,
     name: String,
     monthly_fee: i64,
     note: Option<String>,
@@ -53,26 +53,26 @@ pub struct CreateClassRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClassNameRequest {
-    class_id: String,
+    class_id: i64,
     name: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClassMonthlyFeeRequest {
-    class_id: String,
+    class_id: i64,
     monthly_fee: i64,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateClassScheduleRequest {
-    class_id: String,
+    class_id: i64,
     schedule_items: Vec<ClassScheduleItemDto>,
 }
 
 struct SeedSchedule {
-    class_id: &'static str,
+    class_key: &'static str,
     weekday: i64,
     start_time: &'static str,
     end_time: &'static str,
@@ -120,15 +120,17 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             ),
         ];
 
-        for (id, label, starts_at, ends_at, is_current) in academic_years {
+        let mut academic_year_ids: HashMap<&'static str, i64> = HashMap::new();
+        for (key, label, starts_at, ends_at, is_current) in academic_years {
             transaction
                 .execute(
                     "INSERT INTO academic_years
-                     (id, label, starts_at, ends_at, is_current, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    params![id, label, starts_at, ends_at, is_current],
+                     (label, starts_at, ends_at, is_current, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    params![label, starts_at, ends_at, is_current],
                 )
                 .map_err(|error| format!("Không seed được năm học {label}: {error}"))?;
+            academic_year_ids.insert(key, transaction.last_insert_rowid());
         }
 
         let classes = [
@@ -162,69 +164,76 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             ),
         ];
 
-        for (id, academic_year_id, name, monthly_fee, room) in classes {
+        let mut class_ids: HashMap<&'static str, i64> = HashMap::new();
+        for (key, academic_year_key, name, monthly_fee, room) in classes {
+            let academic_year_id = academic_year_ids
+                .get(academic_year_key)
+                .copied()
+                .ok_or_else(|| format!("Không tìm thấy năm học seed {academic_year_key}"))?;
+
             transaction
                 .execute(
                     "INSERT INTO classes
-                     (id, academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    params![id, academic_year_id, name, monthly_fee, room],
+                     (academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    params![academic_year_id, name, monthly_fee, room],
                 )
                 .map_err(|error| format!("Không seed được lớp {name}: {error}"))?;
+            class_ids.insert(key, transaction.last_insert_rowid());
         }
 
         let schedules = [
             SeedSchedule {
-                class_id: "van-9a",
+                class_key: "van-9a",
                 weekday: 2,
                 start_time: "18:00",
                 end_time: "20:00",
                 sort_order: 0,
             },
             SeedSchedule {
-                class_id: "van-9a",
+                class_key: "van-9a",
                 weekday: 5,
                 start_time: "18:00",
                 end_time: "20:00",
                 sort_order: 1,
             },
             SeedSchedule {
-                class_id: "van-8a",
+                class_key: "van-8a",
                 weekday: 1,
                 start_time: "17:30",
                 end_time: "19:30",
                 sort_order: 0,
             },
             SeedSchedule {
-                class_id: "van-8a",
+                class_key: "van-8a",
                 weekday: 4,
                 start_time: "17:30",
                 end_time: "19:30",
                 sort_order: 1,
             },
             SeedSchedule {
-                class_id: "van-7a",
+                class_key: "van-7a",
                 weekday: 3,
                 start_time: "19:00",
                 end_time: "21:00",
                 sort_order: 0,
             },
             SeedSchedule {
-                class_id: "van-7a",
+                class_key: "van-7a",
                 weekday: 0,
                 start_time: "19:00",
                 end_time: "21:00",
                 sort_order: 1,
             },
             SeedSchedule {
-                class_id: "van-9-old",
+                class_key: "van-9-old",
                 weekday: 2,
                 start_time: "18:00",
                 end_time: "20:00",
                 sort_order: 0,
             },
             SeedSchedule {
-                class_id: "van-9-old",
+                class_key: "van-9-old",
                 weekday: 5,
                 start_time: "18:00",
                 end_time: "20:00",
@@ -233,17 +242,18 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
         ];
 
         for schedule in schedules {
+            let class_id = class_ids
+                .get(schedule.class_key)
+                .copied()
+                .ok_or_else(|| format!("Không tìm thấy lớp seed {}", schedule.class_key))?;
+
             transaction
                 .execute(
                     "INSERT INTO class_schedules
-                     (id, class_id, weekday, start_time, end_time, sort_order, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                     (class_id, weekday, start_time, end_time, sort_order, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                     params![
-                        format!(
-                            "seed-schedule-{}-{}-{}",
-                            schedule.class_id, schedule.weekday, schedule.sort_order
-                        ),
-                        schedule.class_id,
+                        class_id,
                         schedule.weekday,
                         schedule.start_time,
                         schedule.end_time,
@@ -251,9 +261,14 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                     ],
                 )
                 .map_err(|error| {
-                    format!("Không seed được lịch học cho lớp {}: {error}", schedule.class_id)
+                    format!("Không seed được lịch học cho lớp {}: {error}", schedule.class_key)
                 })?;
         }
+
+        let current_academic_year_id = academic_year_ids
+            .get("2025-2026")
+            .copied()
+            .ok_or_else(|| "Không tìm thấy năm học hiện tại khi seed.".to_string())?;
 
         transaction
             .execute(
@@ -262,7 +277,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                  ON CONFLICT(key) DO UPDATE SET
                    value = excluded.value,
                    updated_at = CURRENT_TIMESTAMP",
-                params![CURRENT_ACADEMIC_YEAR_KEY, "2025-2026"],
+                params![CURRENT_ACADEMIC_YEAR_KEY, current_academic_year_id.to_string()],
             )
             .map_err(|error| format!("Không lưu được năm học hiện tại khi seed: {error}"))?;
 
@@ -304,17 +319,17 @@ pub fn list_academic_years(
 #[tauri::command]
 pub fn get_current_academic_year_id(
     database: tauri::State<'_, AppDatabase>,
-) -> Result<String, String> {
+) -> Result<i64, String> {
     get_current_academic_year_id_value(&database)
 }
 
 #[tauri::command]
 pub fn set_current_academic_year(
     database: tauri::State<'_, AppDatabase>,
-    academic_year_id: String,
+    academic_year_id: i64,
 ) -> Result<(), String> {
     database.with_connection_mut(|connection| {
-        ensure_academic_year_exists(connection, &academic_year_id)?;
+        ensure_academic_year_exists(connection, academic_year_id)?;
 
         let transaction = connection
             .transaction()
@@ -341,7 +356,7 @@ pub fn set_current_academic_year(
                  ON CONFLICT(key) DO UPDATE SET
                    value = excluded.value,
                    updated_at = CURRENT_TIMESTAMP",
-                params![CURRENT_ACADEMIC_YEAR_KEY, academic_year_id],
+                params![CURRENT_ACADEMIC_YEAR_KEY, academic_year_id.to_string()],
             )
             .map_err(|error| format!("Không lưu được cài đặt năm học hiện tại: {error}"))?;
 
@@ -354,17 +369,17 @@ pub fn set_current_academic_year(
 #[tauri::command]
 pub fn list_class_overviews_by_year(
     database: tauri::State<'_, AppDatabase>,
-    academic_year_id: String,
+    academic_year_id: i64,
 ) -> Result<Vec<ClassOverviewDto>, String> {
-    database.with_connection(|connection| list_class_overviews(connection, &academic_year_id))
+    database.with_connection(|connection| list_class_overviews(connection, academic_year_id))
 }
 
 #[tauri::command]
 pub fn get_class_detail(
     database: tauri::State<'_, AppDatabase>,
-    class_id: String,
+    class_id: i64,
 ) -> Result<ClassOverviewDto, String> {
-    database.with_connection(|connection| get_class_overview(connection, &class_id))
+    database.with_connection(|connection| get_class_overview(connection, class_id))
 }
 
 #[tauri::command]
@@ -377,9 +392,8 @@ pub fn create_class(
     validate_schedule_items(&request.schedule_items)?;
 
     database.with_connection_mut(|connection| {
-        ensure_academic_year_exists(connection, &request.academic_year_id)?;
+        ensure_academic_year_exists(connection, request.academic_year_id)?;
 
-        let class_id = generate_id("class");
         let name = request.name.trim().to_string();
         let note = normalize_optional_text(request.note.as_deref());
         let transaction = connection
@@ -389,10 +403,9 @@ pub fn create_class(
         transaction
             .execute(
                 "INSERT INTO classes
-                 (id, academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                 (academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 params![
-                    class_id,
                     request.academic_year_id,
                     name,
                     request.monthly_fee,
@@ -401,14 +414,15 @@ pub fn create_class(
                 ],
             )
             .map_err(|error| format!("Không tạo được lớp học: {error}"))?;
+        let class_id = transaction.last_insert_rowid();
 
-        insert_schedule_items(&transaction, &class_id, &request.schedule_items)?;
+        insert_schedule_items(&transaction, class_id, &request.schedule_items)?;
 
         transaction
             .commit()
             .map_err(|error| format!("Không commit được lớp học mới: {error}"))?;
 
-        get_class_overview(connection, &class_id)
+        get_class_overview(connection, class_id)
     })
 }
 
@@ -420,7 +434,7 @@ pub fn update_class_name(
     validate_class_name(&request.name)?;
 
     database.with_connection_mut(|connection| {
-        ensure_class_exists(connection, &request.class_id)?;
+        ensure_class_exists(connection, request.class_id)?;
         connection
             .execute(
                 "UPDATE classes
@@ -430,7 +444,7 @@ pub fn update_class_name(
             )
             .map_err(|error| format!("Không cập nhật được tên lớp: {error}"))?;
 
-        get_class_overview(connection, &request.class_id)
+        get_class_overview(connection, request.class_id)
     })
 }
 
@@ -442,7 +456,7 @@ pub fn update_class_monthly_fee(
     validate_monthly_fee(request.monthly_fee)?;
 
     database.with_connection_mut(|connection| {
-        ensure_class_exists(connection, &request.class_id)?;
+        ensure_class_exists(connection, request.class_id)?;
         connection
             .execute(
                 "UPDATE classes
@@ -452,7 +466,7 @@ pub fn update_class_monthly_fee(
             )
             .map_err(|error| format!("Không cập nhật được học phí lớp: {error}"))?;
 
-        get_class_overview(connection, &request.class_id)
+        get_class_overview(connection, request.class_id)
     })
 }
 
@@ -464,7 +478,7 @@ pub fn update_class_schedule(
     validate_schedule_items(&request.schedule_items)?;
 
     database.with_connection_mut(|connection| {
-        ensure_class_exists(connection, &request.class_id)?;
+        ensure_class_exists(connection, request.class_id)?;
         let transaction = connection
             .transaction()
             .map_err(|error| format!("Không bắt đầu được transaction lịch học: {error}"))?;
@@ -475,7 +489,7 @@ pub fn update_class_schedule(
                 params![request.class_id],
             )
             .map_err(|error| format!("Không xóa được lịch học cũ: {error}"))?;
-        insert_schedule_items(&transaction, &request.class_id, &request.schedule_items)?;
+        insert_schedule_items(&transaction, request.class_id, &request.schedule_items)?;
         transaction
             .execute(
                 "UPDATE classes SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -487,17 +501,20 @@ pub fn update_class_schedule(
             .commit()
             .map_err(|error| format!("Không commit được lịch học: {error}"))?;
 
-        get_class_overview(connection, &request.class_id)
+        get_class_overview(connection, request.class_id)
     })
 }
 
-fn get_current_academic_year_id_value(database: &AppDatabase) -> Result<String, String> {
+fn get_current_academic_year_id_value(database: &AppDatabase) -> Result<i64, String> {
     if let Some(stored_id) = database.get_setting(CURRENT_ACADEMIC_YEAR_KEY)? {
+        let parsed_id = stored_id
+            .parse::<i64>()
+            .map_err(|_| "Mã năm học hiện tại trong cài đặt không hợp lệ.".to_string())?;
         let exists =
-            database.with_connection(|connection| academic_year_exists(connection, &stored_id))?;
+            database.with_connection(|connection| academic_year_exists(connection, parsed_id))?;
 
         if exists {
-            return Ok(stored_id);
+            return Ok(parsed_id);
         }
     }
 
@@ -506,7 +523,7 @@ fn get_current_academic_year_id_value(database: &AppDatabase) -> Result<String, 
             .query_row(
                 "SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, i64>(0),
             )
             .optional()
             .map_err(|error| format!("Không đọc được năm học hiện tại: {error}"))?;
@@ -519,7 +536,7 @@ fn get_current_academic_year_id_value(database: &AppDatabase) -> Result<String, 
             .query_row(
                 "SELECT id FROM academic_years ORDER BY starts_at DESC LIMIT 1",
                 [],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, i64>(0),
             )
             .optional()
             .map_err(|error| format!("Không đọc được năm học đầu tiên: {error}"))?
@@ -529,7 +546,7 @@ fn get_current_academic_year_id_value(database: &AppDatabase) -> Result<String, 
 
 fn list_class_overviews(
     connection: &Connection,
-    academic_year_id: &str,
+    academic_year_id: i64,
 ) -> Result<Vec<ClassOverviewDto>, String> {
     let mut statement = connection
         .prepare(
@@ -541,19 +558,19 @@ fn list_class_overviews(
         .map_err(|error| format!("Không chuẩn bị được truy vấn lớp học: {error}"))?;
 
     let class_ids = statement
-        .query_map(params![academic_year_id], |row| row.get::<_, String>(0))
+        .query_map(params![academic_year_id], |row| row.get::<_, i64>(0))
         .map_err(|error| format!("Không đọc được danh sách lớp học: {error}"))?;
 
     let mut overviews = Vec::new();
     for class_id in class_ids {
         let class_id = class_id.map_err(|error| format!("Không parse được mã lớp: {error}"))?;
-        overviews.push(get_class_overview(connection, &class_id)?);
+        overviews.push(get_class_overview(connection, class_id)?);
     }
 
     Ok(overviews)
 }
 
-fn get_class_overview(connection: &Connection, class_id: &str) -> Result<ClassOverviewDto, String> {
+fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOverviewDto, String> {
     let class_row = connection
         .query_row(
             "SELECT id, academic_year_id, name, monthly_fee, room, note
@@ -562,8 +579,8 @@ fn get_class_overview(connection: &Connection, class_id: &str) -> Result<ClassOv
             params![class_id],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<String>>(4)?,
@@ -575,8 +592,9 @@ fn get_class_overview(connection: &Connection, class_id: &str) -> Result<ClassOv
         .map_err(|error| format!("Không đọc được lớp học: {error}"))?
         .ok_or_else(|| "Không tìm thấy lớp học.".to_string())?;
 
-    let schedule_items = schedule_items_for_class(connection, &class_row.0)?;
+    let schedule_items = schedule_items_for_class(connection, class_row.0)?;
     let schedule = format_schedule_text(&schedule_items);
+    let student_count = crate::students::count_active_students_by_class(connection, class_row.0)?;
 
     Ok(ClassOverviewDto {
         id: class_row.0,
@@ -590,14 +608,14 @@ fn get_class_overview(connection: &Connection, class_id: &str) -> Result<ClassOv
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Phòng học nhà thầy".to_string()),
         note: class_row.5,
-        student_count: 0,
+        student_count,
         unpaid_count: 0,
     })
 }
 
 fn schedule_items_for_class(
     connection: &Connection,
-    class_id: &str,
+    class_id: i64,
 ) -> Result<Vec<ClassScheduleItemDto>, String> {
     let mut statement = connection
         .prepare(
@@ -623,17 +641,16 @@ fn schedule_items_for_class(
 
 fn insert_schedule_items(
     transaction: &rusqlite::Transaction<'_>,
-    class_id: &str,
+    class_id: i64,
     schedule_items: &[ClassScheduleItemDto],
 ) -> Result<(), String> {
     for (index, item) in schedule_items.iter().enumerate() {
         transaction
             .execute(
                 "INSERT INTO class_schedules
-                 (id, class_id, weekday, start_time, end_time, sort_order, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                 (class_id, weekday, start_time, end_time, sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 params![
-                    generate_id(&format!("schedule-{class_id}-{index}")),
                     class_id,
                     item.weekday,
                     item.start_time,
@@ -662,7 +679,7 @@ fn collect_rows<T>(
 
 fn ensure_academic_year_exists(
     connection: &Connection,
-    academic_year_id: &str,
+    academic_year_id: i64,
 ) -> Result<(), String> {
     if academic_year_exists(connection, academic_year_id)? {
         return Ok(());
@@ -671,12 +688,12 @@ fn ensure_academic_year_exists(
     Err("Không tìm thấy năm học.".to_string())
 }
 
-fn academic_year_exists(connection: &Connection, academic_year_id: &str) -> Result<bool, String> {
+fn academic_year_exists(connection: &Connection, academic_year_id: i64) -> Result<bool, String> {
     let exists = connection
         .query_row(
             "SELECT id FROM academic_years WHERE id = ?1",
             params![academic_year_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, i64>(0),
         )
         .optional()
         .map_err(|error| format!("Không kiểm tra được năm học: {error}"))?;
@@ -684,12 +701,12 @@ fn academic_year_exists(connection: &Connection, academic_year_id: &str) -> Resu
     Ok(exists.is_some())
 }
 
-fn ensure_class_exists(connection: &Connection, class_id: &str) -> Result<(), String> {
+fn ensure_class_exists(connection: &Connection, class_id: i64) -> Result<(), String> {
     let exists = connection
         .query_row(
             "SELECT id FROM classes WHERE id = ?1 AND is_archived = 0",
             params![class_id],
-            |row| row.get::<_, String>(0),
+            |row| row.get::<_, i64>(0),
         )
         .optional()
         .map_err(|error| format!("Không kiểm tra được lớp học: {error}"))?;
@@ -788,13 +805,4 @@ fn weekday_label(weekday: i64) -> &'static str {
         0 => "Chủ nhật",
         _ => "Thứ ?",
     }
-}
-
-fn generate_id(prefix: &str) -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-
-    format!("{prefix}-{millis}")
 }

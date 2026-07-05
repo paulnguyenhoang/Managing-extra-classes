@@ -11,8 +11,8 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - App type: ứng dụng desktop Tauri dùng React + TypeScript.
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
-- Trạng thái persistence: đã có SQLite local qua Rust commands. Phase 1-3 hiện lưu được app settings/password, academic years, classes và class schedules.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho học sinh, điểm danh, điểm, học phí và vài placeholder. Các tab lõi trong lớp chưa nối DB, trừ header lớp/lịch/học phí tháng.
+- Trạng thái persistence: đã có SQLite local qua Rust commands. Phase 1-4 hiện lưu được app settings/password, academic years, classes, class schedules, students và class memberships.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho điểm danh, điểm, học phí và vài placeholder. Tab Danh sách học sinh đã nối SQLite; các tab Điểm danh/Nhập điểm/Học phí vẫn mock/local.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -100,6 +100,7 @@ src/
   services/
     academicYearApi.ts
     classApi.ts
+    studentApi.ts
   lib/
     format.ts
     utils.ts
@@ -152,7 +153,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 | App shell | `src/components/layout/AppShell.tsx` | Layout sau login | implemented | Header + sidebar + main scroll |
 | Tổng quan/Home | `src/features/home/HomePage.tsx` | Xem năm học, summary, danh sách lớp | implemented | Năm học/lớp/lịch học lấy từ SQLite |
 | Chi tiết lớp | `src/features/classes/ClassDetailPage.tsx` | Header lớp và tabs | implemented | Header lớp lưu tên, lịch học, học phí tháng vào SQLite |
-| Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh mock | implemented | Local state riêng trong tab |
+| Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh | implemented | Load/save SQLite qua `students` và `class_memberships` |
 | Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Local state qua `useMockAttendance` |
 | Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Local state qua `useMockScores` |
 | Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | Local state trong tab |
@@ -218,8 +219,8 @@ Create class hiện tại:
 Hạn chế:
 
 - Không có sửa/xóa/archive lớp ở Home.
-- Lớp tạo mới chưa có học sinh thật vì students/memberships chưa nối DB.
-- `studentCount` và `unpaidCount` từ DB hiện tạm là `0` cho đến các phase students/payments.
+- Lớp tạo mới chưa có học sinh cho đến khi thêm ở tab Danh sách học sinh.
+- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` từ DB hiện tạm là `0` cho đến phase payments.
 
 ## 10. Class Detail Header hiện tại
 
@@ -279,7 +280,7 @@ Add student:
 - Khi bấm, thêm một dòng mới trực tiếp vào table với fields rỗng, `status: "active"`, `classId` hiện tại.
 - Dòng mới tự đưa tab vào edit mode.
 - Dòng mới có icon thùng rác cạnh STT để xóa dòng mới.
-- Icon thùng rác chỉ xuất hiện cho các dòng mới, không xuất hiện với học sinh mock có sẵn.
+- Icon thùng rác chỉ xuất hiện cho các dòng mới chưa lưu, không xuất hiện với học sinh đã lưu trong DB.
 
 Edit/update:
 
@@ -301,10 +302,13 @@ Export:
 
 State/data source:
 
-- Initial data từ `getStudentsByClassId(classId)`.
-- `StudentListTab` tự giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
-- Khi `classId` đổi, tab reset lại từ mock data.
-- Thay đổi không cập nhật `mockData.ts`, không cập nhật `classOverviews.studentCount`.
+- Initial data từ command `list_students_by_class` qua `src/services/studentApi.ts`.
+- `StudentListTab` tự giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`, loading/error trong lúc thao tác.
+- Khi `classId` đổi, tab load lại danh sách từ SQLite.
+- Khi lưu, dòng mới gọi `create_student_for_class`; dòng hiện có gọi `update_student` và `update_class_membership_status`.
+- Status `"Đang học"`/`"Đã nghỉ"` được lưu trên `class_memberships`, không lưu global trên `students`.
+- Sau khi lưu, `ClassDetailPage` refresh class detail để `studentCount` trong header/Home đồng bộ theo active memberships.
+- `mockData.ts` vẫn còn danh sách học sinh cũ cho các tab chưa nối DB như điểm danh/điểm/học phí.
 
 ## 12. Tab Điểm danh hiện tại
 
@@ -636,7 +640,7 @@ State/data source:
 - File seed/mock cũ: `src/data/mockData.ts`.
 - Type: `AcademicYear` trong `src/types/academic-year.ts`.
 - Fields: `id`, `label`, `startsAt`, `endsAt`, `isCurrent`.
-- SQLite Phase 3 có bảng `academic_years`; seed có 3 năm: `2025-2026` current, `2024-2025`, `2026-2027`.
+- SQLite Phase 3 có bảng `academic_years` dùng `INTEGER PRIMARY KEY AUTOINCREMENT`; seed có 3 năm học mẫu và để SQLite tự sinh id.
 - Frontend hiện gọi `list_academic_years` và `get_current_academic_year_id`.
 
 ### Class data
@@ -646,18 +650,22 @@ State/data source:
 - Type phụ:
   - `WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6`
   - `ClassScheduleItem = { weekday, startTime, endTime }`
-- SQLite Phase 3 có bảng `classes` và `class_schedules`.
-- Seed DB hiện tạo các lớp `van-9a`, `van-8a`, `van-7a`, `van-9-old` nếu bảng năm học/lớp đang rỗng.
-- `studentCount` và `unpaidCount` trong class overview hiện tạm trả `0` vì students/payments chưa nối DB.
-- Quan hệ: class thuộc academic year qua `academicYearId`; class có nhiều `class_schedules`; student/payment/attendance vẫn dùng mock theo `classId` trong các tab chưa nối DB.
+- SQLite Phase 3 có bảng `classes` và `class_schedules`, đều dùng id số tự tăng; `classes.academic_year_id` và `class_schedules.class_id` là foreign key số.
+- Seed DB hiện tạo các lớp mẫu tương ứng Văn 9/Văn 8/Văn 7/khóa trước nếu bảng năm học/lớp đang rỗng; các khóa mock cũ chỉ còn dùng nội bộ khi seed/map dữ liệu mẫu, không lưu làm database id.
+- `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` hiện tạm trả `0` vì payments chưa nối DB.
+- Quan hệ: class thuộc academic year qua `academicYearId` số; class có nhiều `class_schedules`; student dùng `class_memberships`; payment/attendance vẫn dùng mock theo `classId` chuỗi trong các tab chưa nối DB.
 
 ### Student data
 
-- Type: `Student` trong `src/types/student.ts`.
-- Fields: `id`, `classId`, `fullName`, `schoolClass`, `school`, `parentPhone`, `status`, `note?`.
+- SQLite Phase 4 có bảng `students` và `class_memberships`, đều dùng id số tự tăng; `class_memberships.class_id` và `class_memberships.student_id` là foreign key số.
+- Type `Student` trong `src/types/student.ts` vẫn giữ shape UI cũ để các tab mock dùng tiếp.
+- Type `StudentListItem` thêm `membershipId` và `studentId` cho tab Danh sách học sinh.
+- DTO tab Danh sách học sinh gồm: `membershipId`, `studentId`, `classId`, `fullName`, `schoolClass`, `school`, `parentPhone`, `status`, `note?`.
 - Status type: `"active" | "paused"`.
-- Mock có 9 học sinh trên các lớp.
-- Quan hệ hiện tại: mỗi student có đúng một `classId`.
+- Status thuộc `class_memberships`, không thuộc student global.
+- Một học sinh có thể thuộc nhiều lớp về mặt schema, nhưng UI hiện tại chỉ tạo một membership cho lớp đang mở.
+- Seed Phase 4 đưa 9 học sinh mock ban đầu vào SQLite nếu `students` và `class_memberships` đều đang trống; SQLite tự sinh `students.id` và `class_memberships.id`.
+- `mockData.ts` vẫn có danh sách học sinh cũ để phục vụ các tab chưa nối DB.
 
 ### Attendance data
 
@@ -735,8 +743,9 @@ State/data source:
   - khi mở detail gọi `get_class_detail`.
   - lưu thay đổi gọi command DB, sau đó gọi `onClassUpdate` để cập nhật `classOverviews` ở App.
 - StudentListTab:
-  - giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`.
-  - reset khi `classId` đổi.
+  - giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`, loading/error/save state.
+  - load danh sách từ SQLite khi `classId` đổi.
+  - lưu thay đổi vào SQLite qua `studentApi`.
 - AttendanceTab/useMockAttendance:
   - `weekStart`, `weekPickerOpen`, `visibleCalendarMonth`, `pendingCancelSession`, `pendingStudentMakeup`, `selectedStudentMakeupSessionId` ở tab.
   - `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`, `studentMakeupRecords` ở hook/module-level mock store.
@@ -744,8 +753,8 @@ State/data source:
   - `selectedMonth`, `savedSheets`, `draftSheets`, `isEditing`, `errorMessage`.
 - PaymentsTab:
   - `selectedMonth`, `filter`, `searchQuery`, `pendingPaidRow`, `pendingWaivedRow`, `paymentsByMonth`.
-- State của năm học/lớp/lịch học được load lại từ SQLite sau restart.
-- State của học sinh, điểm danh, điểm, học phí trong các tab vẫn là local/mock và reset khi reload/restart.
+- State của năm học/lớp/lịch học/học sinh-membership được load lại từ SQLite sau restart.
+- State của điểm danh, điểm, học phí trong các tab vẫn là local/mock và reset khi reload/restart.
 - Một số state reset khi đổi class hoặc đổi month.
 
 ## 18. UI action inventory
@@ -755,17 +764,17 @@ State/data source:
 | Login | LoginPage | Tạo/verify mật khẩu qua command settings | `screen`, `app_settings` | SQLite | Không persist session sau restart |
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
-| Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | Students/payments chưa ảnh hưởng summary |
+| Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; payments chưa ảnh hưởng summary |
 | Create class | CreateClassDialog | Gọi `create_class`, insert class + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | `grade` hiện UI-only |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
 | Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
 | Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance records chưa nối DB |
 | Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment records chưa nối DB |
-| Search student | StudentListTab | Lọc table local | UI only | none | Query/filter frontend hoặc DB khi data lớn |
-| Add student | StudentListTab | Thêm dòng mới inline, vào edit mode | local `students` | local only | Insert `students`/`class_students` |
+| Search student | StudentListTab | Lọc table local trên dữ liệu đã load từ DB | UI only | none | Query/filter backend khi data lớn |
+| Add student | StudentListTab | Thêm dòng mới inline, lưu tạo `students` + `class_memberships` | `students`, `class_memberships` | SQLite khi bấm Lưu cập nhật | Có thể thêm validate nâng cao sau |
 | Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
-| Edit student | StudentListTab | Sửa fields và status trong edit mode | local `students` | local only | Update student/class membership/status |
+| Edit student | StudentListTab | Sửa fields và status trong edit mode, bấm lưu gọi DB | `students`, `class_memberships.status` | SQLite | Update student/class membership/status |
 | Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar | `weekStart` | local only | Có thể query session theo week |
 | Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Thêm session `"Học bù cả lớp"` local | `makeupSessions` | local only | Insert `attendance_sessions` type makeup, link optional to original session |
@@ -798,8 +807,8 @@ State/data source:
 
 ## 19. Current limitations / chưa có
 
-- SQLite/database đã có cho settings/password, academic years, classes và class schedules; các domain còn lại chưa nối DB.
-- Học sinh, điểm danh, điểm, học phí vẫn là mock/local; reload/restart mất các thay đổi trong các tab đó.
+- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students và class memberships; các domain còn lại chưa nối DB.
+- Điểm danh, điểm, học phí vẫn là mock/local; reload/restart mất các thay đổi trong các tab đó.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Chưa có Excel export thật dù nhiều nút export đã hiện.
@@ -807,7 +816,7 @@ State/data source:
 - Trang Lịch học global chỉ là placeholder.
 - Trang Tổng hợp học phí global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
-- Chưa có đồng bộ student thêm/sửa với Home summary hoặc các tab khác.
+- StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu, nhưng các tab điểm danh/điểm/học phí vẫn đọc học sinh từ mock.
 - Chưa có phân quyền hoặc nhiều người dùng.
 - Chưa có xử lý hard delete/archive học sinh hiện có.
 - Chưa có lưu lịch sử học phí theo tháng.
@@ -816,11 +825,11 @@ State/data source:
 - Student-level makeup hiện đã có flow chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận, nhưng chưa có persistence thật.
 - Danh sách lớp/buổi đủ điều kiện học bù lấy từ `classes` mock trong `mockData.ts`, cùng năm học và cùng thứ tự buổi trong tuần; chưa dùng dữ liệu database hoặc class được thêm local ngoài mock.
 - Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
-- Chưa có transaction/service backend cho students, payments, scores, attendance.
+- Chưa có transaction/service backend cho payments, scores, attendance.
 
 ## 20. Database status / future candidates based on current code
 
-Một phần đã implemented ở SQLite Phase 1-3, các phần còn lại vẫn là candidate cho phase sau:
+Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -828,8 +837,8 @@ Một phần đã implemented ở SQLite Phase 1-3, các phần còn lại vẫn
 | `academic_years` | Implemented Phase 3: Home có bộ chọn năm học và class thuộc năm học |
 | `classes` | Implemented Phase 3: lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
 | `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
-| `students` | Lưu thông tin học sinh: tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú |
-| `class_memberships` | Nên có vì một học sinh có thể học nhiều lớp và trạng thái active/paused thuộc membership |
+| `students` | Implemented Phase 4: lưu thông tin học sinh, không hard delete trong flow hiện tại |
+| `class_memberships` | Implemented Phase 4: quan hệ học sinh-lớp, status active/paused thuộc membership |
 | `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, lock/cancel state, link optional tới buổi gốc |
 | `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
 | `student_makeup_records` | Lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần; hoặc gộp vào attendance schema nếu thiết kế khác |
@@ -844,7 +853,7 @@ Một phần đã implemented ở SQLite Phase 1-3, các phần còn lại vẫn
 1. SQLite/data access setup: đã triển khai Phase 1.
 2. App settings/login: đã triển khai Phase 2 cho password local và current academic year.
 3. Academic years/classes/class schedules: đã triển khai Phase 3 cho Home, ClassDetail header và AttendanceTab schedule props.
-4. Students/class membership: các tab đều phụ thuộc danh sách học sinh.
+4. Students/class membership: đã triển khai Phase 4 cho StudentListTab và active student count.
 5. Payments: cấu trúc theo tháng rõ, ít phụ thuộc lịch học, có flow confirm/waiver cụ thể.
 6. Scores: cần lưu cột động theo tháng và điểm theo học sinh.
 7. Attendance: phức tạp hơn vì liên quan lịch học, session phát sinh, lock/cancel/makeup.
@@ -853,10 +862,10 @@ Một phần đã implemented ở SQLite Phase 1-3, các phần còn lại vẫn
 
 ## 22. Questions to confirm before backend
 
-- Xóa học sinh sau này là hard delete, archive, hay chỉ chuyển trạng thái `"Đã nghỉ"`?
-- Một học sinh có được nằm trong nhiều lớp không?
-- Trạng thái `"Đã nghỉ"` là trạng thái toàn học sinh hay trạng thái theo từng lớp?
-- Tạo học sinh inline có cần validate bắt buộc họ tên/SĐT không?
+- Đã xác nhận: xóa học sinh không hard delete trong normal use; UI hiện tại chỉ cho xóa dòng mới chưa lưu.
+- Đã xác nhận: một học sinh có thể thuộc nhiều lớp qua `class_memberships`.
+- Đã xác nhận: trạng thái `"Đã nghỉ"` là trạng thái theo từng lớp, lưu ở `class_memberships`.
+- Tạo học sinh inline hiện validate bắt buộc họ tên; có cần bắt buộc thêm SĐT không?
 - Sửa lịch học có ảnh hưởng đến các buổi điểm danh đã qua không?
 - Có cần sinh sẵn `attendance_sessions` theo lịch hay chỉ sinh khi mở tuần/điểm danh?
 - Buổi nghỉ nên lưu như một trạng thái của session hay tạo attendance record `"Nghỉ"` cho từng học sinh?
