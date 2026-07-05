@@ -194,6 +194,12 @@ Sidebar hiện có 5 item:
 
 - Greeting `"Xin chào thầy"` và heading `"Hôm nay mình quản lý lớp nào?"`
 - Bộ chọn năm học `YearSelector`, dữ liệu từ SQLite qua command `list_academic_years`.
+- Tab khối (segmented control) `"Khối 8"` / `"Khối 9"`:
+  - Lọc danh sách class card theo khối đang chọn.
+  - Summary cards tính theo khối đang chọn.
+  - Mặc định chọn Khối 9 nếu năm học có lớp Khối 9, ngược lại Khối 8.
+  - Đổi năm học giữ nguyên khối thầy đã chọn; nếu khối không có lớp thì hiển thị empty state.
+  - `selectedGrade` được giữ ở `App.tsx` (không phải state cục bộ của HomePage) nên mở chi tiết lớp rồi quay lại vẫn ở đúng tab khối. Khi mở một lớp, `selectedGrade` được đặt theo `grade` của lớp đó.
 - Summary cards:
   - Tổng số lớp
   - Tổng số học sinh
@@ -206,15 +212,19 @@ Sidebar hiện có 5 item:
   - số học sinh
   - học phí tháng
   - badge unpaid/paid theo `unpaidCount`
-- Nếu năm học không có lớp, dùng `EmptyState`.
+- Nếu khối/năm học không có lớp, dùng `EmptyState`.
 - Click class card gọi `onOpenClass(classId)` để mở `ClassDetailPage`.
+- Không hiển thị database ID cho người dùng; STT nếu có luôn tính từ `index + 1`.
 
 Create class hiện tại:
 
-- Dialog fields: `Tên lớp`, `Khối`, `Lịch học`, `Học phí tháng`, `Ghi chú`.
-- Khi lưu, gọi command `create_class`, insert vào bảng `classes` và `class_schedules`.
+- Dialog fields: `Tên lớp`, `Khối` (select Khối 8/Khối 9), `Học phí tháng`, `Lịch học`.
+- Không còn field `Ghi chú` trong dialog tạo lớp.
+- Lịch học dùng bộ chọn checkbox từng thứ + giờ bắt đầu/kết thúc (component `ScheduleItemsEditor`, dùng chung với `EditClassScheduleDialog`), không còn nhập text tự do.
+- Validation: tên lớp bắt buộc, khối phải là 8 hoặc 9, học phí là số nguyên không âm, phải chọn ít nhất một buổi học.
+- Khi lưu, gọi command `create_class`, insert vào bảng `classes` (gồm `grade`) và `class_schedules`.
 - Class mới được append vào `classOverviews` ở `App.tsx` từ response DB.
-- `grade` hiện vẫn là field UI-only, chưa lưu vào schema Phase 3.
+- Khối mặc định trong dialog là khối đang chọn trên Home.
 
 Hạn chế:
 
@@ -338,28 +348,32 @@ Attendance statuses:
 - Trạng thái rỗng/undefined hiển thị `"Chưa điểm danh"`.
 - UI labels:
   - empty/undefined: Chưa điểm danh
-  - `present`: Có học
+  - `present`: Học
   - `absent`: Nghỉ
   - `makeup`: Học bù
-- MVP hiện tại không có `"Có phép"` và không có `"Đi muộn"` trong type, badge, legend hoặc click cycle.
-- Legend hiện tại: `"Chú thích: Chưa điểm danh, Có học, Nghỉ, Học bù"`.
+- Mỗi ô chỉ lưu một trạng thái duy nhất; hiển thị luôn suy ra từ trạng thái đó.
+- MVP hiện tại không có `"Có phép"` và không có `"Đi muộn"`.
+- Legend hiện tại: `"Chú thích: Chưa điểm danh, Học, Nghỉ, Học bù"`.
 - `"Học bù"` có 2 khái niệm khác nhau trong code:
   - Class-level makeup: một session/cột học bù cả lớp (`session.isMakeup`) và header có badge `"Học bù cả lớp"`.
   - Student-level makeup: trạng thái `makeup` của một học sinh ở buổi gốc, có record liên kết sang lớp/buổi nhận học bù.
 
-Cell click behavior:
+Cell behavior (nút trạng thái, không dùng click cycle):
 
-- Mỗi cell là button.
-- Chỉ click được khi session đang unlocked và không bị cancel.
-- Chu kỳ intended cho học sinh chính thức: empty -> Có học -> Nghỉ -> Học bù -> empty.
-- Trong code, khi next status là `present` hoặc `absent`, cell cập nhật ngay bằng `setAttendanceStatus`.
-- Khi next status là `makeup`, UI không set ngay mà mở dialog `"Chọn lớp học bù"`.
+- Buổi bị khóa: cell chỉ hiển thị badge trạng thái, không có nút.
+- Buổi nghỉ (cancelled): cell hiển thị `"Nghỉ"` thống nhất một màu đỏ (giống badge Nghỉ của từng học sinh), không có nút, không sửa được cho đến khi hủy nghỉ.
+- Buổi mở khóa: cell hiển thị các nút nhỏ theo ngữ cảnh, nút đang chọn được highlight:
+  - Buổi thường + học sinh chính thức: `Học` / `Nghỉ` / `Học bù`.
+  - Buổi học bù cả lớp + học sinh chính thức: `Học` / `Nghỉ` (không có `Học bù`).
+  - Dòng học sinh học bù ở lớp nhận: `Học` / `Nghỉ` (không có `Học bù`).
+- Bấm lại nút đang chọn để bỏ trạng thái, quay về `"Chưa điểm danh"`.
+- Bấm `Học`/`Nghỉ`: set ngay bằng `setAttendanceStatus`; nếu ô đang `makeup` thì xóa liên kết học bù cũ qua `removeStudentMakeupRecordForOriginal`.
+- Bấm `Học bù`: không set ngay mà mở dialog `"Chọn lớp học bù"`.
 - Nếu cancel dialog học bù, giữ nguyên trạng thái cũ.
 - Nếu confirm dialog học bù:
   - Tạo local `StudentMakeupRecord`.
   - Cell buổi gốc được set thành `makeup`.
   - Cell có helper text dạng `"Học bù tại [Tên lớp] - [ngày]"`.
-- Nếu một cell đang `makeup` được click sang trạng thái khác, code gọi `removeStudentMakeupRecordForOriginal` để xóa liên kết học bù cũ.
 
 Student-level makeup dialog:
 
@@ -373,7 +387,9 @@ Student-level makeup dialog:
 - Điều kiện hiện tại của eligible session:
   - Chỉ lấy lớp khác `sourceClassId`.
   - Chỉ lấy lớp cùng `academicYearId` với lớp gốc.
+  - Chỉ lấy lớp CÙNG KHỐI (`grade`) với lớp gốc.
   - Chỉ lấy buổi có cùng thứ tự trong tuần với buổi gốc.
+  - Không giới hạn quá khứ/tương lai: cho phép ghi học bù buổi đã qua (khi quên cập nhật), miễn cùng tuần và cùng thứ tự buổi. Giới hạn tương lai chỉ áp dụng cho việc tạo buổi học bù cả lớp.
   - Dựa trên danh sách `classes` mock và schedule parse từ `mockData.ts`.
 - Student-level makeup hiện đã có UI và local state, nhưng vẫn là mock/in-memory, chưa persist database.
 
@@ -381,8 +397,10 @@ Receiving makeup students:
 
 - Khi xem lớp/buổi nhận học bù, nếu có `StudentMakeupRecord` trỏ về class/session hiện tại, table hiện thêm section `"Học sinh học bù"`.
 - Dòng học sinh học bù không thêm vào danh sách học sinh chính thức của lớp nhận.
-- Trạng thái của dòng học sinh học bù ở lớp nhận chỉ cycle: empty -> Có học -> Nghỉ -> empty.
+- Dòng học sinh học bù chỉ có nút `Học` / `Nghỉ`; trạng thái có thể là empty/present/absent.
+- Không cho dòng học sinh học bù chọn `"Học bù"` tiếp.
 - Các cell không phải session nhận học bù hiển thị `"-"`.
+- Trường hợp đặc biệt: nếu học sinh nghỉ buổi học bù cả lớp và qua lớp khác học, giáo viên đánh dấu `"Nghỉ"` ở buổi bù cả lớp rồi quay lại buổi gốc đánh dấu `"Học bù"`; record học bù liên kết với buổi gốc, không liên kết buổi bù cả lớp.
 
 Lock/unlock behavior:
 
@@ -390,32 +408,43 @@ Lock/unlock behavior:
 - Mặc định session bị khóa vì id chưa nằm trong `unlockedSessionIds`.
 - Nút `"Mở khóa"` thêm id vào `unlockedSessionIds`.
 - Nút `"Khóa"` xóa id khỏi `unlockedSessionIds`.
-- Khi session bị khóa, cell disabled và có opacity.
+- Khi session bị khóa, cell chỉ hiển thị badge trạng thái, không hiển thị nút điểm danh.
+- Buổi học bù cả lớp mới tạo được mở khóa sẵn.
 
 Cancel session behavior:
 
 - Header session có icon `CalendarX`.
 - Bấm icon mở dialog xác nhận.
-- Nếu chưa nghỉ: dialog hỏi xác nhận lớp nghỉ; confirm gọi `cancelSession(sessionId)`.
+- Nếu chưa nghỉ: dialog hỏi xác nhận lớp nghỉ; confirm ghi trạng thái `absent`/Nghỉ cho toàn bộ học sinh chính thức và các dòng học bù của buổi đó (như tick Nghỉ từng người), gỡ liên kết học bù của học sinh đang `makeup`, rồi gọi `cancelSession(sessionId)`.
 - `cancelSession` thêm session vào `cancelledSessionIds` và xóa khỏi `unlockedSessionIds`.
-- Khi session nghỉ, tất cả cell hiển thị badge `"Nghỉ"`; dữ liệu điểm danh cũ vẫn được giữ trong state.
-- Bấm icon lần nữa khi đã nghỉ mở dialog hủy trạng thái nghỉ; confirm gọi `restoreCancelledSession(sessionId)`, xóa khỏi cancelled và mở khóa session.
+- Khi session nghỉ, tất cả cell hiển thị badge `"Nghỉ"` màu đỏ; trạng thái Nghỉ đã được ghi vào từng học sinh nên mở khóa vẫn giữ Nghỉ.
+- Bấm icon lần nữa khi đã nghỉ mở dialog hủy trạng thái nghỉ; confirm gọi `restoreCancelledSession(sessionId)`, xóa khỏi cancelled và mở khóa session; trạng thái Nghỉ từng học sinh giữ nguyên để thầy chỉnh lại.
 
 Makeup session:
 
 - Nút `"Thêm buổi học bù"` mở `AddMakeupSessionDialog`.
-- Fields: ngày học bù, giờ học bù, bù cho buổi nào.
-- Khi lưu, thêm một `WeeklySession` local với id `makeup-${Date.now()}`, date, startTime/endTime, `isMakeup: true`, `makeupForSessionId`.
+- Fields: ngày học bù, giờ học bù, bù cho buổi nào (bắt buộc chọn).
+- Validation khi lưu:
+  - Phải chọn buổi gốc cần bù.
+  - Ngày học bù phải sau ngày hôm nay; lỗi: `"Ngày học bù phải sau ngày hôm nay."` Input date có `min` là ngày mai.
+  - Ngày học bù không được rơi vào các thứ trong lịch học cố định của lớp; lỗi: `"Ngày học bù không được trùng với lịch học cố định của lớp."`
+  - Không cho trùng ngày với buổi học bù đã có.
+- Khi lưu hợp lệ:
+  - Thêm một `WeeklySession` local với `isMakeup: true`, `makeupForSessionId` trỏ về buổi gốc.
+  - Buổi gốc tự động chuyển sang trạng thái nghỉ (cancelled) và bị khóa.
+  - Buổi học bù mới được mở khóa sẵn để điểm danh.
 - Nếu ngày học bù nằm trong tuần đang xem thì session hiện thành cột mới.
 - Header có badge `"Học bù cả lớp"` nếu `session.isMakeup`.
+- Header buổi học bù có nút `"Hủy buổi bù"` với dialog xác nhận; khi xác nhận: xóa buổi bù, khôi phục buổi gốc về buổi học bình thường, xóa dữ liệu điểm danh của buổi bù.
 - Đây là class-level makeup, tức khái niệm session-level, khác với trạng thái student-level `makeup`.
 
 Quick action:
 
 - Nút `"Đánh dấu cả lớp đi học"` nằm cạnh `"Thêm buổi học bù"`.
-- Chỉ enabled nếu tuần đang xem có session trùng hôm nay.
-- Khi bấm, gọi `markSessionForStudents(todaySession.id, studentIds, "present")` để set tất cả học sinh thành `"present"` cho session hôm nay.
-- Nút này cũng xóa trạng thái cancelled của session đó nếu có.
+- Chỉ enabled nếu tuần đang xem có session trùng hôm nay và session đó không bị nghỉ.
+- Khi bấm, gọi `markSessionForStudents` để set học sinh chính thức thành `"present"` cho session hôm nay, kèm cả các dòng học sinh học bù đang nhận ở buổi hôm nay.
+- Áp dụng cả khi buổi hôm nay là buổi học bù cả lớp.
+- Không áp dụng cho session đã nghỉ.
 
 Export:
 
@@ -646,10 +675,12 @@ State/data source:
 ### Class data
 
 - Type: `ExtraClass` và `ClassOverview` trong `src/types/class.ts`.
-- Fields: `id`, `academicYearId`, `name`, `schedule`, `scheduleItems`, `monthlyFee`, `room`, `note?`, `studentCount`, `unpaidCount`.
+- Fields: `id`, `academicYearId`, `name`, `grade`, `schedule`, `scheduleItems`, `monthlyFee`, `room`, `note?`, `studentCount`, `unpaidCount`.
+- `grade` lưu trong bảng `classes` (INTEGER, migration `004_class_grade`); MVP chỉ dùng Khối 8 và Khối 9.
 - Type phụ:
   - `WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6`
   - `ClassScheduleItem = { weekday, startTime, endTime }`
+  - `ClassGrade = 8 | 9`
 - SQLite Phase 3 có bảng `classes` và `class_schedules`, đều dùng id số tự tăng; `classes.academic_year_id` và `class_schedules.class_id` là foreign key số.
 - Seed DB hiện tạo các lớp mẫu tương ứng Văn 9/Văn 8/Văn 7/khóa trước nếu bảng năm học/lớp đang rỗng; các khóa mock cũ chỉ còn dùng nội bộ khi seed/map dữ liệu mẫu, không lưu làm database id.
 - `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` hiện tạm trả `0` vì payments chưa nối DB.
@@ -765,7 +796,8 @@ State/data source:
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
 | Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; payments chưa ảnh hưởng summary |
-| Create class | CreateClassDialog | Gọi `create_class`, insert class + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | `grade` hiện UI-only |
+| Create class | CreateClassDialog | Gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9, không còn field ghi chú |
+| Select grade tab | HomePage | Lọc class cards và summary theo Khối 8/Khối 9 | UI only | none | Grade đọc từ `classes.grade` |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
 | Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
@@ -777,14 +809,15 @@ State/data source:
 | Edit student | StudentListTab | Sửa fields và status trong edit mode, bấm lưu gọi DB | `students`, `class_memberships.status` | SQLite | Update student/class membership/status |
 | Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar | `weekStart` | local only | Có thể query session theo week |
-| Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Thêm session `"Học bù cả lớp"` local | `makeupSessions` | local only | Insert `attendance_sessions` type makeup, link optional to original session |
-| Mark today present | AttendanceTab | Nếu có session hôm nay, set tất cả status present | `attendance` | local only | Batch update attendance_records |
+| Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Validate ngày/buổi gốc, thêm session `"Học bù cả lớp"`, buổi gốc chuyển nghỉ | `makeupSessions`, `cancelledSessionIds`, `unlockedSessionIds` | local only | Insert `attendance_sessions` type makeup, link tới buổi gốc |
+| Remove class-level makeup session | AttendanceTab | Nút `"Hủy buổi bù"` với xác nhận; xóa buổi bù, khôi phục buổi gốc | `makeupSessions`, `cancelledSessionIds`, `unlockedSessionIds`, `attendance` | local only | Delete/cancel makeup session, restore original |
+| Mark today present | AttendanceTab | Nếu có session hôm nay chưa nghỉ, set học sinh chính thức thành present | `attendance` | local only | Batch update attendance_records |
 | Cancel/restored session | AttendanceTab | Dialog xác nhận nghỉ/hủy nghỉ, lock/unlock tương ứng | `cancelledSessionIds`, `unlockedSessionIds` | local only | Session status cancelled/restored |
 | Lock/unlock session | AttendanceTab | Toggle khả năng sửa cell | `unlockedSessionIds` | local only | Cần field locked hoặc rule theo date |
-| Tick official attendance cell | AttendanceTab | Cycle empty/present/absent; khi tới makeup thì mở dialog chọn lớp học bù | `attendance`, `pendingStudentMakeup` | local only | Upsert attendance_record, có thể cần transaction khi chọn makeup |
+| Set official attendance status | AttendanceTab | Nút Học/Nghỉ/Học bù theo ngữ cảnh; Học bù mở dialog chọn lớp; bấm lại nút đang chọn để bỏ trạng thái | `attendance`, `pendingStudentMakeup` | local only | Upsert attendance_record, có thể cần transaction khi chọn makeup |
 | Confirm student-level makeup | AttendanceTab dialog | Tạo liên kết học bù và set buổi gốc thành makeup | `attendance`, `studentMakeupRecords` | local only | Có thể cần bảng `student_makeup_records` hoặc link trong attendance record |
 | Remove student-level makeup by cycling off | AttendanceTab | Khi cell đang makeup chuyển sang status khác, xóa liên kết học bù cũ | `attendance`, `studentMakeupRecords` | local only | Cần delete/update record liên kết và xử lý attendance ở lớp nhận |
-| Tick receiving makeup student cell | AttendanceTab receiving class | Dòng học sinh học bù cycle empty/present/absent | `attendance` | local only | Lưu attendance cho học sinh khách nhưng không thêm vào roster chính thức |
+| Set receiving makeup student status | AttendanceTab receiving class | Dòng học sinh học bù chỉ có nút Học/Nghỉ | `attendance` | local only | Lưu attendance cho học sinh khách nhưng không thêm vào roster chính thức |
 | Export attendance Excel | AttendanceTab | Chưa có behavior | none | none | Export sheet theo week/class |
 | Change score month | ScoresTab | Chuyển sheet tháng, thoát edit | `selectedMonth`, draft | local only | Query score columns/values by month |
 | Add score column/test | ScoresTab | Thêm cột mới, vào edit mode | `draftSheets` | local only | Insert score column |
@@ -869,7 +902,7 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 - Sửa lịch học có ảnh hưởng đến các buổi điểm danh đã qua không?
 - Có cần sinh sẵn `attendance_sessions` theo lịch hay chỉ sinh khi mở tuần/điểm danh?
 - Buổi nghỉ nên lưu như một trạng thái của session hay tạo attendance record `"Nghỉ"` cho từng học sinh?
-- Khi hủy trạng thái nghỉ, có giữ lại data điểm danh cũ không? Code hiện tại đang giữ.
+- Đã chốt: hủy buổi (cancel) ghi Nghỉ cho toàn bộ học sinh của buổi đó; khi mở khóa/khôi phục, trạng thái Nghỉ từng học sinh giữ nguyên.
 - Class-level makeup có cần bắt buộc link tới một buổi nghỉ gốc không, hay có thể là một buổi học bù độc lập?
 - Student-level makeup nên lưu bằng bảng riêng `student_makeup_records`, hay lưu bằng attendance record có field `receivingSessionId`?
 - Ở buổi/lớp nhận học bù, trạng thái có học/nghỉ của học sinh khách nên lưu chung trong `attendance_records` hay bảng riêng?

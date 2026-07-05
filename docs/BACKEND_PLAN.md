@@ -35,12 +35,14 @@ Nguyên tắc dữ liệu đã chốt:
 - Không hard-delete học sinh trong sử dụng bình thường.
 - Một học sinh có thể thuộc nhiều lớp.
 - Trạng thái học sinh được lưu theo quan hệ học sinh-lớp, không lưu global trên `students`.
-- Attendance statuses:
+- Attendance statuses là enum một giá trị duy nhất cho mỗi ô học sinh/buổi:
   - empty / Chưa điểm danh
-  - present / Có học
+  - present / Học
   - absent / Nghỉ
   - makeup / Học bù
+- Không lưu nhiều boolean trạng thái; hiển thị suy ra từ một trường status.
 - Không có `late` / Đi muộn và không có `excused` / Có phép trong MVP.
+- Attendance persistence vẫn thuộc Phase 7, chưa triển khai trong Phase 4.5.
 - Class-level makeup là session type.
 - Student-level makeup dùng `student_makeup_records`.
 - Payment statuses:
@@ -253,6 +255,7 @@ CREATE TABLE classes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   academic_year_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  grade INTEGER,
   monthly_fee INTEGER NOT NULL DEFAULT 0,
   room TEXT,
   note TEXT,
@@ -262,6 +265,12 @@ CREATE TABLE classes (
   FOREIGN KEY (academic_year_id) REFERENCES academic_years(id)
 );
 ```
+
+Notes:
+
+- `grade` được thêm bằng migration `004_class_grade` (ALTER TABLE + backfill từ tên lớp, mặc định 9 nếu không đoán được).
+- MVP chỉ dùng grade 8 và 9; service layer validate khi tạo lớp.
+- Home lọc lớp theo grade bằng tab Khối 8/Khối 9.
 
 ### class_schedules
 
@@ -631,7 +640,7 @@ Seed strategy:
 - Chỉ seed khi database mới hoàn toàn.
 - Seed tối thiểu:
   - Academic years: 2025-2026 current, 2024-2025, 2026-2027.
-  - Classes: Văn 9, Văn 8, Văn 7 theo mock.
+  - Classes: chỉ seed lớp Khối 8 và Khối 9 (Văn 9 ôn thi, Văn 8 nâng cao, Văn 8 cơ bản, Văn 9 khóa trước); không seed lớp Khối 7 nữa.
   - Class schedules theo lịch hiện tại.
   - Students và memberships.
   - Payments mẫu theo tháng 05/2026-08/2026.
@@ -729,7 +738,9 @@ Ví dụ service rules:
 - `AttendanceService.cancelSession`:
   - Update session status `cancelled`.
   - Lock session.
-  - Không xóa attendance records cũ.
+  - Ghi `absent` cho toàn bộ học sinh chính thức và học sinh học bù đang nhận ở session đó (như tick Nghỉ từng người).
+  - Gỡ `student_makeup_records` của học sinh đang `makeup` ở session bị hủy.
+  - Khi restore, giữ nguyên trạng thái Nghỉ đã ghi; giáo viên chỉnh lại từng học sinh nếu cần.
 
 ## 9. Implementation phases
 
@@ -953,8 +964,8 @@ Attendance:
 - Regular sessions sinh theo `class_schedules`.
 - Session quá khứ khóa theo rule đã chốt.
 - Mở khóa cho phép sửa.
-- Cancel session không xóa attendance records cũ.
-- Restore session giữ lại dữ liệu cũ.
+- Cancel session ghi Nghỉ cho toàn bộ học sinh của session đó.
+- Mở khóa hoặc restore session vẫn giữ trạng thái Nghỉ đã ghi cho từng học sinh.
 - Class-level makeup tạo session `class_makeup`.
 - Official attendance statuses chỉ là empty/present/absent/makeup.
 - Không có late/excused trong DB/UI.

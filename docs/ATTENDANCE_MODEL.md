@@ -21,9 +21,15 @@ Trạng thái điểm danh của một học sinh trong một buổi học:
 | Code | Nhãn UI | Ý nghĩa |
 |---|---|---|
 | empty | Chưa điểm danh | Chưa nhập trạng thái cho học sinh ở buổi đó |
-| present | Có học | Học sinh có tham gia buổi học |
+| present | Học | Học sinh có tham gia buổi học |
 | absent | Nghỉ | Học sinh không tham gia buổi học |
 | makeup | Học bù | Học sinh của lớp gốc học bù ở một lớp/buổi khác |
+
+Quy tắc một trạng thái duy nhất:
+
+- Mỗi ô học sinh/buổi học chỉ lưu đúng một trạng thái tại một thời điểm: `present`, `absent`, `makeup` hoặc empty.
+- Không lưu nhiều boolean kiểu `isPresent`/`isAbsent`/`isMakeup`.
+- Hiển thị luôn suy ra từ trường trạng thái duy nhất này.
 
 MVP không có các trạng thái sau:
 
@@ -60,6 +66,12 @@ Các session status đề xuất:
 | active | Đang học | Buổi học diễn ra bình thường |
 | cancelled | Nghỉ | Cả lớp nghỉ buổi này |
 
+Quy tắc khi hủy buổi (cancel):
+
+- Hủy buổi ghi trạng thái `absent`/Nghỉ cho toàn bộ học sinh chính thức và các dòng học bù đang nhận ở buổi đó, giống việc tick Nghỉ từng học sinh.
+- Học sinh đang `makeup` ở buổi bị hủy được gỡ liên kết học bù trước khi ghi đè thành Nghỉ.
+- Vì trạng thái Nghỉ đã ghi vào từng học sinh, mở khóa hoặc khôi phục buổi vẫn giữ Nghỉ; giáo viên chỉnh lại từng em nếu cần.
+
 MVP có thể lưu thêm trạng thái khóa chỉnh sửa:
 
 - `is_locked = true`: không cho sửa điểm danh nếu chưa mở khóa.
@@ -74,25 +86,36 @@ Gợi ý rule:
 
 Class-level makeup là học bù cho cả lớp.
 
-Luồng đề xuất:
+Luồng đã chốt:
 
-1. Giáo viên đánh dấu một buổi học thường là nghỉ.
-2. Session gốc được cập nhật `status = cancelled`.
-3. Giáo viên tạo một buổi học bù cho cả lớp.
-4. Buổi học bù được lưu thành một session riêng với `type = class_makeup`.
-5. Nếu buổi học bù dùng để bù cho một buổi nghỉ cụ thể, session học bù có thể lưu `makeup_for_session_id`.
-6. Trong buổi học bù cả lớp, học sinh vẫn được điểm danh bằng các trạng thái bình thường:
+1. Giáo viên tạo một buổi học bù cho cả lớp và bắt buộc chọn buổi gốc cần bù.
+2. Session gốc tự động chuyển `status = cancelled` khi buổi học bù được tạo.
+3. Buổi học bù được lưu thành một session riêng với `type = class_makeup` và lưu `makeup_for_session_id` trỏ về buổi gốc.
+4. Ngày học bù phải sau ngày hôm nay. Lỗi hiển thị: `"Ngày học bù phải sau ngày hôm nay."`
+5. Ngày học bù không được trùng với các thứ trong lịch học cố định của lớp. Lỗi hiển thị: `"Ngày học bù không được trùng với lịch học cố định của lớp."`
+6. Trong buổi học bù cả lớp, học sinh chính thức chỉ được điểm danh:
    - Chưa điểm danh
-   - Có học
+   - Học
    - Nghỉ
-   - Học bù
+7. Buổi học bù cả lớp KHÔNG có lựa chọn `"Học bù"` cho từng học sinh, để tránh học bù đệ quy/khó hiểu.
+
+Hủy buổi học bù cả lớp:
+
+1. Header buổi học bù có hành động `"Hủy buổi bù"` với dialog xác nhận:
+   - `"Hủy buổi học bù này?"`
+   - `"Buổi gốc sẽ được mở lại như buổi học bình thường."`
+2. Khi xác nhận hủy:
+   - Buổi học bù bị xóa khỏi danh sách session.
+   - Buổi gốc được khôi phục, không còn trạng thái nghỉ.
+   - Dữ liệu điểm danh đã nhập cho buổi học bù được xóa.
+   - Các buổi khác không bị ảnh hưởng.
 
 Ví dụ:
 
 - Lớp Văn 9 nghỉ buổi Thứ 3.
-- Giáo viên tạo buổi học bù vào Chủ nhật.
+- Giáo viên tạo buổi học bù vào Chủ nhật, chọn buổi gốc Thứ 3; buổi Thứ 3 tự chuyển sang nghỉ.
 - Chủ nhật là một `attendance_session` riêng, `type = class_makeup`.
-- Học sinh trong lớp Văn 9 được điểm danh ở buổi Chủ nhật như một buổi học bình thường.
+- Học sinh trong lớp Văn 9 được điểm danh ở buổi Chủ nhật với hai lựa chọn Học/Nghỉ.
 
 ## 6. Student-level makeup flow
 
@@ -106,7 +129,11 @@ Trường hợp:
 
 Quy tắc quan trọng:
 
+- Lớp nhận học bù phải CÙNG KHỐI với lớp gốc (ví dụ học sinh Khối 9 chỉ học bù ở lớp Khối 9 khác).
+- Lớp nhận phải cùng năm học với lớp gốc.
 - Receiving session phải có cùng `session_index_in_week`.
+- Receiving session KHÔNG bị giới hạn quá khứ/tương lai: thầy có thể ghi học bù cho buổi đã qua nếu quên cập nhật, miễn cùng tuần và cùng thứ tự buổi (ví dụ lớp Thứ 4/Chủ nhật bù Chủ nhật bằng buổi Thứ 5 của lớp Thứ 2/Thứ 5).
+- Lưu ý: giới hạn "phải trong tương lai" chỉ áp dụng khi TẠO buổi học bù cả lớp (class-level), không áp dụng cho học bù theo học sinh.
 - Học sinh học bù không trở thành học sinh chính thức của lớp nhận.
 - Lớp gốc hiển thị trạng thái của học sinh là `makeup` / Học bù.
 - Lớp nhận hiển thị học sinh đó ở một khu vực riêng, ví dụ `"Học sinh học bù"`.
@@ -129,43 +156,58 @@ Khi xác nhận học bù:
    - Session nhận
    - Thứ tự buổi trong tuần
 3. Ở lớp nhận, học sinh xuất hiện như một extra makeup row.
-4. Extra makeup row có thể được điểm danh:
+4. Extra makeup row chỉ được điểm danh:
    - Chưa điểm danh
-   - Có học
+   - Học
    - Nghỉ
+5. Extra makeup row KHÔNG có lựa chọn `"Học bù"` — không cho học bù tiếp từ một buổi học bù.
 
 Nếu giáo viên hủy trạng thái học bù ở buổi gốc, backend nên xử lý đồng bộ record liên quan ở lớp nhận.
 
+Trường hợp đặc biệt đã chốt:
+
+- Nếu lớp có buổi học bù cả lớp nhưng một học sinh không tham gia được buổi bù đó mà qua học ở lớp khác:
+  - Trong buổi học bù cả lớp, học sinh đó được đánh dấu `"Nghỉ"`.
+  - Giáo viên quay lại buổi gốc bị nghỉ và đánh dấu học sinh đó là `"Học bù"` sang lớp/buổi khác.
+  - `student_makeup_record` phải liên kết với buổi gốc, KHÔNG liên kết với buổi học bù cả lớp.
+
 ## 7. UI behavior
 
-UI điểm danh nên hoạt động như sau:
+UI điểm danh hoạt động như sau:
 
 - Mỗi tuần hiển thị các cột buổi học tương ứng với lịch của lớp.
 - Header cột hiển thị thứ, ngày, badge hôm nay nếu có.
 - Buổi học bù cả lớp hiển thị badge `"Học bù cả lớp"`.
 - Buổi cả lớp nghỉ hiển thị trạng thái nghỉ ở cấp session.
-- Ô điểm danh của học sinh chính thức cycle theo thứ tự:
-  - Chưa điểm danh -> Có học -> Nghỉ -> Học bù -> Chưa điểm danh
-- Khi chuyển sang `"Học bù"`, UI nên mở dialog chọn lớp/buổi học bù.
+- Ô điểm danh dùng các nút trạng thái rõ ràng, KHÔNG dùng click cycle:
+  - Buổi bị khóa: chỉ hiển thị badge trạng thái, không hiển thị nút.
+  - Buổi mở khóa và không nghỉ: hiển thị các nút nhỏ theo ngữ cảnh.
+  - Chỉ một trạng thái được chọn tại một thời điểm; nút đang chọn được highlight.
+  - Bấm lại nút đang chọn để bỏ trạng thái, quay về Chưa điểm danh.
+- Quy tắc nút theo loại buổi/dòng:
+  - Buổi thường + học sinh chính thức: Học / Nghỉ / Học bù.
+  - Buổi nghỉ (cancelled): không có nút, mọi ô hiển thị `"Nghỉ"` thống nhất một màu đỏ, giống hệt khi tick Nghỉ từng học sinh.
+  - Buổi học bù cả lớp + học sinh chính thức: Học / Nghỉ.
+  - Dòng học sinh học bù ở lớp nhận: Học / Nghỉ.
+- Trạng thái `"Nghỉ"` dùng chung một màu đỏ ở mọi cấp (session nghỉ và học sinh nghỉ); phân biệt nội bộ bằng session.status vs attendance.status, không phân biệt bằng màu.
+- Bấm `"Học"` hoặc `"Nghỉ"`: set trạng thái ngay và xóa record học bù cũ của ô đó nếu có.
+- Bấm `"Học bù"`: mở dialog chọn lớp/buổi học bù; chưa set trạng thái.
 - Nếu hủy dialog, giữ nguyên trạng thái cũ.
-- Nếu xác nhận dialog, buổi gốc hiển thị `"Học bù"` và có thể hiển thị chi tiết:
+- Nếu xác nhận dialog, buổi gốc hiển thị `"Học bù"` và chi tiết:
   - Học bù tại lớp nào
   - Ngày nào
 - Ở lớp nhận, học sinh học bù hiển thị trong section riêng:
   - `"Học sinh học bù"`
 - Row học bù ở lớp nhận không nằm trong danh sách học sinh chính thức.
-- Row học bù ở lớp nhận chỉ cần điểm danh:
-  - Chưa điểm danh
-  - Có học
-  - Nghỉ
 
 Các nút UI trong MVP:
 
 - Tuần trước
 - Chọn tuần bằng lịch mini
 - Tuần sau
-- Thêm buổi học bù
-- Đánh dấu cả lớp đi học
+- Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, validate ngày không trùng lịch cố định, buổi gốc tự chuyển nghỉ
+- Hủy buổi bù: trên header buổi học bù cả lớp, có xác nhận, khôi phục buổi gốc
+- Đánh dấu cả lớp đi học: chỉ áp dụng cho buổi hôm nay chưa nghỉ; áp dụng cả buổi học bù cả lớp; đánh dấu luôn cả dòng học sinh học bù đang nhận ở buổi hôm nay
 - Xuất Excel, UI only trong MVP
 - Khóa/mở khóa buổi học
 - Đánh dấu buổi học nghỉ/hủy nghỉ với xác nhận
