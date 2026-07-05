@@ -36,7 +36,7 @@ import {
   formatDateRange,
   formatDayMonth,
   getEligibleStudentMakeupSessions,
-  getNextAttendanceStatus,
+  getMakeupSessionInputError,
   getSessionOrderInWeek,
   getWeekEnd,
   getWeekStart,
@@ -44,6 +44,7 @@ import {
   isSameDay,
   startOfDay,
   weekdayLabel,
+  type MakeupSessionInput,
   type StudentMakeupRecord,
   type StudentMakeupSessionOption,
   type WeeklySession,
@@ -73,6 +74,12 @@ const attendanceBadgeClasses: Record<AttendanceStatus, string> = {
   makeup: "bg-violet-100 text-violet-900 hover:bg-violet-100",
 };
 
+const statusButtonActiveClasses: Record<AttendanceStatus, string> = {
+  present: "border-emerald-400 bg-emerald-100 font-semibold text-emerald-900",
+  absent: "border-red-400 bg-red-100 font-semibold text-red-900",
+  makeup: "border-violet-400 bg-violet-100 font-semibold text-violet-900",
+};
+
 const miniCalendarWeekdays = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 
 function AttendanceStatusBadge({ status }: { status: AttendanceCellStatus }) {
@@ -83,12 +90,54 @@ function AttendanceStatusBadge({ status }: { status: AttendanceCellStatus }) {
   return <Badge className={attendanceBadgeClasses[status]}>{attendanceStatusLabel(status)}</Badge>;
 }
 
+function AttendanceStatusButtons({
+  status,
+  allowMakeup,
+  onSelect,
+}: {
+  status: AttendanceCellStatus;
+  allowMakeup: boolean;
+  onSelect: (next: AttendanceCellStatus) => void;
+}) {
+  const options: Array<{ value: AttendanceStatus; label: string }> = [
+    { value: "present", label: "Học" },
+    { value: "absent", label: "Nghỉ" },
+    ...(allowMakeup ? [{ value: "makeup" as const, label: "Học bù" }] : []),
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-1">
+      {options.map((option) => {
+        const isActive = status === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={[
+              "rounded-full border px-2 py-0.5 text-xs transition outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              isActive
+                ? statusButtonActiveClasses[option.value]
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900",
+            ].join(" ")}
+            onClick={() => onSelect(isActive ? undefined : option.value)}
+            title={isActive ? "Bấm để bỏ trạng thái này" : `Đánh dấu ${option.label}`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SessionHeader({
   session,
   today,
   isCancelled,
   isUnlocked,
   onRequestCancelToggle,
+  onRequestRemoveMakeup,
   onToggleLock,
 }: {
   session: WeeklySession;
@@ -96,6 +145,7 @@ function SessionHeader({
   isCancelled: boolean;
   isUnlocked: boolean;
   onRequestCancelToggle: () => void;
+  onRequestRemoveMakeup: () => void;
   onToggleLock: () => void;
 }) {
   const past = isPastDate(session.date, today);
@@ -104,24 +154,26 @@ function SessionHeader({
     <div className={["min-w-36 space-y-2", past ? "opacity-70" : ""].join(" ")}>
       <div className="flex flex-wrap items-center justify-center gap-1">
         <span className="font-semibold text-slate-950">{weekdayLabel(session.date)}</span>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant={isCancelled ? "default" : "ghost"}
-          className={[
-            "h-6 w-6",
-            isCancelled
-              ? "bg-slate-900 text-white hover:bg-slate-800"
-              : "text-slate-500 hover:bg-slate-100 hover:text-slate-950",
-          ].join(" ")}
-          onClick={onRequestCancelToggle}
-          title={isCancelled ? "Hủy trạng thái nghỉ" : "Đánh dấu buổi này nghỉ"}
-        >
-          <CalendarX className="size-3.5" />
-          <span className="sr-only">
-            {isCancelled ? "Hủy trạng thái nghỉ" : "Đánh dấu buổi này nghỉ"}
-          </span>
-        </Button>
+        {!session.isMakeup ? (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant={isCancelled ? "default" : "ghost"}
+            className={[
+              "h-6 w-6",
+              isCancelled
+                ? "bg-slate-900 text-white hover:bg-slate-800"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-950",
+            ].join(" ")}
+            onClick={onRequestCancelToggle}
+            title={isCancelled ? "Hủy trạng thái nghỉ" : "Đánh dấu buổi này nghỉ"}
+          >
+            <CalendarX className="size-3.5" />
+            <span className="sr-only">
+              {isCancelled ? "Hủy trạng thái nghỉ" : "Đánh dấu buổi này nghỉ"}
+            </span>
+          </Button>
+        ) : null}
         {isSameDay(session.date, today) ? (
           <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">Hôm nay</Badge>
         ) : null}
@@ -129,13 +181,13 @@ function SessionHeader({
           <Badge className="bg-violet-100 text-violet-900 hover:bg-violet-100">Học bù cả lớp</Badge>
         ) : null}
         {isCancelled ? (
-          <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">Nghỉ</Badge>
+          <Badge className="bg-red-100 text-red-900 hover:bg-red-100">Nghỉ</Badge>
         ) : null}
       </div>
       <div className="text-center text-sm text-muted-foreground">
         {formatDayMonth(session.date)}
       </div>
-      <div className="flex justify-center gap-1">
+      <div className="flex flex-wrap justify-center gap-1">
         <Button
           type="button"
           size="xs"
@@ -146,6 +198,18 @@ function SessionHeader({
           {isUnlocked ? <Lock className="size-3" /> : <Unlock className="size-3" />}
           {isUnlocked ? "Khóa" : "Mở khóa"}
         </Button>
+        {session.isMakeup ? (
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="h-6 gap-1 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+            onClick={onRequestRemoveMakeup}
+          >
+            <CalendarX className="size-3" />
+            Hủy buổi bù
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -274,6 +338,8 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [visibleCalendarMonth, setVisibleCalendarMonth] = useState(() => weekStart);
   const [pendingCancelSession, setPendingCancelSession] = useState<WeeklySession | null>(null);
+  const [pendingRemoveMakeupSession, setPendingRemoveMakeupSession] =
+    useState<WeeklySession | null>(null);
   const [pendingStudentMakeup, setPendingStudentMakeup] = useState<PendingStudentMakeup | null>(
     null,
   );
@@ -282,23 +348,28 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   const currentClassName = classes.find((classItem) => classItem.id === classId)?.name ?? "";
   const {
     sessions,
+    allMakeupSessions,
     cancelledSessionIds,
     unlockedSessionIds,
     studentMakeupRecords,
     getStatus,
     setAttendanceStatus,
     getMakeupStudentStatus,
-    cycleMakeupStudentStatus,
+    setMakeupStudentStatus,
     markSessionForStudents,
     cancelSession,
     restoreCancelledSession,
     toggleSessionLock,
     addMakeupSession,
+    removeMakeupSession,
     addStudentMakeupRecord,
     removeStudentMakeupRecordForOriginal,
   } = useMockAttendance(weekStart, scheduleItems);
   const todaySession = sessions.find((session) => isSameDay(session.date, today));
-  const canMarkTodayPresent = Boolean(todaySession);
+  const isTodaySessionCancelled = todaySession
+    ? cancelledSessionIds.includes(todaySession.id)
+    : false;
+  const canMarkTodayPresent = Boolean(todaySession) && !isTodaySessionCancelled;
   const visibleStudentMakeupRecords = studentMakeupRecords.filter(
     (record) =>
       record.receivingClassId === classId &&
@@ -315,6 +386,35 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     setWeekPickerOpen(false);
   }
 
+  function getMakeupRecordIdsForSession(sessionId: string) {
+    return studentMakeupRecords
+      .filter(
+        (record) =>
+          record.receivingClassId === classId && record.receivingSessionId === sessionId,
+      )
+      .map((record) => record.id);
+  }
+
+  function markWholeSessionAbsent(sessionId: string) {
+    // Học sinh đang "Học bù" ở buổi này phải gỡ liên kết học bù trước khi ghi đè thành Nghỉ.
+    students.forEach((student) => {
+      if (getStatus(sessionId, student.id) === "makeup") {
+        removeStudentMakeupRecordForOriginal({
+          studentId: student.id,
+          originalClassId: classId,
+          originalSessionId: sessionId,
+        });
+      }
+    });
+
+    markSessionForStudents(
+      sessionId,
+      students.map((student) => student.id),
+      "absent",
+      getMakeupRecordIdsForSession(sessionId),
+    );
+  }
+
   function confirmCancelToggle() {
     if (!pendingCancelSession) {
       return;
@@ -324,14 +424,24 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     if (isCancelled) {
       restoreCancelledSession(pendingCancelSession.id);
     } else {
+      markWholeSessionAbsent(pendingCancelSession.id);
       cancelSession(pendingCancelSession.id);
     }
 
     setPendingCancelSession(null);
   }
 
+  function confirmRemoveMakeupSession() {
+    if (!pendingRemoveMakeupSession) {
+      return;
+    }
+
+    removeMakeupSession(pendingRemoveMakeupSession.id);
+    setPendingRemoveMakeupSession(null);
+  }
+
   function markTodayPresent() {
-    if (!todaySession) {
+    if (!todaySession || isTodaySessionCancelled) {
       return;
     }
 
@@ -339,6 +449,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
       todaySession.id,
       students.map((student) => student.id),
       "present",
+      getMakeupRecordIdsForSession(todaySession.id),
     );
   }
 
@@ -352,36 +463,55 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     setWeekPickerOpen(false);
   }
 
-  function handleAttendanceCellClick(
+  function tryAddMakeupSession(input: MakeupSessionInput): string | null {
+    const error = getMakeupSessionInputError({
+      date: input.date,
+      makeupForSessionId: input.makeupForSessionId,
+      scheduleItems,
+      existingMakeupSessions: allMakeupSessions,
+      today,
+    });
+
+    if (error) {
+      return error;
+    }
+
+    // Buổi gốc chuyển sang nghỉ: đánh dấu Nghỉ cho toàn bộ học sinh như tick từng người.
+    markWholeSessionAbsent(input.makeupForSessionId);
+    addMakeupSession(input);
+    return null;
+  }
+
+  function handleOfficialStatusSelect(
     student: Student,
     session: WeeklySession,
-    currentStatus: AttendanceCellStatus,
+    nextStatus: AttendanceCellStatus,
   ) {
-    const nextStatus = getNextAttendanceStatus(currentStatus);
+    if (nextStatus === "makeup") {
+      const options = getEligibleStudentMakeupSessions({
+        sourceClassId: classId,
+        sourceSession: session,
+        sourceSessions: sessions,
+        weekStart,
+        classes,
+      });
 
-    if (nextStatus !== "makeup") {
-      if (currentStatus === "makeup") {
-        removeStudentMakeupRecordForOriginal({
-          studentId: student.id,
-          originalClassId: classId,
-          originalSessionId: session.id,
-        });
-      }
-
-      setAttendanceStatus(session.id, student.id, nextStatus);
+      setPendingStudentMakeup({ student, session, options });
+      setSelectedStudentMakeupSessionId(options[0]?.sessionId ?? "");
       return;
     }
 
-    const options = getEligibleStudentMakeupSessions({
-      sourceClassId: classId,
-      sourceSession: session,
-      sourceSessions: sessions,
-      weekStart,
-      classes,
-    });
+    const currentStatus = getStatus(session.id, student.id);
 
-    setPendingStudentMakeup({ student, session, options });
-    setSelectedStudentMakeupSessionId(options[0]?.sessionId ?? "");
+    if (currentStatus === "makeup") {
+      removeStudentMakeupRecordForOriginal({
+        studentId: student.id,
+        originalClassId: classId,
+        originalSessionId: session.id,
+      });
+    }
+
+    setAttendanceStatus(session.id, student.id, nextStatus);
   }
 
   function confirmStudentMakeup() {
@@ -467,7 +597,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
 
       <section className="flex justify-end">
         <div className="flex flex-wrap justify-end gap-2">
-          <AddMakeupSessionDialog sessions={sessions} onAdd={addMakeupSession} />
+          <AddMakeupSessionDialog sessions={sessions} onAdd={tryAddMakeupSession} />
           <Button
             type="button"
             variant="outline"
@@ -477,7 +607,9 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
             title={
               canMarkTodayPresent
                 ? "Đánh dấu tất cả học sinh có mặt trong buổi hôm nay"
-                : "Hôm nay không có buổi học trong tuần đang xem"
+                : isTodaySessionCancelled
+                  ? "Buổi học hôm nay đã nghỉ"
+                  : "Hôm nay không có buổi học trong tuần đang xem"
             }
           >
             <CheckCheck className="size-4" />
@@ -491,7 +623,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
       </section>
 
       <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <span className="font-medium text-slate-900">Chú thích:</span> Chưa điểm danh, Có học, Nghỉ,
+        <span className="font-medium text-slate-900">Chú thích:</span> Chưa điểm danh, Học, Nghỉ,
         Học bù
       </div>
 
@@ -509,6 +641,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                     isCancelled={cancelledSessionIds.includes(session.id)}
                     isUnlocked={unlockedSessionIds.includes(session.id)}
                     onRequestCancelToggle={() => setPendingCancelSession(session)}
+                    onRequestRemoveMakeup={() => setPendingRemoveMakeupSession(session)}
                     onToggleLock={() => toggleSessionLock(session.id)}
                   />
                 </TableHead>
@@ -535,33 +668,36 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                   return (
                     <TableCell key={session.id} className="text-center">
                       {isCancelled ? (
-                        <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">
+                        <Badge className="bg-red-100 text-red-900 hover:bg-red-100">
                           Nghỉ
                         </Badge>
+                      ) : isUnlocked ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <AttendanceStatusButtons
+                            status={status}
+                            allowMakeup={!session.isMakeup}
+                            onSelect={(nextStatus) =>
+                              handleOfficialStatusSelect(student, session, nextStatus)
+                            }
+                          />
+                          {makeupDetail ? (
+                            <span className="max-w-40 text-xs font-normal text-slate-500">
+                              {makeupDetail}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : (
-                        <button
-                          type="button"
-                          disabled={!isUnlocked}
-                          className={[
-                            "rounded-md outline-none transition focus-visible:ring-3 focus-visible:ring-ring/50",
-                            isUnlocked ? "hover:scale-[1.02]" : "cursor-not-allowed opacity-75",
-                          ].join(" ")}
-                          onClick={() => handleAttendanceCellClick(student, session, status)}
-                          title={
-                            isUnlocked
-                              ? makeupDetail || "Bấm để đổi trạng thái điểm danh"
-                              : "Bấm Mở khóa để chỉnh sửa buổi này"
-                          }
+                        <span
+                          className="flex flex-col items-center gap-1"
+                          title="Bấm Mở khóa để chỉnh sửa buổi này"
                         >
-                          <span className="flex flex-col items-center gap-1">
-                            <AttendanceStatusBadge status={status} />
-                            {makeupDetail ? (
-                              <span className="max-w-40 text-xs font-normal text-slate-500">
-                                {makeupDetail}
-                              </span>
-                            ) : null}
-                          </span>
-                        </button>
+                          <AttendanceStatusBadge status={status} />
+                          {makeupDetail ? (
+                            <span className="max-w-40 text-xs font-normal text-slate-500">
+                              {makeupDetail}
+                            </span>
+                          ) : null}
+                        </span>
                       )}
                     </TableCell>
                   );
@@ -600,28 +736,21 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                           <TableCell key={session.id} className="text-center">
                             {isTargetSession ? (
                               isCancelled ? (
-                                <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">
+                                <Badge className="bg-red-100 text-red-900 hover:bg-red-100">
                                   Nghỉ
                                 </Badge>
-                              ) : (
-                                <button
-                                  type="button"
-                                  disabled={!isUnlocked}
-                                  className={[
-                                    "rounded-md outline-none transition focus-visible:ring-3 focus-visible:ring-ring/50",
-                                    isUnlocked
-                                      ? "hover:scale-[1.02]"
-                                      : "cursor-not-allowed opacity-75",
-                                  ].join(" ")}
-                                  onClick={() => cycleMakeupStudentStatus(session.id, record.id)}
-                                  title={
-                                    isUnlocked
-                                      ? "Bấm để đổi trạng thái học bù"
-                                      : "Bấm Mở khóa để chỉnh sửa buổi này"
+                              ) : isUnlocked ? (
+                                <AttendanceStatusButtons
+                                  status={status}
+                                  allowMakeup={false}
+                                  onSelect={(nextStatus) =>
+                                    setMakeupStudentStatus(session.id, record.id, nextStatus)
                                   }
-                                >
+                                />
+                              ) : (
+                                <span title="Bấm Mở khóa để chỉnh sửa buổi này">
                                   <AttendanceStatusBadge status={status} />
-                                </button>
+                                </span>
                               )
                             ) : (
                               <span className="text-slate-300">-</span>
@@ -658,11 +787,11 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
             {pendingCancelSession && cancelledSessionIds.includes(pendingCancelSession.id)
               ? `Hủy nghỉ buổi ${weekdayLabel(pendingCancelSession.date)} ${formatDayMonth(
                   pendingCancelSession.date,
-                )}? Buổi học sẽ trở lại bình thường và được mở khóa để chỉnh sửa.`
+                )}? Buổi học sẽ trở lại bình thường và được mở khóa; trạng thái Nghỉ của học sinh được giữ nguyên để thầy chỉnh lại từng em.`
               : pendingCancelSession
                 ? `Lớp học buổi ${weekdayLabel(pendingCancelSession.date)} ${formatDayMonth(
                     pendingCancelSession.date,
-                  )} nghỉ? Dữ liệu điểm danh đã nhập sẽ được giữ lại và buổi học sẽ bị khóa.`
+                  )} nghỉ? Tất cả học sinh trong buổi này sẽ được đánh dấu Nghỉ và buổi học sẽ bị khóa.`
                 : ""}
           </p>
           <DialogFooter>
@@ -673,6 +802,38 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
             </DialogClose>
             <Button type="button" onClick={confirmCancelToggle}>
               Xác nhận
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(pendingRemoveMakeupSession)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingRemoveMakeupSession(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Hủy buổi học bù này?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {pendingRemoveMakeupSession
+              ? `Hủy buổi học bù ${weekdayLabel(pendingRemoveMakeupSession.date)} ${formatDayMonth(
+                  pendingRemoveMakeupSession.date,
+                )}? Buổi gốc sẽ được mở lại như buổi học bình thường.`
+              : ""}
+          </p>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Không
+              </Button>
+            </DialogClose>
+            <Button type="button" onClick={confirmRemoveMakeupSession}>
+              Xác nhận hủy
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -730,7 +891,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                 </Select>
               ) : (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Tuần này chưa có lớp khác cùng thứ tự buổi để chọn học bù.
+                  Tuần này chưa có lớp cùng khối, cùng thứ tự buổi để chọn học bù.
                 </p>
               )}
             </div>

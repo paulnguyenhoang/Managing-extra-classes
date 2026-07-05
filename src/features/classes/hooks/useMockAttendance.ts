@@ -4,8 +4,6 @@ import type { AttendanceStatus } from "@/types/attendance";
 import type { ClassScheduleItem } from "@/types/class";
 import {
   attendanceCellKey,
-  getNextAttendanceStatus,
-  getNextMakeupStudentAttendanceStatus,
   getRegularSessionsForWeek,
   isDateInWeek,
   parseLocalDate,
@@ -52,19 +50,6 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
     return attendance[attendanceCellKey(sessionId, studentId)];
   }
 
-  function cycleStatus(sessionId: string, studentId: string) {
-    if (cancelledSessionIds.includes(sessionId) || !unlockedSessionIds.includes(sessionId)) {
-      return;
-    }
-
-    updateAttendance((current) => ({
-      ...current,
-      [attendanceCellKey(sessionId, studentId)]: getNextAttendanceStatus(
-        current[attendanceCellKey(sessionId, studentId)],
-      ),
-    }));
-  }
-
   function setAttendanceStatus(
     sessionId: string,
     studentId: string,
@@ -84,17 +69,18 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
     return attendance[attendanceCellKey(sessionId, `makeup:${recordId}`)];
   }
 
-  function cycleMakeupStudentStatus(sessionId: string, recordId: string) {
+  function setMakeupStudentStatus(
+    sessionId: string,
+    recordId: string,
+    status: AttendanceStatus | undefined,
+  ) {
     if (cancelledSessionIds.includes(sessionId) || !unlockedSessionIds.includes(sessionId)) {
       return;
     }
 
     updateAttendance((current) => ({
       ...current,
-      [attendanceCellKey(sessionId, `makeup:${recordId}`)]:
-        getNextMakeupStudentAttendanceStatus(
-          current[attendanceCellKey(sessionId, `makeup:${recordId}`)],
-        ),
+      [attendanceCellKey(sessionId, `makeup:${recordId}`)]: status,
     }));
   }
 
@@ -102,12 +88,19 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
     sessionId: string,
     studentIds: string[],
     status: AttendanceStatus,
+    makeupRecordIds: string[] = [],
   ) {
-    updateCancelledSessionIds((current) => current.filter((id) => id !== sessionId));
+    if (mockCancelledSessionIds.includes(sessionId)) {
+      return;
+    }
+
     updateAttendance((current) => {
       const next = { ...current };
       studentIds.forEach((studentId) => {
         next[attendanceCellKey(sessionId, studentId)] = status;
+      });
+      makeupRecordIds.forEach((recordId) => {
+        next[attendanceCellKey(sessionId, `makeup:${recordId}`)] = status;
       });
       return next;
     });
@@ -138,11 +131,12 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
 
   function addMakeupSession(input: MakeupSessionInput) {
     const date = parseLocalDate(input.date);
+    const sessionId = `makeup-${Date.now()}`;
 
     updateMakeupSessions((current) => [
       ...current,
       {
-        id: `makeup-${Date.now()}`,
+        id: sessionId,
         date,
         startTime: input.time || "18:00",
         endTime: input.time || "20:00",
@@ -150,6 +144,50 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
         makeupForSessionId: input.makeupForSessionId,
       },
     ]);
+
+    // Buổi gốc chuyển sang nghỉ và bị khóa; buổi bù mới mở khóa sẵn để điểm danh.
+    updateCancelledSessionIds((current) =>
+      current.includes(input.makeupForSessionId)
+        ? current
+        : [...current, input.makeupForSessionId],
+    );
+    updateUnlockedSessionIds((current) => [
+      ...current.filter((id) => id !== input.makeupForSessionId),
+      sessionId,
+    ]);
+  }
+
+  function removeMakeupSession(sessionId: string) {
+    const session = mockMakeupSessions.find((item) => item.id === sessionId);
+
+    if (!session) {
+      return;
+    }
+
+    updateMakeupSessions((current) => current.filter((item) => item.id !== sessionId));
+    updateCancelledSessionIds((current) =>
+      current.filter((id) => id !== sessionId && id !== session.makeupForSessionId),
+    );
+    updateUnlockedSessionIds((current) => {
+      const next = current.filter((id) => id !== sessionId);
+
+      if (session.makeupForSessionId && !next.includes(session.makeupForSessionId)) {
+        next.push(session.makeupForSessionId);
+      }
+
+      return next;
+    });
+    updateAttendance((current) => {
+      const next: AttendanceState = {};
+
+      for (const [key, value] of Object.entries(current)) {
+        if (!key.startsWith(`${sessionId}:`)) {
+          next[key] = value;
+        }
+      }
+
+      return next;
+    });
   }
 
   function addStudentMakeupRecord(record: StudentMakeupRecord) {
@@ -233,19 +271,20 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
 
   return {
     sessions,
+    allMakeupSessions: makeupSessions,
     cancelledSessionIds,
     unlockedSessionIds,
     studentMakeupRecords,
     getStatus,
-    cycleStatus,
     setAttendanceStatus,
     getMakeupStudentStatus,
-    cycleMakeupStudentStatus,
+    setMakeupStudentStatus,
     markSessionForStudents,
     cancelSession,
     restoreCancelledSession,
     toggleSessionLock,
     addMakeupSession,
+    removeMakeupSession,
     addStudentMakeupRecord,
     removeStudentMakeupRecordForOriginal,
   };

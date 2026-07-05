@@ -6,15 +6,22 @@ import { ClassCard } from "@/features/home/components/ClassCard";
 import { CreateClassDialog } from "@/features/home/components/CreateClassDialog";
 import { YearSelector } from "@/features/home/components/YearSelector";
 import type { AcademicYear } from "@/types/academic-year";
-import type { ClassOverview, CreateClassInput } from "@/types/class";
+import {
+  classGradeOptions,
+  type ClassGrade,
+  type ClassOverview,
+  type CreateClassInput,
+} from "@/types/class";
 
 type HomePageProps = {
   academicYears: AcademicYear[];
   selectedYearId: number | null;
+  selectedGrade: ClassGrade | null;
   classOverviews: ClassOverview[];
   isLoading?: boolean;
   errorMessage?: string;
   onYearChange: (yearId: number) => void | Promise<void>;
+  onGradeChange: (grade: ClassGrade) => void;
   onOpenClass: (classId: number) => void;
   onCreateClass: (input: CreateClassInput) => void | Promise<void>;
 };
@@ -28,15 +35,26 @@ const summaryCards = [
 export function HomePage({
   academicYears,
   selectedYearId,
+  selectedGrade: pickedGrade,
   classOverviews,
   isLoading = false,
   errorMessage = "",
   onYearChange,
+  onGradeChange,
   onOpenClass,
   onCreateClass,
 }: HomePageProps) {
-  const visibleClassOverviews = classOverviews.filter(
+  const yearClassOverviews = classOverviews.filter(
     (classItem) => selectedYearId !== null && classItem.academicYearId === selectedYearId,
+  );
+  const defaultGrade: ClassGrade = yearClassOverviews.some((classItem) => classItem.grade === 9)
+    ? 9
+    : yearClassOverviews.some((classItem) => classItem.grade === 8)
+      ? 8
+      : 9;
+  const selectedGrade = pickedGrade ?? defaultGrade;
+  const visibleClassOverviews = yearClassOverviews.filter(
+    (classItem) => classItem.grade === selectedGrade,
   );
   const summary = {
     totalClasses: visibleClassOverviews.length,
@@ -63,6 +81,7 @@ export function HomePage({
           <YearSelector years={academicYears} value={selectedYearId} onChange={onYearChange} />
           <CreateClassDialog
             academicYearId={selectedYearId}
+            defaultGrade={selectedGrade}
             onCreate={onCreateClass}
             disabled={selectedYearId === null}
           />
@@ -74,6 +93,28 @@ export function HomePage({
           {isLoading ? "Đang tải dữ liệu lớp học..." : errorMessage}
         </div>
       )}
+
+      <section className="inline-flex rounded-lg border bg-white p-1 shadow-sm">
+        {classGradeOptions.map((gradeOption) => {
+          const isSelected = gradeOption === selectedGrade;
+
+          return (
+            <button
+              key={gradeOption}
+              type="button"
+              className={[
+                "rounded-md px-4 py-2 text-sm font-medium transition",
+                isSelected
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+              ].join(" ")}
+              onClick={() => onGradeChange(gradeOption)}
+            >
+              Khối {gradeOption}
+            </button>
+          );
+        })}
+      </section>
 
       <section className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         {summaryCards.map((item) => {
@@ -97,7 +138,9 @@ export function HomePage({
 
       <section>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h3 className="text-xl font-semibold text-slate-950">Danh sách lớp học</h3>
+          <h3 className="text-xl font-semibold text-slate-950">
+            Danh sách lớp học - Khối {selectedGrade}
+          </h3>
           <p className="hidden text-sm text-muted-foreground md:block">
             Bấm vào lớp để xem chi tiết.
           </p>
@@ -111,11 +154,12 @@ export function HomePage({
         ) : (
           <EmptyState
             icon={FolderOpen}
-            title="Chưa có lớp học trong năm này"
+            title={`Chưa có lớp Khối ${selectedGrade} trong năm này`}
             description="Thầy có thể tạo lớp mẫu để xem trước cách danh sách lớp sẽ hiển thị."
             action={
               <CreateClassDialog
                 academicYearId={selectedYearId}
+                defaultGrade={selectedGrade}
                 onCreate={onCreateClass}
                 disabled={selectedYearId === null}
               />

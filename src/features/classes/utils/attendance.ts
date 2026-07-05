@@ -1,4 +1,3 @@
-import type { AttendanceStatus } from "@/types/attendance";
 import type { ClassScheduleItem, ExtraClass } from "@/types/class";
 import { parseScheduleText } from "@/features/classes/utils/classSchedule";
 
@@ -41,19 +40,6 @@ export type StudentMakeupSessionOption = {
   startTime: string;
   endTime: string;
 };
-
-export const attendanceCycle: Array<AttendanceStatus | undefined> = [
-  undefined,
-  "present",
-  "absent",
-  "makeup",
-];
-
-export const makeupStudentAttendanceCycle: Array<AttendanceStatus | undefined> = [
-  undefined,
-  "present",
-  "absent",
-];
 
 export function startOfDay(date: Date) {
   const result = new Date(date);
@@ -153,18 +139,42 @@ export function getRegularSessionsForWeek(
     .sort((first, second) => first.date.getTime() - second.date.getTime());
 }
 
-export function getNextAttendanceStatus(status: AttendanceStatus | undefined) {
-  const currentIndex = attendanceCycle.indexOf(status);
-  const nextIndex = (currentIndex + 1) % attendanceCycle.length;
+export function getMakeupSessionInputError({
+  date,
+  makeupForSessionId,
+  scheduleItems,
+  existingMakeupSessions,
+  today,
+}: {
+  date: string;
+  makeupForSessionId: string;
+  scheduleItems: ClassScheduleItem[];
+  existingMakeupSessions: WeeklySession[];
+  today: Date;
+}): string | null {
+  if (!makeupForSessionId) {
+    return "Vui lòng chọn buổi cần học bù.";
+  }
 
-  return attendanceCycle[nextIndex];
-}
+  if (!date) {
+    return "Vui lòng chọn ngày học bù.";
+  }
 
-export function getNextMakeupStudentAttendanceStatus(status: AttendanceStatus | undefined) {
-  const currentIndex = makeupStudentAttendanceCycle.indexOf(status);
-  const nextIndex = (currentIndex + 1) % makeupStudentAttendanceCycle.length;
+  const parsedDate = parseLocalDate(date);
 
-  return makeupStudentAttendanceCycle[nextIndex];
+  if (parsedDate.getTime() <= startOfDay(today).getTime()) {
+    return "Ngày học bù phải sau ngày hôm nay.";
+  }
+
+  if (scheduleItems.some((item) => item.weekday === parsedDate.getDay())) {
+    return "Ngày học bù không được trùng với lịch học cố định của lớp.";
+  }
+
+  if (existingMakeupSessions.some((session) => isSameDay(session.date, parsedDate))) {
+    return "Đã có buổi học bù vào ngày này.";
+  }
+
+  return null;
 }
 
 export function attendanceCellKey(sessionId: string, studentId: string) {
@@ -196,11 +206,14 @@ export function getEligibleStudentMakeupSessions({
   const sourceOrder = getSessionOrderInWeek(sourceSession, sourceSessions);
   const sourceClass = classes.find((classItem) => classItem.id === sourceClassId);
 
+  // Học bù theo học sinh nhận buổi của lớp khác cùng khối, cùng năm học, cùng thứ tự buổi
+  // trong tuần. Không lọc theo quá khứ/tương lai để thầy có thể ghi bù cho buổi đã quên.
   return classes
     .filter(
       (classItem) =>
         classItem.id !== sourceClassId &&
-        classItem.academicYearId === sourceClass?.academicYearId,
+        classItem.academicYearId === sourceClass?.academicYearId &&
+        classItem.grade === sourceClass?.grade,
     )
     .flatMap((classItem) => {
       const classSessions = getRegularSessionsForWeek(

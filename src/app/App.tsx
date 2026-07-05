@@ -20,7 +20,7 @@ import {
   listClassOverviewsByYear,
 } from "@/services/classApi";
 import type { AcademicYear } from "@/types/academic-year";
-import type { ClassOverview, CreateClassInput } from "@/types/class";
+import type { ClassGrade, ClassOverview, CreateClassInput } from "@/types/class";
 
 type Screen = "login" | "class-detail" | SidebarScreen;
 
@@ -35,6 +35,7 @@ function App() {
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
   const [selectedYearId, setSelectedYearId] = useState<number | null>(null);
+  const [selectedGrade, setSelectedGrade] = useState<ClassGrade | null>(null);
   const [classOverviews, setClassOverviews] = useState<ClassOverview[]>([]);
   const [isSchoolDataLoading, setIsSchoolDataLoading] = useState(false);
   const [hasLoadedSchoolData, setHasLoadedSchoolData] = useState(false);
@@ -116,6 +117,10 @@ function App() {
   }
 
   function handleOpenClass(classId: number) {
+    const openedClass = classOverviews.find((classItem) => classItem.id === classId);
+    if (openedClass && (openedClass.grade === 8 || openedClass.grade === 9)) {
+      setSelectedGrade(openedClass.grade);
+    }
     setSelectedClassId(classId);
     setScreen("class-detail");
   }
@@ -192,10 +197,12 @@ function App() {
       <HomePage
         academicYears={academicYears}
         selectedYearId={selectedYearId}
+        selectedGrade={selectedGrade}
         classOverviews={classOverviews}
         isLoading={isSchoolDataLoading}
         errorMessage={schoolDataError}
         onYearChange={handleYearChange}
+        onGradeChange={setSelectedGrade}
         onOpenClass={handleOpenClass}
         onCreateClass={handleCreateClass}
       />

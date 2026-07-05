@@ -370,7 +370,7 @@ function getMockClassIdForClass(classItem: ClassOverview) {
     return "van-8a";
   }
 
-  if (classItem.name.includes("Văn 7 - Cơ bản")) {
+  if (classItem.name.includes("Văn 8 - Cơ bản") || classItem.name.includes("Văn 7 - Cơ bản")) {
     return "van-7a";
   }
 

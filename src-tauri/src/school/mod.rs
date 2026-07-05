@@ -31,6 +31,7 @@ pub struct ClassOverviewDto {
     id: i64,
     academic_year_id: i64,
     name: String,
+    grade: i64,
     schedule: String,
     schedule_items: Vec<ClassScheduleItemDto>,
     monthly_fee: i64,
@@ -45,6 +46,7 @@ pub struct ClassOverviewDto {
 pub struct CreateClassRequest {
     academic_year_id: i64,
     name: String,
+    grade: i64,
     monthly_fee: i64,
     note: Option<String>,
     schedule_items: Vec<ClassScheduleItemDto>,
@@ -138,6 +140,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 "van-9a",
                 "2025-2026",
                 "Văn 9 - Ôn thi vào 10",
+                9,
                 700_000,
                 "Phòng học nhà thầy",
             ),
@@ -145,13 +148,15 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 "van-8a",
                 "2025-2026",
                 "Văn 8 - Nâng cao",
+                8,
                 600_000,
                 "Phòng học nhà thầy",
             ),
             (
-                "van-7a",
+                "van-8b",
                 "2025-2026",
-                "Văn 7 - Cơ bản",
+                "Văn 8 - Cơ bản",
+                8,
                 550_000,
                 "Phòng học nhà thầy",
             ),
@@ -159,13 +164,14 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 "van-9-old",
                 "2024-2025",
                 "Văn 9 - Khóa trước",
+                9,
                 650_000,
                 "Phòng học nhà thầy",
             ),
         ];
 
         let mut class_ids: HashMap<&'static str, i64> = HashMap::new();
-        for (key, academic_year_key, name, monthly_fee, room) in classes {
+        for (key, academic_year_key, name, grade, monthly_fee, room) in classes {
             let academic_year_id = academic_year_ids
                 .get(academic_year_key)
                 .copied()
@@ -174,9 +180,9 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             transaction
                 .execute(
                     "INSERT INTO classes
-                     (academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    params![academic_year_id, name, monthly_fee, room],
+                     (academic_year_id, name, grade, monthly_fee, room, note, is_archived, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    params![academic_year_id, name, grade, monthly_fee, room],
                 )
                 .map_err(|error| format!("Không seed được lớp {name}: {error}"))?;
             class_ids.insert(key, transaction.last_insert_rowid());
@@ -212,14 +218,14 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 sort_order: 1,
             },
             SeedSchedule {
-                class_key: "van-7a",
+                class_key: "van-8b",
                 weekday: 3,
                 start_time: "19:00",
                 end_time: "21:00",
                 sort_order: 0,
             },
             SeedSchedule {
-                class_key: "van-7a",
+                class_key: "van-8b",
                 weekday: 0,
                 start_time: "19:00",
                 end_time: "21:00",
@@ -388,6 +394,7 @@ pub fn create_class(
     request: CreateClassRequest,
 ) -> Result<ClassOverviewDto, String> {
     validate_class_name(&request.name)?;
+    validate_class_grade(request.grade)?;
     validate_monthly_fee(request.monthly_fee)?;
     validate_schedule_items(&request.schedule_items)?;
 
@@ -403,11 +410,12 @@ pub fn create_class(
         transaction
             .execute(
                 "INSERT INTO classes
-                 (academic_year_id, name, monthly_fee, room, note, is_archived, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                 (academic_year_id, name, grade, monthly_fee, room, note, is_archived, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 params![
                     request.academic_year_id,
                     name,
+                    request.grade,
                     request.monthly_fee,
                     "Phòng học nhà thầy",
                     note
@@ -573,7 +581,7 @@ fn list_class_overviews(
 fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOverviewDto, String> {
     let class_row = connection
         .query_row(
-            "SELECT id, academic_year_id, name, monthly_fee, room, note
+            "SELECT id, academic_year_id, name, grade, monthly_fee, room, note
              FROM classes
              WHERE id = ?1 AND is_archived = 0",
             params![class_id],
@@ -582,9 +590,10 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, i64>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )
@@ -600,14 +609,15 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
         id: class_row.0,
         academic_year_id: class_row.1,
         name: class_row.2,
+        grade: class_row.3.unwrap_or(9),
         schedule,
         schedule_items,
-        monthly_fee: class_row.3,
+        monthly_fee: class_row.4,
         room: class_row
-            .4
+            .5
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Phòng học nhà thầy".to_string()),
-        note: class_row.5,
+        note: class_row.6,
         student_count,
         unpaid_count: 0,
     })
@@ -721,6 +731,14 @@ fn ensure_class_exists(connection: &Connection, class_id: i64) -> Result<(), Str
 fn validate_class_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Tên lớp không được để trống.".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_class_grade(grade: i64) -> Result<(), String> {
+    if grade != 8 && grade != 9 {
+        return Err("Khối lớp phải là Khối 8 hoặc Khối 9.".to_string());
     }
 
     Ok(())

@@ -10,11 +10,16 @@ export type ExtraClass = {
   id: string;
   academicYearId: string;
   name: string;
+  grade: number;
   schedule: string;
   monthlyFee: number;
   room: string;
   note?: string;
 };
+
+export type ClassGrade = 8 | 9;
+
+export const classGradeOptions: ClassGrade[] = [8, 9];
 
 export type ClassOverview = Omit<ExtraClass, "id" | "academicYearId"> & {
   id: number;
@@ -27,7 +32,7 @@ export type ClassOverview = Omit<ExtraClass, "id" | "academicYearId"> & {
 export type CreateClassInput = {
   academicYearId: number;
   name: string;
+  grade: ClassGrade;
   monthlyFee: number;
-  note?: string;
   scheduleItems: ClassScheduleItem[];
 };

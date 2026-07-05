@@ -13,36 +13,60 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { parseScheduleText } from "@/features/classes/utils/classSchedule";
-import type { CreateClassInput } from "@/types/class";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ScheduleItemsEditor } from "@/features/classes/components/ScheduleItemsEditor";
+import { sortScheduleItems } from "@/features/classes/utils/classSchedule";
+import {
+  classGradeOptions,
+  type ClassGrade,
+  type ClassScheduleItem,
+  type CreateClassInput,
+} from "@/types/class";
 
 type CreateClassDialogProps = {
   academicYearId: number | null;
+  defaultGrade?: ClassGrade;
   disabled?: boolean;
   onCreate: (input: CreateClassInput) => void | Promise<void>;
 };
 
 const initialForm = {
   name: "",
-  grade: "",
-  schedule: "",
   monthlyFee: "",
-  note: "",
 };
 
 export function CreateClassDialog({
   academicYearId,
+  defaultGrade = 9,
   disabled = false,
   onCreate,
 }: CreateClassDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [grade, setGrade] = useState<ClassGrade>(defaultGrade);
+  const [scheduleItems, setScheduleItems] = useState<ClassScheduleItem[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+
+    if (nextOpen) {
+      setForm(initialForm);
+      setGrade(defaultGrade);
+      setScheduleItems([]);
+      setErrorMessage("");
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -56,8 +80,18 @@ export function CreateClassDialog({
       return;
     }
 
+    if (grade !== 8 && grade !== 9) {
+      setErrorMessage("Khối lớp phải là Khối 8 hoặc Khối 9.");
+      return;
+    }
+
     if (!Number.isInteger(monthlyFee) || monthlyFee < 0) {
       setErrorMessage("Học phí tháng phải là số nguyên không âm.");
+      return;
+    }
+
+    if (scheduleItems.length === 0) {
+      setErrorMessage("Vui lòng chọn ít nhất một buổi học trong tuần.");
       return;
     }
 
@@ -68,12 +102,13 @@ export function CreateClassDialog({
       await onCreate({
         academicYearId: academicYearId ?? 0,
         name,
+        grade,
         monthlyFee,
-        note: form.note.trim() || undefined,
-        scheduleItems: parseScheduleText(form.schedule),
+        scheduleItems: sortScheduleItems(scheduleItems),
       });
 
       setForm(initialForm);
+      setScheduleItems([]);
       setOpen(false);
     } catch (error) {
       console.warn("[create-class] failed", error);
@@ -84,14 +119,14 @@ export function CreateClassDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button disabled={disabled} className="h-10 w-full gap-2 sm:w-auto">
           <Plus className="size-4" />
           <span className="hidden sm:inline">Tạo lớp mới</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Tạo lớp mới</DialogTitle>
         </DialogHeader>
@@ -108,12 +143,21 @@ export function CreateClassDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="class-grade">Khối</Label>
-              <Input
-                id="class-grade"
-                value={form.grade}
-                onChange={(event) => updateField("grade", event.target.value)}
-                placeholder="Khối 9"
-              />
+              <Select
+                value={String(grade)}
+                onValueChange={(value) => setGrade(Number(value) as ClassGrade)}
+              >
+                <SelectTrigger id="class-grade" className="w-full bg-white">
+                  <SelectValue placeholder="Chọn khối" />
+                </SelectTrigger>
+                <SelectContent>
+                  {classGradeOptions.map((gradeOption) => (
+                    <SelectItem key={gradeOption} value={String(gradeOption)}>
+                      Khối {gradeOption}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="class-fee">Học phí tháng</Label>
@@ -125,24 +169,14 @@ export function CreateClassDialog({
                 placeholder="700000"
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="class-schedule">Lịch học</Label>
-              <Input
-                id="class-schedule"
-                value={form.schedule}
-                onChange={(event) => updateField("schedule", event.target.value)}
-                placeholder="Thứ 3, Thứ 6 - 18:00"
-              />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="class-note">Ghi chú</Label>
-              <Textarea
-                id="class-note"
-                value={form.note}
-                onChange={(event) => updateField("note", event.target.value)}
-                placeholder="Ghi chú thêm về lớp"
-              />
-            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Lịch học</Label>
+            <ScheduleItemsEditor
+              items={scheduleItems}
+              onChange={setScheduleItems}
+              idPrefix="create-schedule"
+            />
           </div>
           {errorMessage && (
             <p className="text-sm text-red-600">{errorMessage}</p>

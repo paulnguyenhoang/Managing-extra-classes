@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  addDays,
   formatDayMonth,
   toDateKey,
   weekdayLabel,
@@ -30,7 +31,7 @@ import {
 
 type AddMakeupSessionDialogProps = {
   sessions: WeeklySession[];
-  onAdd: (session: MakeupSessionInput) => void;
+  onAdd: (session: MakeupSessionInput) => string | null;
 };
 
 const initialForm = {
@@ -42,6 +43,7 @@ const initialForm = {
 export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [errorMessage, setErrorMessage] = useState("");
   const regularSessions = useMemo(
     () => sessions.filter((session) => !session.isMakeup),
     [sessions],
@@ -49,23 +51,38 @@ export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDial
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+    setErrorMessage("");
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+
+    if (nextOpen) {
+      setForm(initialForm);
+      setErrorMessage("");
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    onAdd({
-      date: form.date || toDateKey(new Date()),
+    const error = onAdd({
+      date: form.date,
       time: form.time || "18:00",
-      makeupForSessionId: form.makeupForSessionId || regularSessions[0]?.id || "",
+      makeupForSessionId: form.makeupForSessionId,
     });
+
+    if (error) {
+      setErrorMessage(error);
+      return;
+    }
 
     setForm(initialForm);
     setOpen(false);
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button className="gap-2">
           <CalendarPlus className="size-4" />
@@ -83,6 +100,7 @@ export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDial
               <Input
                 id="makeup-date"
                 type="date"
+                min={toDateKey(addDays(new Date(), 1))}
                 value={form.date}
                 onChange={(event) => updateField("date", event.target.value)}
               />
@@ -115,6 +133,10 @@ export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDial
               </Select>
             </div>
           </div>
+          <p className="text-sm text-muted-foreground">
+            Buổi gốc được chọn sẽ chuyển sang nghỉ và toàn bộ học sinh buổi đó được đánh dấu Nghỉ.
+          </p>
+          {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">

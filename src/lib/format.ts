@@ -45,7 +45,7 @@ export function paymentStatusLabel(status: PaymentStatus) {
 
 export function attendanceStatusLabel(status?: AttendanceStatus) {
   const labels: Record<AttendanceStatus, string> = {
-    present: "Có học",
+    present: "Học",
     absent: "Nghỉ",
     makeup: "Học bù",
   };

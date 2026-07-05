@@ -390,7 +390,7 @@ fn seed_class_id(transaction: &rusqlite::Transaction<'_>, class_key: &str) -> Re
     let class_name = match class_key {
         "van-9a" => "Văn 9 - Ôn thi vào 10",
         "van-8a" => "Văn 8 - Nâng cao",
-        "van-7a" => "Văn 7 - Cơ bản",
+        "van-8b" => "Văn 8 - Cơ bản",
         "van-9-old" => "Văn 9 - Khóa trước",
         _ => return Err(format!("Không nhận diện được lớp seed {class_key}.")),
     };
@@ -463,18 +463,18 @@ fn seed_students() -> [SeedStudent; 9] {
             note: None,
         },
         SeedStudent {
-            class_key: "van-7a",
+            class_key: "van-8b",
             full_name: "Bùi Ngọc Mai",
-            school_class: "7C1",
+            school_class: "8C1",
             school: "THCS Trần Phú",
             parent_phone: "0966 321 123",
             status: "active",
             note: None,
         },
         SeedStudent {
-            class_key: "van-7a",
+            class_key: "van-8b",
             full_name: "Hoàng Tuấn Kiệt",
-            school_class: "7C2",
+            school_class: "8C2",
             school: "THCS Nguyễn Du",
             parent_phone: "0922 444 555",
             status: "active",
