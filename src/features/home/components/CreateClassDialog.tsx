@@ -126,62 +126,64 @@ export function CreateClassDialog({
           <span className="hidden sm:inline">Tạo lớp mới</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] w-[min(94vw,640px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+        <DialogHeader className="px-4 pt-4 pb-3">
           <DialogTitle>Tạo lớp mới</DialogTitle>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="class-name">Tên lớp</Label>
-              <Input
-                id="class-name"
-                value={form.name}
-                onChange={(event) => updateField("name", event.target.value)}
-                placeholder="Ví dụ: Văn 9 - Ôn thi vào 10"
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="class-name">Tên lớp</Label>
+                <Input
+                  id="class-name"
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  placeholder="Ví dụ: Văn 9 - Ôn thi vào 10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="class-grade">Khối</Label>
+                <Select
+                  value={String(grade)}
+                  onValueChange={(value) => setGrade(Number(value) as ClassGrade)}
+                >
+                  <SelectTrigger id="class-grade" className="w-full bg-white">
+                    <SelectValue placeholder="Chọn khối" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {classGradeOptions.map((gradeOption) => (
+                      <SelectItem key={gradeOption} value={String(gradeOption)}>
+                        Khối {gradeOption}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="class-fee">Học phí tháng</Label>
+                <Input
+                  id="class-fee"
+                  inputMode="numeric"
+                  value={form.monthlyFee}
+                  onChange={(event) => updateField("monthlyFee", event.target.value)}
+                  placeholder="700000"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Lịch học</Label>
+              <ScheduleItemsEditor
+                items={scheduleItems}
+                onChange={setScheduleItems}
+                idPrefix="create-schedule"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="class-grade">Khối</Label>
-              <Select
-                value={String(grade)}
-                onValueChange={(value) => setGrade(Number(value) as ClassGrade)}
-              >
-                <SelectTrigger id="class-grade" className="w-full bg-white">
-                  <SelectValue placeholder="Chọn khối" />
-                </SelectTrigger>
-                <SelectContent>
-                  {classGradeOptions.map((gradeOption) => (
-                    <SelectItem key={gradeOption} value={String(gradeOption)}>
-                      Khối {gradeOption}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="class-fee">Học phí tháng</Label>
-              <Input
-                id="class-fee"
-                inputMode="numeric"
-                value={form.monthlyFee}
-                onChange={(event) => updateField("monthlyFee", event.target.value)}
-                placeholder="700000"
-              />
-            </div>
+            {errorMessage && (
+              <p className="text-sm text-red-600">{errorMessage}</p>
+            )}
           </div>
-          <div className="space-y-2">
-            <Label>Lịch học</Label>
-            <ScheduleItemsEditor
-              items={scheduleItems}
-              onChange={setScheduleItems}
-              idPrefix="create-schedule"
-            />
-          </div>
-          {errorMessage && (
-            <p className="text-sm text-red-600">{errorMessage}</p>
-          )}
-          <DialogFooter>
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-4 py-3">
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={isSubmitting}>
                 Hủy
