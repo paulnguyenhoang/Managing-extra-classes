@@ -20,7 +20,11 @@ let mockUnlockedSessionIds: string[] = [];
 let mockMakeupSessions: WeeklySession[] = [];
 const mockStudentMakeupRecords: StudentMakeupRecord[] = [];
 
-export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleItem[]) {
+export function useMockAttendance(
+  weekStart: Date,
+  scheduleItems: ClassScheduleItem[],
+  classId: string,
+) {
   const [attendance, setAttendance] = useState<AttendanceState>(() => ({ ...mockAttendanceState }));
   const [cancelledSessionIds, setCancelledSessionIds] = useState<string[]>(() => [
     ...mockCancelledSessionIds,
@@ -37,14 +41,14 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
 
   const sessions = useMemo(() => {
     const regularSessions = getRegularSessionsForWeek(weekStart, scheduleItems);
-    const visibleMakeupSessions = makeupSessions.filter((session) =>
-      isDateInWeek(session.date, weekStart),
+    const visibleMakeupSessions = makeupSessions.filter(
+      (session) => session.classId === classId && isDateInWeek(session.date, weekStart),
     );
 
     return [...regularSessions, ...visibleMakeupSessions].sort(
       (first, second) => first.date.getTime() - second.date.getTime(),
     );
-  }, [makeupSessions, scheduleItems, weekStart]);
+  }, [classId, makeupSessions, scheduleItems, weekStart]);
 
   function getStatus(sessionId: string, studentId: string) {
     return attendance[attendanceCellKey(sessionId, studentId)];
@@ -137,9 +141,10 @@ export function useMockAttendance(weekStart: Date, scheduleItems: ClassScheduleI
       ...current,
       {
         id: sessionId,
+        classId: input.classId,
         date,
-        startTime: input.time || "18:00",
-        endTime: input.time || "20:00",
+        startTime: input.startTime || "18:00",
+        endTime: input.endTime || "20:00",
         isMakeup: true,
         makeupForSessionId: input.makeupForSessionId,
       },

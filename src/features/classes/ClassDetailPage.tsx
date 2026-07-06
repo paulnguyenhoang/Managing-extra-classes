@@ -14,6 +14,7 @@ import {
   formatScheduleLines,
   parseScheduleText,
 } from "@/features/classes/utils/classSchedule";
+import { formatDayMonth, weekdayLabel, type WeeklySession } from "@/features/classes/utils/attendance";
 import { formatCurrency } from "@/lib/format";
 import {
   getClassDetail,
@@ -48,8 +49,15 @@ export function ClassDetailPage({
       ? classItem.scheduleItems
       : parseScheduleText(classItem?.schedule ?? ""),
   );
+  const [upcomingClassMakeupSessions, setUpcomingClassMakeupSessions] = useState<WeeklySession[]>(
+    [],
+  );
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [headerError, setHeaderError] = useState("");
   const scheduleLines = formatScheduleLines(scheduleItems);
+  const visibleUpcomingClassMakeupSessions = upcomingClassMakeupSessions.filter(
+    (session) => getSessionEndTime(session).getTime() >= nowTick,
+  );
 
   useEffect(() => {
     setClassName(classItem?.name ?? "");
@@ -95,6 +103,15 @@ export function ClassDetailPage({
       cancelled = true;
     };
   }, [classId]);
+
+  useEffect(() => {
+    if (upcomingClassMakeupSessions.length === 0) {
+      return;
+    }
+
+    const timer = window.setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [upcomingClassMakeupSessions.length]);
 
   function applyClassDetail(detail: ClassOverview) {
     setClassName(detail.name);
@@ -233,13 +250,24 @@ export function ClassDetailPage({
             )}
             <div className="mt-2 flex items-start gap-2 text-base leading-6 text-slate-600">
               <EditClassScheduleDialog
+                classId={classId}
                 scheduleItems={scheduleItems}
+                existingClasses={classOverviews}
                 onSave={saveSchedule}
               />
               <div className="min-w-0 space-y-0.5">
                 {scheduleLines.map((line) => (
                   <p key={line} className="break-words">
                     {line}
+                  </p>
+                ))}
+                {visibleUpcomingClassMakeupSessions.map((session) => (
+                  <p
+                    key={session.id}
+                    className="break-words text-sm font-medium text-violet-700"
+                  >
+                    Học bù cả lớp: {weekdayLabel(session.date)} {formatDayMonth(session.date)} -{" "}
+                    {session.startTime} đến {session.endTime}
                   </p>
                 ))}
               </div>
@@ -344,6 +372,7 @@ export function ClassDetailPage({
             className={className}
             scheduleItems={scheduleItems}
             availableClasses={classOverviews}
+            onUpcomingMakeupSessionsChange={setUpcomingClassMakeupSessions}
           />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="scores" className="outline-none">
@@ -355,4 +384,11 @@ export function ClassDetailPage({
       </TabsPrimitive.Root>
     </div>
   );
+}
+
+function getSessionEndTime(session: WeeklySession) {
+  const [hour, minute] = session.endTime.split(":").map(Number);
+  const result = new Date(session.date);
+  result.setHours(Number.isFinite(hour) ? hour : 23, Number.isFinite(minute) ? minute : 59, 0, 0);
+  return result;
 }

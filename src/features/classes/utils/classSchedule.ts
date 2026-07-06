@@ -1,4 +1,4 @@
-import type { ClassScheduleItem, WeekdayIndex } from "@/types/class";
+import type { ClassOverview, ClassScheduleItem, WeekdayIndex } from "@/types/class";
 
 export const weekdayOptions: Array<{ value: WeekdayIndex; label: string }> = [
   { value: 1, label: "Thứ 2" },
@@ -67,9 +67,124 @@ export function sortScheduleItems(items: ClassScheduleItem[]) {
   });
 }
 
+export function findScheduleConflict({
+  scheduleItems,
+  classes,
+  ignoreClassId,
+}: {
+  scheduleItems: ClassScheduleItem[];
+  classes: ClassOverview[];
+  ignoreClassId?: number;
+}) {
+  for (const item of scheduleItems) {
+    for (const classItem of classes) {
+      if (classItem.id === ignoreClassId) {
+        continue;
+      }
+
+      const conflictItem = classItem.scheduleItems.find(
+        (existingItem) =>
+          existingItem.weekday === item.weekday &&
+          timeRangesOverlap(
+            item.startTime,
+            item.endTime,
+            existingItem.startTime,
+            existingItem.endTime,
+          ),
+      );
+
+      if (conflictItem) {
+        return {
+          className: classItem.name,
+          weekday: item.weekday,
+          startTime: conflictItem.startTime,
+          endTime: conflictItem.endTime,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+export function findOneTimeScheduleConflict({
+  date,
+  startTime,
+  endTime,
+  classes,
+}: {
+  date: Date;
+  startTime: string;
+  endTime: string;
+  classes: ClassOverview[];
+}) {
+  const weekday = date.getDay() as WeekdayIndex;
+
+  return findScheduleConflict({
+    scheduleItems: [{ weekday, startTime, endTime }],
+    classes,
+  });
+}
+
+export function formatScheduleConflictMessage(conflict: {
+  className: string;
+  weekday: WeekdayIndex;
+  startTime: string;
+  endTime: string;
+}) {
+  return `Lịch học bị trùng với ${conflict.className} (${weekdayName(conflict.weekday)} ${conflict.startTime} đến ${conflict.endTime}).`;
+}
+
+export function timeRangesOverlap(
+  firstStart: string,
+  firstEnd: string,
+  secondStart: string,
+  secondEnd: string,
+) {
+  const firstStartMinute = timeToMinutes(firstStart);
+  const firstEndMinute = timeToMinutes(firstEnd);
+  const secondStartMinute = timeToMinutes(secondStart);
+  const secondEndMinute = timeToMinutes(secondEnd);
+
+  if (
+    firstStartMinute === null ||
+    firstEndMinute === null ||
+    secondStartMinute === null ||
+    secondEndMinute === null
+  ) {
+    return false;
+  }
+
+  return firstStartMinute < secondEndMinute && secondStartMinute < firstEndMinute;
+}
+
+export function isValidTimeRange(startTime: string, endTime: string) {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+
+  return start !== null && end !== null && start < end;
+}
+
 function defaultEndTime(startTime: string) {
   const [hour, minute] = startTime.split(":").map(Number);
   const endHour = Number.isFinite(hour) ? Math.min(hour + 2, 23) : 20;
   const endMinute = Number.isFinite(minute) ? minute : 0;
   return `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+}
+
+function timeToMinutes(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  return hour * 60 + minute;
 }

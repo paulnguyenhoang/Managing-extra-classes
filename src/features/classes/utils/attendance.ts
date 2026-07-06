@@ -2,6 +2,7 @@ import type { ClassScheduleItem } from "@/types/class";
 
 export type WeeklySession = {
   id: string;
+  classId?: string;
   date: Date;
   startTime: string;
   endTime: string;
@@ -10,8 +11,10 @@ export type WeeklySession = {
 };
 
 export type MakeupSessionInput = {
+  classId: string;
   date: string;
-  time: string;
+  startTime: string;
+  endTime: string;
   makeupForSessionId: string;
 };
 
@@ -141,15 +144,19 @@ export function getRegularSessionsForWeek(
 
 export function getMakeupSessionInputError({
   date,
+  startTime,
+  endTime,
   makeupForSessionId,
-  scheduleItems,
   existingMakeupSessions,
+  classId,
   today,
 }: {
   date: string;
+  startTime: string;
+  endTime: string;
   makeupForSessionId: string;
-  scheduleItems: ClassScheduleItem[];
   existingMakeupSessions: WeeklySession[];
+  classId: string;
   today: Date;
 }): string | null {
   if (!makeupForSessionId) {
@@ -160,18 +167,25 @@ export function getMakeupSessionInputError({
     return "Vui lòng chọn ngày học bù.";
   }
 
+  if (!startTime || !endTime || startTime >= endTime) {
+    return "Giờ kết thúc phải sau giờ bắt đầu.";
+  }
+
   const parsedDate = parseLocalDate(date);
 
   if (parsedDate.getTime() <= startOfDay(today).getTime()) {
     return "Ngày học bù phải sau ngày hôm nay.";
   }
 
-  if (scheduleItems.some((item) => item.weekday === parsedDate.getDay())) {
-    return "Ngày học bù không được trùng với lịch học cố định của lớp.";
-  }
-
-  if (existingMakeupSessions.some((session) => isSameDay(session.date, parsedDate))) {
-    return "Đã có buổi học bù vào ngày này.";
+  if (
+    existingMakeupSessions.some(
+      (session) =>
+        session.classId === classId &&
+        isSameDay(session.date, parsedDate) &&
+        timeRangesOverlap(startTime, endTime, session.startTime, session.endTime),
+    )
+  ) {
+    return "Đã có buổi học bù trùng giờ vào ngày này.";
   }
 
   return null;
@@ -188,5 +202,14 @@ export function getSessionOrderInWeek(session: WeeklySession, sessions: WeeklySe
   const index = regularSessions.findIndex((item) => item.id === session.id);
 
   return index >= 0 ? index + 1 : 1;
+}
+
+function timeRangesOverlap(
+  firstStart: string,
+  firstEnd: string,
+  secondStart: string,
+  secondEnd: string,
+) {
+  return firstStart < secondEnd && secondStart < firstEnd;
 }
 

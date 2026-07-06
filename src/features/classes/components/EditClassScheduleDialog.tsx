@@ -12,15 +12,24 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ScheduleItemsEditor } from "@/features/classes/components/ScheduleItemsEditor";
-import type { ClassScheduleItem } from "@/types/class";
+import {
+  findScheduleConflict,
+  formatScheduleConflictMessage,
+  isValidTimeRange,
+} from "@/features/classes/utils/classSchedule";
+import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 
 type EditClassScheduleDialogProps = {
+  classId: number;
   scheduleItems: ClassScheduleItem[];
+  existingClasses: ClassOverview[];
   onSave: (scheduleItems: ClassScheduleItem[]) => void | Promise<void>;
 };
 
 export function EditClassScheduleDialog({
+  classId,
   scheduleItems,
+  existingClasses,
   onSave,
 }: EditClassScheduleDialogProps) {
   const [open, setOpen] = useState(false);
@@ -36,6 +45,22 @@ export function EditClassScheduleDialog({
   }, [open, scheduleItems]);
 
   async function handleSave() {
+    if (draftItems.some((item) => !isValidTimeRange(item.startTime, item.endTime))) {
+      setErrorMessage("Giờ kết thúc phải sau giờ bắt đầu.");
+      return;
+    }
+
+    const conflict = findScheduleConflict({
+      scheduleItems: draftItems,
+      classes: existingClasses,
+      ignoreClassId: classId,
+    });
+
+    if (conflict) {
+      setErrorMessage(formatScheduleConflictMessage(conflict));
+      return;
+    }
+
     setIsSaving(true);
     setErrorMessage("");
 

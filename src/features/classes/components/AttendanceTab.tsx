@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   CalendarX,
-  Check,
   CheckCheck,
   ChevronLeft,
   ChevronRight,
@@ -30,6 +29,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AddMakeupSessionDialog } from "@/features/classes/components/AddMakeupSessionDialog";
+import {
+  StudentMakeupDialog,
+  type PendingStudentMakeup,
+} from "@/features/classes/components/attendance/StudentMakeupDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { useMockAttendance } from "@/features/classes/hooks/useMockAttendance";
 import {
@@ -60,6 +63,7 @@ type AttendanceTabProps = {
   className: string;
   scheduleItems: ClassScheduleItem[];
   availableClasses: ClassOverview[];
+  onUpcomingMakeupSessionsChange?: (sessions: WeeklySession[]) => void;
 };
 
 type AttendanceCellStatus = AttendanceStatus | undefined;
@@ -217,12 +221,6 @@ function SessionHeader({
   );
 }
 
-type PendingStudentMakeup = {
-  student: ClassStudentRosterItem;
-  session: WeeklySession;
-  options: StudentMakeupSessionOption[];
-};
-
 function WeekPicker({
   visibleMonth,
   selectedWeekStart,
@@ -347,6 +345,7 @@ export function AttendanceTab({
   className,
   scheduleItems,
   availableClasses,
+  onUpcomingMakeupSessionsChange,
 }: AttendanceTabProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(today));
@@ -384,7 +383,7 @@ export function AttendanceTab({
     removeMakeupSession,
     addStudentMakeupRecord,
     removeStudentMakeupRecordForOriginal,
-  } = useMockAttendance(weekStart, scheduleItems);
+  } = useMockAttendance(weekStart, scheduleItems, classIdKey);
   const todaySession = sessions.find((session) => isSameDay(session.date, today));
   const isSelectedWeekCurrent = isSameDay(weekStart, getWeekStart(today));
   const isTodaySessionCancelled = todaySession
@@ -396,6 +395,22 @@ export function AttendanceTab({
       record.receivingClassId === classIdKey &&
       sessions.some((session) => session.id === record.receivingSessionId),
   );
+  const upcomingMakeupSessions = useMemo(
+    () =>
+      allMakeupSessions
+        .filter(
+          (session) =>
+            session.classId === classIdKey &&
+            session.isMakeup &&
+            getSessionEndDateTime(session).getTime() >= Date.now(),
+        )
+        .sort((first, second) => first.date.getTime() - second.date.getTime()),
+    [allMakeupSessions, classIdKey],
+  );
+
+  useEffect(() => {
+    onUpcomingMakeupSessionsChange?.(upcomingMakeupSessions);
+  }, [onUpcomingMakeupSessionsChange, upcomingMakeupSessions]);
 
   function goToPreviousWeek() {
     setWeekStart((current) => addDays(current, -7));
@@ -489,9 +504,11 @@ export function AttendanceTab({
   function tryAddMakeupSession(input: MakeupSessionInput): string | null {
     const error = getMakeupSessionInputError({
       date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
       makeupForSessionId: input.makeupForSessionId,
-      scheduleItems,
       existingMakeupSessions: allMakeupSessions,
+      classId: classIdKey,
       today,
     });
 
@@ -638,7 +655,12 @@ export function AttendanceTab({
 
       <section className="flex justify-end">
         <div className="flex flex-wrap justify-end gap-2">
-          <AddMakeupSessionDialog sessions={sessions} onAdd={tryAddMakeupSession} />
+          <AddMakeupSessionDialog
+            classId={classId}
+            sessions={sessions}
+            existingClasses={availableClasses}
+            onAdd={tryAddMakeupSession}
+          />
           <Button
             type="button"
             variant="outline"
@@ -893,105 +915,20 @@ export function AttendanceTab({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={Boolean(pendingStudentMakeup)}
+      <StudentMakeupDialog
+        pendingMakeup={pendingStudentMakeup}
+        currentClassName={currentClassName}
+        sessions={sessions}
+        selectedSessionId={selectedStudentMakeupSessionId}
         onOpenChange={(open) => {
           if (!open) {
             setPendingStudentMakeup(null);
             setSelectedStudentMakeupSessionId("");
           }
         }}
-      >
-        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Chọn lớp học bù</DialogTitle>
-          </DialogHeader>
-          {pendingStudentMakeup ? (
-            <div className="min-w-0 space-y-4">
-              <div className="grid gap-2 rounded-lg bg-slate-50 p-4 text-sm">
-                <ReadonlyInfo label="Học sinh" value={pendingStudentMakeup.student.fullName} />
-                <ReadonlyInfo label="Lớp gốc" value={currentClassName} />
-                <ReadonlyInfo
-                  label="Buổi gốc"
-                  value={`${weekdayLabel(pendingStudentMakeup.session.date)} ${formatDayMonth(
-                    pendingStudentMakeup.session.date,
-                  )}`}
-                />
-                <ReadonlyInfo
-                  label="Thứ tự buổi"
-                  value={`Buổi ${getSessionOrderInWeek(
-                    pendingStudentMakeup.session,
-                    sessions,
-                  )} trong tuần`}
-                />
-              </div>
-
-              {pendingStudentMakeup.options.length > 0 ? (
-                <div className="max-h-56 min-w-0 space-y-2 overflow-y-auto pr-1">
-                  {pendingStudentMakeup.options.map((option) => {
-                    const isSelected = option.sessionId === selectedStudentMakeupSessionId;
-
-                    return (
-                      <button
-                        key={option.sessionId}
-                        type="button"
-                        onClick={() => setSelectedStudentMakeupSessionId(option.sessionId)}
-                        className={[
-                          "w-full min-w-0 rounded-lg border px-3 py-2 text-left transition-colors",
-                          "hover:border-emerald-200 hover:bg-emerald-50/60",
-                          isSelected
-                            ? "border-emerald-300 bg-emerald-50"
-                            : "border-slate-200 bg-white",
-                        ].join(" ")}
-                      >
-                        <span className="flex min-w-0 items-start justify-between gap-3">
-                          <span className="min-w-0 truncate font-medium text-slate-950">
-                            {option.className}
-                          </span>
-                          {isSelected ? (
-                            <Check className="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                          ) : null}
-                        </span>
-                        <span className="mt-1 block min-w-0 text-sm text-slate-600">
-                          {weekdayLabel(option.date)} {formatDayMonth(option.date)} -{" "}
-                          {option.startTime} đến {option.endTime}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Tuần này chưa có lớp cùng khối, cùng thứ tự buổi để chọn học bù.
-                </p>
-              )}
-            </div>
-          ) : null}
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Hủy
-              </Button>
-            </DialogClose>
-            <Button
-              type="button"
-              onClick={confirmStudentMakeup}
-              disabled={!selectedStudentMakeupSessionId}
-            >
-              Xác nhận
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function ReadonlyInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words text-right font-medium text-slate-950">{value}</span>
+        onSelectSession={setSelectedStudentMakeupSessionId}
+        onConfirm={confirmStudentMakeup}
+      />
     </div>
   );
 }
@@ -1018,6 +955,13 @@ function getSessionDateToneClass(date: Date, today: Date) {
   }
 
   return "bg-sky-50 text-sky-800";
+}
+
+function getSessionEndDateTime(session: WeeklySession) {
+  const [hour, minute] = session.endTime.split(":").map(Number);
+  const result = new Date(session.date);
+  result.setHours(Number.isFinite(hour) ? hour : 23, Number.isFinite(minute) ? minute : 59, 0, 0);
+  return result;
 }
 
 function getEligibleDbStudentMakeupSessions({

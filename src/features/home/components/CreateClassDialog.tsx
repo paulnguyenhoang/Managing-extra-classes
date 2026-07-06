@@ -21,10 +21,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScheduleItemsEditor } from "@/features/classes/components/ScheduleItemsEditor";
-import { sortScheduleItems } from "@/features/classes/utils/classSchedule";
+import {
+  findScheduleConflict,
+  formatScheduleConflictMessage,
+  isValidTimeRange,
+  sortScheduleItems,
+} from "@/features/classes/utils/classSchedule";
 import {
   classGradeOptions,
   type ClassGrade,
+  type ClassOverview,
   type ClassScheduleItem,
   type CreateClassInput,
 } from "@/types/class";
@@ -33,6 +39,7 @@ type CreateClassDialogProps = {
   academicYearId: number | null;
   defaultGrade?: ClassGrade;
   disabled?: boolean;
+  existingClasses: ClassOverview[];
   onCreate: (input: CreateClassInput) => void | Promise<void>;
 };
 
@@ -45,6 +52,7 @@ export function CreateClassDialog({
   academicYearId,
   defaultGrade = 9,
   disabled = false,
+  existingClasses,
   onCreate,
 }: CreateClassDialogProps) {
   const [open, setOpen] = useState(false);
@@ -92,6 +100,21 @@ export function CreateClassDialog({
 
     if (scheduleItems.length === 0) {
       setErrorMessage("Vui lòng chọn ít nhất một buổi học trong tuần.");
+      return;
+    }
+
+    if (scheduleItems.some((item) => !isValidTimeRange(item.startTime, item.endTime))) {
+      setErrorMessage("Giờ kết thúc phải sau giờ bắt đầu.");
+      return;
+    }
+
+    const conflict = findScheduleConflict({
+      scheduleItems,
+      classes: existingClasses,
+    });
+
+    if (conflict) {
+      setErrorMessage(formatScheduleConflictMessage(conflict));
       return;
     }
 

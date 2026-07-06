@@ -82,6 +82,7 @@ export function HomePage({
           <CreateClassDialog
             academicYearId={selectedYearId}
             defaultGrade={selectedGrade}
+            existingClasses={yearClassOverviews}
             onCreate={onCreateClass}
             disabled={selectedYearId === null}
           />
@@ -160,6 +161,7 @@ export function HomePage({
               <CreateClassDialog
                 academicYearId={selectedYearId}
                 defaultGrade={selectedGrade}
+                existingClasses={yearClassOverviews}
                 onCreate={onCreateClass}
                 disabled={selectedYearId === null}
               />

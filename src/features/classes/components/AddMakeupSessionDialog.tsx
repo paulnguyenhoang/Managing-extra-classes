@@ -23,24 +23,39 @@ import {
 import {
   addDays,
   formatDayMonth,
+  parseLocalDate,
   toDateKey,
   weekdayLabel,
   type MakeupSessionInput,
   type WeeklySession,
 } from "@/features/classes/utils/attendance";
+import {
+  findOneTimeScheduleConflict,
+  formatScheduleConflictMessage,
+  isValidTimeRange,
+} from "@/features/classes/utils/classSchedule";
+import type { ClassOverview } from "@/types/class";
 
 type AddMakeupSessionDialogProps = {
+  classId: number;
   sessions: WeeklySession[];
+  existingClasses: ClassOverview[];
   onAdd: (session: MakeupSessionInput) => string | null;
 };
 
 const initialForm = {
   date: "",
-  time: "18:00",
+  startTime: "18:00",
+  endTime: "20:00",
   makeupForSessionId: "",
 };
 
-export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDialogProps) {
+export function AddMakeupSessionDialog({
+  classId,
+  sessions,
+  existingClasses,
+  onAdd,
+}: AddMakeupSessionDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [errorMessage, setErrorMessage] = useState("");
@@ -66,9 +81,30 @@ export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDial
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!isValidTimeRange(form.startTime, form.endTime)) {
+      setErrorMessage("Giờ kết thúc phải sau giờ bắt đầu.");
+      return;
+    }
+
+    if (form.date) {
+      const conflict = findOneTimeScheduleConflict({
+        date: parseLocalDate(form.date),
+        startTime: form.startTime,
+        endTime: form.endTime,
+        classes: existingClasses,
+      });
+
+      if (conflict) {
+        setErrorMessage(formatScheduleConflictMessage(conflict));
+        return;
+      }
+    }
+
     const error = onAdd({
+      classId: String(classId),
       date: form.date,
-      time: form.time || "18:00",
+      startTime: form.startTime || "18:00",
+      endTime: form.endTime || "20:00",
       makeupForSessionId: form.makeupForSessionId,
     });
 
@@ -106,12 +142,21 @@ export function AddMakeupSessionDialog({ sessions, onAdd }: AddMakeupSessionDial
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="makeup-time">Giờ học bù</Label>
+              <Label htmlFor="makeup-start-time">Bắt đầu</Label>
               <Input
-                id="makeup-time"
+                id="makeup-start-time"
                 type="time"
-                value={form.time}
-                onChange={(event) => updateField("time", event.target.value)}
+                value={form.startTime}
+                onChange={(event) => updateField("startTime", event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="makeup-end-time">Kết thúc</Label>
+              <Input
+                id="makeup-end-time"
+                type="time"
+                value={form.endTime}
+                onChange={(event) => updateField("endTime", event.target.value)}
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
