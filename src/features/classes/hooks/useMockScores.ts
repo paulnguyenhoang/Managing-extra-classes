@@ -1,18 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-
-import { getStudentsByClassId } from "@/data/mockData";
+import { useEffect, useState } from "react";
 import {
   cloneScoreSheets,
   createInitialScoreSheets,
   createNewScoreColumn,
+  getScoreStudentKey,
   normalizeScoreSheet,
   scoreMonths,
+  type ScoreRosterStudent,
   validateScoreSheet,
   type MonthlyScoreSheets,
 } from "@/features/classes/utils/scores";
 
-export function useMockScores(classId: string) {
-  const students = useMemo(() => getStudentsByClassId(classId), [classId]);
+export function useMockScores(classId: number, students: ScoreRosterStudent[]) {
   const [selectedMonth, setSelectedMonth] = useState(scoreMonths[2]);
   const [savedSheets, setSavedSheets] = useState<MonthlyScoreSheets>(() =>
     createInitialScoreSheets(classId, students),
@@ -80,13 +79,17 @@ export function useMockScores(classId: string) {
         ...current[selectedMonth],
         columns: [...current[selectedMonth].columns, nextColumn],
         valuesByStudentId: Object.fromEntries(
-          students.map((student) => [
-            student.id,
-            {
-              ...(current[selectedMonth].valuesByStudentId[student.id] ?? {}),
-              [nextColumn.id]: "",
-            },
-          ]),
+          students.map((student) => {
+            const studentKey = getScoreStudentKey(student);
+
+            return [
+              studentKey,
+              {
+                ...(current[selectedMonth].valuesByStudentId[studentKey] ?? {}),
+                [nextColumn.id]: "",
+              },
+            ];
+          }),
         ),
       },
     }));

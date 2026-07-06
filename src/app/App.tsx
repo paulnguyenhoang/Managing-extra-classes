@@ -171,6 +171,7 @@ function App() {
       return (
         <ClassDetailPage
           classItem={selectedClass}
+          classOverviews={classOverviews}
           onBack={handleBackHome}
           onClassUpdate={handleUpdateClass}
         />

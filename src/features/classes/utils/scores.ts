@@ -1,4 +1,6 @@
-import type { Student } from "@/types/student";
+import type { ClassStudentRosterItem, Student } from "@/types/student";
+
+export type ScoreRosterStudent = Student | ClassStudentRosterItem;
 
 export type MonthlyScoreColumn = {
   id: string;
@@ -19,20 +21,27 @@ export function formatScoreMonthLabel(month: string) {
   return `Tháng ${monthNumber}/${year}`;
 }
 
-export function createEmptyScoreSheet(students: Student[]): MonthlyScoreSheet {
+export function getScoreStudentKey(student: ScoreRosterStudent) {
+  return String("membershipId" in student ? student.membershipId : student.id);
+}
+
+export function createEmptyScoreSheet(students: ScoreRosterStudent[]): MonthlyScoreSheet {
   return {
     columns: [],
     valuesByStudentId: createStudentValueMap(students),
   };
 }
 
-export function createInitialScoreSheets(classId: string, students: Student[]): MonthlyScoreSheets {
+export function createInitialScoreSheets(
+  classId: string | number,
+  students: ScoreRosterStudent[],
+): MonthlyScoreSheets {
   const emptySheets = scoreMonths.reduce<MonthlyScoreSheets>((result, month) => {
     result[month] = createEmptyScoreSheet(students);
     return result;
   }, {});
 
-  if (classId !== "van-9a") {
+  if (String(classId) !== "van-9a") {
     return emptySheets;
   }
 
@@ -139,25 +148,29 @@ export function normalizeScoreSheet(sheet: MonthlyScoreSheet): MonthlyScoreSheet
 }
 
 function createSheet(
-  students: Student[],
+  students: ScoreRosterStudent[],
   columns: MonthlyScoreColumn[],
   values: Record<string, Record<string, string>>,
 ): MonthlyScoreSheet {
   return {
     columns,
     valuesByStudentId: Object.fromEntries(
-      students.map((student) => [
-        student.id,
-        Object.fromEntries(
-          columns.map((column) => [column.id, values[student.id]?.[column.id] ?? ""]),
-        ),
-      ]),
+      students.map((student) => {
+        const studentKey = getScoreStudentKey(student);
+
+        return [
+          studentKey,
+          Object.fromEntries(
+            columns.map((column) => [column.id, values[studentKey]?.[column.id] ?? ""]),
+          ),
+        ];
+      }),
     ),
   };
 }
 
-function createStudentValueMap(students: Student[]) {
-  return Object.fromEntries(students.map((student) => [student.id, {}]));
+function createStudentValueMap(students: ScoreRosterStudent[]) {
+  return Object.fromEntries(students.map((student) => [getScoreStudentKey(student), {}]));
 }
 
 function cloneNestedRecord(record: Record<string, Record<string, string>>) {

@@ -42,7 +42,7 @@ Nguyên tắc dữ liệu đã chốt:
   - makeup / Học bù
 - Không lưu nhiều boolean trạng thái; hiển thị suy ra từ một trường status.
 - Không có `late` / Đi muộn và không có `excused` / Có phép trong MVP.
-- Attendance persistence vẫn thuộc Phase 7, chưa triển khai trong Phase 4.5.
+- Attendance persistence vẫn thuộc Phase 7, chưa triển khai trong Phase 4.5/P0.
 - Class-level makeup là session type.
 - Student-level makeup dùng `student_makeup_records`.
 - Payment statuses:
@@ -821,7 +821,30 @@ Chưa làm trong Phase 4:
 
 - Gán một học sinh đã có vào lớp khác từ UI.
 - Archive/hard delete học sinh hiện có.
-- Nối Attendance/Scores/Payments sang danh sách học sinh DB; các tab này vẫn dùng mock/local cho đến phase riêng.
+- Persistence cho Attendance/Scores/Payments.
+
+### P0 trước Phase 5. Chuẩn hóa roster cho tab chi tiết lớp
+
+Trạng thái hiện tại: đã triển khai ở frontend.
+
+Mục tiêu:
+
+- Bỏ mapping tạm từ DB class sang mock class id trong ClassDetailPage.
+- Truyền DB `classId` dạng số trực tiếp xuống StudentListTab, AttendanceTab, ScoresTab và PaymentsTab.
+- Dùng cùng roster SQLite từ `list_students_by_class` cho cả 4 tab qua hook `useClassStudents`.
+- Dùng `class_memberships.id` / `membershipId` làm khóa ổn định cho state local của Attendance/Scores/Payments trong giai đoạn chưa persist.
+
+Phạm vi:
+
+- Chỉ chuẩn hóa nguồn roster và id.
+- Không tạo bảng payments/scores/attendance.
+- Attendance/Scores/Payments records vẫn mock/local cho đến Phase 5-7.
+
+Ý nghĩa cho các phase sau:
+
+- Phase 5 Payments nên ghi record theo `membership_id`.
+- Phase 6 Scores nên ghi score value theo `membership_id`.
+- Phase 7 Attendance nên ghi attendance record theo `membership_id`; student-level makeup dùng `student_makeup_records` và không thêm học sinh học bù vào membership của lớp nhận.
 
 ### Phase 5. Payments
 

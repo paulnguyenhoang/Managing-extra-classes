@@ -1,12 +1,14 @@
 import type { Payment, PaymentStatus } from "@/types/payment";
-import type { Student } from "@/types/student";
+import type { ClassStudentRosterItem, Student } from "@/types/student";
 
 export type PaymentFilter = "all" | PaymentStatus;
 
 export type PaymentRow = {
-  student: Student;
+  student: PaymentRosterStudent;
   payment: Payment;
 };
+
+export type PaymentRosterStudent = Student | ClassStudentRosterItem;
 
 export type PaymentSummary = {
   totalStudents: number;
@@ -36,11 +38,21 @@ export const paymentSelectClasses: Record<PaymentStatus, string> = {
     "!border-violet-200 !bg-violet-50 !text-violet-900 hover:!bg-violet-100 [&_svg]:!text-violet-800",
 };
 
-export function getPaymentRows(students: Student[], payments: Payment[], classId: string, month: string) {
+export function getPaymentStudentKey(student: PaymentRosterStudent) {
+  return String("membershipId" in student ? student.membershipId : student.id);
+}
+
+export function getPaymentRows(
+  students: PaymentRosterStudent[],
+  payments: Payment[],
+  classId: string | number,
+  month: string,
+) {
   return students.map<PaymentRow>((student) => {
+    const studentKey = getPaymentStudentKey(student);
     const payment =
-      payments.find((item) => item.studentId === student.id) ??
-      createUnpaidPayment(student.id, classId, month);
+      payments.find((item) => item.studentId === studentKey) ??
+      createUnpaidPayment(studentKey, String(classId), month);
 
     return { student, payment };
   });

@@ -27,26 +27,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { useMockScores } from "@/features/classes/hooks/useMockScores";
 import {
   canUseScoreInput,
   formatScoreMonthLabel,
+  getScoreStudentKey,
   scoreMonths,
   type MonthlyScoreColumn,
 } from "@/features/classes/utils/scores";
 
 type ScoresTabProps = {
-  classId: string;
+  classId: number;
 };
 
 export function ScoresTab({ classId }: ScoresTabProps) {
   const [pendingDeleteColumn, setPendingDeleteColumn] = useState<MonthlyScoreColumn | null>(null);
   const {
+    students,
+    isLoading: isLoadingStudents,
+    errorMessage: studentsErrorMessage,
+  } = useClassStudents(classId);
+  const {
     activeSheet,
     errorMessage,
     isEditing,
     selectedMonth,
-    students,
     addColumn,
     cancelEditing,
     changeMonth,
@@ -55,7 +61,7 @@ export function ScoresTab({ classId }: ScoresTabProps) {
     startEditing,
     updateColumnLabel,
     updateScore,
-  } = useMockScores(classId);
+  } = useMockScores(classId, students);
   const hasColumns = activeSheet.columns.length > 0;
 
   function confirmDeleteColumn() {
@@ -119,6 +125,21 @@ export function ScoresTab({ classId }: ScoresTabProps) {
           {errorMessage}
         </div>
       ) : null}
+      {isLoadingStudents ? (
+        <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+          Đang tải danh sách học sinh...
+        </p>
+      ) : null}
+      {studentsErrorMessage ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {studentsErrorMessage}
+        </p>
+      ) : null}
+      {!isLoadingStudents && !studentsErrorMessage && students.length === 0 ? (
+        <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+          Lớp này chưa có học sinh trong database.
+        </p>
+      ) : null}
 
       {!hasColumns ? (
         <EmptyState
@@ -168,14 +189,17 @@ export function ScoresTab({ classId }: ScoresTabProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {students.map((student, index) => (
-                <TableRow key={student.id}>
-                  <TableCell>{index + 1}</TableCell>
-                  <TableCell className="font-medium text-slate-950">
-                    {student.fullName}
-                  </TableCell>
-                  {activeSheet.columns.map((column) => {
-                    const score = activeSheet.valuesByStudentId[student.id]?.[column.id] ?? "";
+              {students.map((student, index) => {
+                const studentKey = getScoreStudentKey(student);
+
+                return (
+                  <TableRow key={studentKey}>
+                    <TableCell>{index + 1}</TableCell>
+                    <TableCell className="font-medium text-slate-950">
+                      {student.fullName}
+                    </TableCell>
+                    {activeSheet.columns.map((column) => {
+                    const score = activeSheet.valuesByStudentId[studentKey]?.[column.id] ?? "";
 
                     return (
                       <TableCell key={column.id}>
@@ -186,7 +210,7 @@ export function ScoresTab({ classId }: ScoresTabProps) {
                             onChange={(event) => {
                               const nextValue = event.target.value;
                               if (canUseScoreInput(nextValue)) {
-                                updateScore(student.id, column.id, nextValue);
+                                updateScore(studentKey, column.id, nextValue);
                               }
                             }}
                             className="h-8 w-24 bg-white"
@@ -198,9 +222,10 @@ export function ScoresTab({ classId }: ScoresTabProps) {
                         )}
                       </TableCell>
                     );
-                  })}
-                </TableRow>
-              ))}
+                    })}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

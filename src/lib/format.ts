@@ -10,6 +10,24 @@ export function formatCurrency(amount: number) {
   }).format(amount);
 }
 
+export function normalizePhoneNumber(value: string) {
+  return value.replace(/\D/g, "").slice(0, 10);
+}
+
+export function formatPhoneNumber(value: string) {
+  const digits = normalizePhoneNumber(value);
+
+  if (digits.length <= 4) {
+    return digits;
+  }
+
+  if (digits.length <= 7) {
+    return `${digits.slice(0, 4)} ${digits.slice(4)}`;
+  }
+
+  return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+}
+
 export function formatShortDate(date: string) {
   return new Intl.DateTimeFormat("vi-VN", {
     day: "2-digit",

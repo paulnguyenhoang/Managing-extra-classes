@@ -12,7 +12,7 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
 - Trạng thái persistence: đã có SQLite local qua Rust commands. Phase 1-4 hiện lưu được app settings/password, academic years, classes, class schedules, students và class memberships.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho điểm danh, điểm, học phí và vài placeholder. Tab Danh sách học sinh đã nối SQLite; các tab Điểm danh/Nhập điểm/Học phí vẫn mock/local.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; records của Điểm danh/Nhập điểm/Học phí vẫn mock/local.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -78,6 +78,7 @@ src/
         StudentListTab.tsx
         TuitionWaiverDialog.tsx
       hooks/
+        useClassStudents.ts
         useMockAttendance.ts
         useMockScores.ts
       utils/
@@ -154,9 +155,9 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 | Tổng quan/Home | `src/features/home/HomePage.tsx` | Xem năm học, summary, danh sách lớp | implemented | Năm học/lớp/lịch học lấy từ SQLite |
 | Chi tiết lớp | `src/features/classes/ClassDetailPage.tsx` | Header lớp và tabs | implemented | Header lớp lưu tên, lịch học, học phí tháng vào SQLite |
 | Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh | implemented | Load/save SQLite qua `students` và `class_memberships` |
-| Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Local state qua `useMockAttendance` |
-| Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Local state qua `useMockScores` |
-| Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | Local state trong tab |
+| Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Roster SQLite qua `useClassStudents`, record local qua `useMockAttendance` |
+| Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Roster SQLite qua `useClassStudents`, score local qua `useMockScores` |
+| Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | Roster SQLite qua `useClassStudents`, payment local trong tab |
 | Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Placeholder dashboard học phí toàn app | placeholder | Summary card mock tĩnh |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Placeholder backup/restore | placeholder | Button disabled |
@@ -318,7 +319,8 @@ State/data source:
 - Khi lưu, dòng mới gọi `create_student_for_class`; dòng hiện có gọi `update_student` và `update_class_membership_status`.
 - Status `"Đang học"`/`"Đã nghỉ"` được lưu trên `class_memberships`, không lưu global trên `students`.
 - Sau khi lưu, `ClassDetailPage` refresh class detail để `studentCount` trong header/Home đồng bộ theo active memberships.
-- `mockData.ts` vẫn còn danh sách học sinh cũ cho các tab chưa nối DB như điểm danh/điểm/học phí.
+- Hook `useClassStudents(classId)` là nguồn roster chung cho StudentListTab, AttendanceTab, ScoresTab và PaymentsTab.
+- `ClassDetailPage` truyền trực tiếp DB `classId` dạng số xuống cả 4 tab; không còn mapping tạm từ DB class sang mock class id.
 
 ## 12. Tab Điểm danh hiện tại
 
@@ -483,9 +485,9 @@ Score table:
 
 Dynamic columns:
 
-- `useMockScores` tạo monthly sheets riêng theo tháng.
-- Với class `van-9a`, tháng 05/06/07 có dữ liệu mẫu.
-- Tháng 08 hoặc class khác có thể không có cột, sẽ hiện empty state.
+- `useMockScores` tạo monthly sheets riêng theo tháng dựa trên roster SQLite truyền vào.
+- Score state dùng `membershipId` dạng string làm key local cho từng học sinh trong lớp.
+- Lớp chưa có cột điểm sẽ hiện empty state an toàn.
 
 Add test behavior:
 
@@ -528,9 +530,9 @@ Export:
 
 State/data source:
 
-- Students lấy từ `getStudentsByClassId`.
+- Students lấy từ `useClassStudents(classId)` qua SQLite.
 - Score sheet hiện tại không dùng `scoreColumns` và `scoreRecords` trong `mockData.ts`; nó dùng `createInitialScoreSheets` trong `features/classes/utils/scores.ts`.
-- State nằm trong `useMockScores`, mất khi reload hoặc đổi class reset theo mock.
+- State nằm trong `useMockScores`, mất khi reload/restart; đổi class reset theo DB `classId` và roster hiện tại.
 
 ## 14. Tab Học phí hiện tại
 
@@ -620,9 +622,10 @@ Export:
 
 State/data source:
 
-- Initial data lấy từ `getPaymentsForClassMonth(classId, month)` cho từng month.
+- Roster học sinh lấy từ `useClassStudents(classId)` qua SQLite.
+- Initial payment records theo tháng hiện là local rỗng; UI ghép roster DB thành các dòng mặc định `Chưa đóng`.
 - `PaymentsTab` giữ `paymentsByMonth` local.
-- `monthlyFee` lấy từ prop `monthlyFeeOverride` nếu có, fallback `getClassById(classId)?.monthlyFee`.
+- `monthlyFee` lấy từ prop `monthlyFeeOverride` từ ClassDetail header.
 - Thay đổi mất khi reload.
 
 ## 15. Các trang/sidebar page khác hiện tại
@@ -684,19 +687,20 @@ State/data source:
 - SQLite Phase 3 có bảng `classes` và `class_schedules`, đều dùng id số tự tăng; `classes.academic_year_id` và `class_schedules.class_id` là foreign key số.
 - Seed DB hiện tạo các lớp mẫu tương ứng Văn 9/Văn 8/Văn 7/khóa trước nếu bảng năm học/lớp đang rỗng; các khóa mock cũ chỉ còn dùng nội bộ khi seed/map dữ liệu mẫu, không lưu làm database id.
 - `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` hiện tạm trả `0` vì payments chưa nối DB.
-- Quan hệ: class thuộc academic year qua `academicYearId` số; class có nhiều `class_schedules`; student dùng `class_memberships`; payment/attendance vẫn dùng mock theo `classId` chuỗi trong các tab chưa nối DB.
+- Quan hệ: class thuộc academic year qua `academicYearId` số; class có nhiều `class_schedules`; student dùng `class_memberships`; payment/score/attendance records vẫn mock/local nhưng roster trong tab dùng DB `classId` số.
 
 ### Student data
 
 - SQLite Phase 4 có bảng `students` và `class_memberships`, đều dùng id số tự tăng; `class_memberships.class_id` và `class_memberships.student_id` là foreign key số.
-- Type `Student` trong `src/types/student.ts` vẫn giữ shape UI cũ để các tab mock dùng tiếp.
+- Type `Student` trong `src/types/student.ts` vẫn giữ shape UI cũ cho mockData và một số helper cũ.
+- Type `ClassStudentRosterItem` là roster DB dùng chung cho các tab chi tiết lớp.
 - Type `StudentListItem` thêm `membershipId` và `studentId` cho tab Danh sách học sinh.
 - DTO tab Danh sách học sinh gồm: `membershipId`, `studentId`, `classId`, `fullName`, `schoolClass`, `school`, `parentPhone`, `status`, `note?`.
 - Status type: `"active" | "paused"`.
 - Status thuộc `class_memberships`, không thuộc student global.
 - Một học sinh có thể thuộc nhiều lớp về mặt schema, nhưng UI hiện tại chỉ tạo một membership cho lớp đang mở.
 - Seed Phase 4 đưa 9 học sinh mock ban đầu vào SQLite nếu `students` và `class_memberships` đều đang trống; SQLite tự sinh `students.id` và `class_memberships.id`.
-- `mockData.ts` vẫn có danh sách học sinh cũ để phục vụ các tab chưa nối DB.
+- `mockData.ts` vẫn có danh sách học sinh cũ nhưng các tab chi tiết lớp hiện không dùng nó làm roster chính.
 
 ### Attendance data
 
@@ -713,7 +717,7 @@ State/data source:
 - Không còn `"excused"`, `"late"`, `"Có phép"` hoặc `"Đi muộn"` trong MVP attendance model hiện tại.
 - `mockData.ts` có `attendanceSessions` và `attendanceRecords`.
 - UI AttendanceTab hiện tại không dùng trực tiếp các array này; nó sinh session từ schedule và giữ record trong `useMockAttendance`.
-- `useMockAttendance` dùng key `${sessionId}:${studentId}` để lưu trạng thái.
+- `useMockAttendance` dùng key `${sessionId}:${studentKey}` để lưu trạng thái; AttendanceTab truyền `membershipId` dạng string làm `studentKey` cho học sinh chính thức.
 - Helper type trong `features/classes/utils/attendance.ts`:
   - `WeeklySession`: session sinh từ lịch học hoặc session học bù cả lớp (`isMakeup`, `makeupForSessionId`).
   - `StudentMakeupRecord`: liên kết học sinh từ buổi gốc sang class/session nhận học bù.
@@ -842,6 +846,7 @@ State/data source:
 
 - SQLite/database đã có cho settings/password, academic years, classes, class schedules, students và class memberships; các domain còn lại chưa nối DB.
 - Điểm danh, điểm, học phí vẫn là mock/local; reload/restart mất các thay đổi trong các tab đó.
+- AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite qua `useClassStudents`, nhưng records trong các tab này chưa persist database.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Chưa có Excel export thật dù nhiều nút export đã hiện.
@@ -849,14 +854,14 @@ State/data source:
 - Trang Lịch học global chỉ là placeholder.
 - Trang Tổng hợp học phí global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
-- StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu, nhưng các tab điểm danh/điểm/học phí vẫn đọc học sinh từ mock.
+- StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster nhưng chưa lưu records.
 - Chưa có phân quyền hoặc nhiều người dùng.
 - Chưa có xử lý hard delete/archive học sinh hiện có.
 - Chưa có lưu lịch sử học phí theo tháng.
 - Attendance MVP không có `"Có phép"` và không có `"Đi muộn"`; nếu muốn dùng lại cần xác nhận model mới.
 - Class-level makeup và student-level makeup đã được tách trong UI/code, nhưng vẫn chỉ là mock/local.
 - Student-level makeup hiện đã có flow chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận, nhưng chưa có persistence thật.
-- Danh sách lớp/buổi đủ điều kiện học bù lấy từ `classes` mock trong `mockData.ts`, cùng năm học và cùng thứ tự buổi trong tuần; chưa dùng dữ liệu database hoặc class được thêm local ngoài mock.
+- Danh sách lớp/buổi đủ điều kiện học bù theo học sinh vẫn chỉ là mock/local. Sau P0 không còn mapping DB class sang mock class id, nên class DB không tự xuất hiện trong danh sách lớp học bù cho đến khi Phase Attendance có query DB thật.
 - Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
 - Chưa có transaction/service backend cho payments, scores, attendance.
 
@@ -886,7 +891,7 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 1. SQLite/data access setup: đã triển khai Phase 1.
 2. App settings/login: đã triển khai Phase 2 cho password local và current academic year.
 3. Academic years/classes/class schedules: đã triển khai Phase 3 cho Home, ClassDetail header và AttendanceTab schedule props.
-4. Students/class membership: đã triển khai Phase 4 cho StudentListTab và active student count.
+4. Students/class membership: đã triển khai Phase 4 cho StudentListTab, active student count, và P0 dùng chung DB roster cho Attendance/Scores/Payments.
 5. Payments: cấu trúc theo tháng rõ, ít phụ thuộc lịch học, có flow confirm/waiver cụ thể.
 6. Scores: cần lưu cột động theo tháng và điểm theo học sinh.
 7. Attendance: phức tạp hơn vì liên quan lịch học, session phát sinh, lock/cancel/makeup.

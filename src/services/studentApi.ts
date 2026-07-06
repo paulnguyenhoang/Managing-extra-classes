@@ -1,18 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  ClassStudentRosterItem,
   CreateStudentForClassInput,
-  StudentListItem,
   StudentStatus,
   UpdateStudentInput,
 } from "@/types/student";
 
 export function listStudentsByClass(classId: number) {
-  return invoke<StudentListItem[]>("list_students_by_class", { classId });
+  return invoke<ClassStudentRosterItem[]>("list_students_by_class", { classId });
 }
 
 export function createStudentForClass(input: CreateStudentForClassInput) {
-  return invoke<StudentListItem>("create_student_for_class", { request: input });
+  return invoke<ClassStudentRosterItem>("create_student_for_class", { request: input });
 }
 
 export function updateStudent(input: UpdateStudentInput) {

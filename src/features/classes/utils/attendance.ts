@@ -1,5 +1,4 @@
-import type { ClassScheduleItem, ExtraClass } from "@/types/class";
-import { parseScheduleText } from "@/features/classes/utils/classSchedule";
+import type { ClassScheduleItem } from "@/types/class";
 
 export type WeeklySession = {
   id: string;
@@ -19,6 +18,7 @@ export type MakeupSessionInput = {
 export type StudentMakeupRecord = {
   id: string;
   studentId: string;
+  studentName?: string;
   originalClassId: string;
   originalClassName: string;
   originalSessionId: string;
@@ -190,51 +190,3 @@ export function getSessionOrderInWeek(session: WeeklySession, sessions: WeeklySe
   return index >= 0 ? index + 1 : 1;
 }
 
-export function getEligibleStudentMakeupSessions({
-  sourceClassId,
-  sourceSession,
-  sourceSessions,
-  weekStart,
-  classes,
-}: {
-  sourceClassId: string;
-  sourceSession: WeeklySession;
-  sourceSessions: WeeklySession[];
-  weekStart: Date;
-  classes: ExtraClass[];
-}): StudentMakeupSessionOption[] {
-  const sourceOrder = getSessionOrderInWeek(sourceSession, sourceSessions);
-  const sourceClass = classes.find((classItem) => classItem.id === sourceClassId);
-
-  // Học bù theo học sinh nhận buổi của lớp khác cùng khối, cùng năm học, cùng thứ tự buổi
-  // trong tuần. Không lọc theo quá khứ/tương lai để thầy có thể ghi bù cho buổi đã quên.
-  return classes
-    .filter(
-      (classItem) =>
-        classItem.id !== sourceClassId &&
-        classItem.academicYearId === sourceClass?.academicYearId &&
-        classItem.grade === sourceClass?.grade,
-    )
-    .flatMap((classItem) => {
-      const classSessions = getRegularSessionsForWeek(
-        weekStart,
-        parseScheduleText(classItem.schedule),
-      );
-      const matchingSession = classSessions[sourceOrder - 1];
-
-      if (!matchingSession) {
-        return [];
-      }
-
-      return [
-        {
-          sessionId: matchingSession.id,
-          classId: classItem.id,
-          className: classItem.name,
-          date: matchingSession.date,
-          startTime: matchingSession.startTime,
-          endTime: matchingSession.endTime,
-        },
-      ];
-    });
-}

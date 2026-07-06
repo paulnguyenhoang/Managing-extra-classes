@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,9 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
+import { formatPhoneNumber, normalizePhoneNumber } from "@/lib/format";
 import {
   createStudentForClass,
-  listStudentsByClass,
   updateClassMembershipStatus,
   updateStudent,
 } from "@/services/studentApi";
@@ -49,11 +50,16 @@ const studentStatusConfig: Record<
 };
 
 export function StudentListTab({ classId, onStudentsChanged }: StudentListTabProps) {
+  const {
+    students: dbStudents,
+    isLoading,
+    errorMessage: loadErrorMessage,
+    refresh,
+  } = useClassStudents(classId);
   const [students, setStudents] = useState<StudentListItem[]>([]);
   const [newStudentIds, setNewStudentIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isEditing, setIsEditing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -64,6 +70,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
           student.schoolClass,
           student.school,
           student.parentPhone,
+          formatPhoneNumber(student.parentPhone),
           student.note,
           studentStatusConfig[student.status].label,
         ]
@@ -73,26 +80,12 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
       )
     : students;
 
-  const loadStudents = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage("");
-
-    try {
-      setStudents(await listStudentsByClass(classId));
-    } catch (error) {
-      console.warn("[students] load failed", error);
-      setErrorMessage("Không tải được danh sách học sinh từ database.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [classId]);
-
   useEffect(() => {
-    setStudents([]);
+    setStudents(dbStudents);
     setNewStudentIds([]);
     setIsEditing(false);
-    loadStudents();
-  }, [classId, loadStudents]);
+    setErrorMessage("");
+  }, [dbStudents]);
 
   function updateStudentField(
     studentId: string,
@@ -157,7 +150,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
           fullName: student.fullName,
           schoolClass: student.schoolClass,
           school: student.school,
-          parentPhone: student.parentPhone,
+          parentPhone: normalizePhoneNumber(student.parentPhone),
           note: student.note,
         };
 
@@ -181,7 +174,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
 
       setNewStudentIds([]);
       setIsEditing(false);
-      await loadStudents();
+      await refresh();
       await onStudentsChanged?.();
     } catch (error) {
       console.warn("[students] save failed", error);
@@ -246,9 +239,9 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
       {isLoading && (
         <p className="text-sm text-slate-600">Đang tải danh sách học sinh...</p>
       )}
-      {errorMessage && (
+      {(loadErrorMessage || errorMessage) && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {errorMessage}
+          {loadErrorMessage || errorMessage}
         </p>
       )}
 
@@ -309,11 +302,13 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
                     placeholder="Tên trường"
                     onChange={(value) => updateStudentField(studentRowId, "school", value)}
                   />
-                  <EditableCell
+                  <EditablePhoneCell
                     isEditing={canEditRow}
                     value={student.parentPhone}
                     placeholder="SĐT phụ huynh"
-                    onChange={(value) => updateStudentField(studentRowId, "parentPhone", value)}
+                    onChange={(value) =>
+                      updateStudentField(studentRowId, "parentPhone", normalizePhoneNumber(value))
+                    }
                   />
                   <EditableStatusCell
                     isEditing={canEditRow}
@@ -399,6 +394,34 @@ function EditableCell({
         />
       ) : (
         value || "-"
+      )}
+    </TableCell>
+  );
+}
+
+function EditablePhoneCell({
+  isEditing,
+  value,
+  placeholder,
+  onChange,
+}: {
+  isEditing: boolean;
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <TableCell>
+      {isEditing ? (
+        <Input
+          value={formatPhoneNumber(value)}
+          placeholder={placeholder}
+          inputMode="numeric"
+          onChange={(event) => onChange(event.target.value)}
+          className="h-8 min-w-36 bg-white"
+        />
+      ) : (
+        formatPhoneNumber(value) || "-"
       )}
     </TableCell>
   );

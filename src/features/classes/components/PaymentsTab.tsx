@@ -20,17 +20,16 @@ import {
 } from "@/components/ui/table";
 import {
   currentPaymentMonth,
-  getClassById,
-  getPaymentsForClassMonth,
-  getStudentsByClassId,
   paymentMonths,
 } from "@/data/mockData";
 import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
 import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
+import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import {
   filterPaymentRows,
   formatPaymentMonth,
   formatPaymentMonthLabel,
+  getPaymentStudentKey,
   getPaymentRows,
   getPaymentSummary,
   paymentFilterOptions,
@@ -45,7 +44,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import type { Payment, PaymentStatus } from "@/types/payment";
 
 type PaymentsTabProps = {
-  classId: string;
+  classId: number;
   monthlyFeeOverride?: number;
 };
 
@@ -57,12 +56,15 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [pendingPaidRow, setPendingPaidRow] = useState<PaymentRow | null>(null);
   const [pendingWaivedRow, setPendingWaivedRow] = useState<PaymentRow | null>(null);
-  const students = getStudentsByClassId(classId);
-  const classItem = getClassById(classId);
-  const monthlyFee = monthlyFeeOverride ?? classItem?.monthlyFee ?? 0;
+  const {
+    students,
+    isLoading: isLoadingStudents,
+    errorMessage: studentsErrorMessage,
+  } = useClassStudents(classId);
+  const monthlyFee = monthlyFeeOverride ?? 0;
   const [paymentsByMonth, setPaymentsByMonth] = useState<PaymentsByMonth>(() =>
     paymentMonths.reduce<PaymentsByMonth>((result, month) => {
-      result[month] = getPaymentsForClassMonth(classId, month);
+      result[month] = [];
       return result;
     }, {}),
   );
@@ -205,8 +207,29 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {isLoadingStudents ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-slate-600">
+                  Đang tải danh sách học sinh...
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {studentsErrorMessage ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-red-700">
+                  {studentsErrorMessage}
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {!isLoadingStudents && !studentsErrorMessage && visibleRows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-slate-600">
+                  Không có học sinh phù hợp.
+                </TableCell>
+              </TableRow>
+            ) : null}
             {visibleRows.map((row, index) => (
-              <TableRow key={row.student.id}>
+              <TableRow key={getPaymentStudentKey(row.student)}>
                 <TableCell>{index + 1}</TableCell>
                 <TableCell className="font-medium text-slate-950">{row.student.fullName}</TableCell>
                 <TableCell>

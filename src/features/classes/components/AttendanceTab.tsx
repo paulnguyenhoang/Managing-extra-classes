@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   CalendarDays,
   CalendarX,
+  Check,
   CheckCheck,
   ChevronLeft,
   ChevronRight,
@@ -28,15 +29,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { classes, getStudentsByClassId, students as allMockStudents } from "@/data/mockData";
 import { AddMakeupSessionDialog } from "@/features/classes/components/AddMakeupSessionDialog";
+import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { useMockAttendance } from "@/features/classes/hooks/useMockAttendance";
 import {
   addDays,
   formatDateRange,
   formatDayMonth,
-  getEligibleStudentMakeupSessions,
   getMakeupSessionInputError,
+  getRegularSessionsForWeek,
   getSessionOrderInWeek,
   getWeekEnd,
   getWeekStart,
@@ -51,19 +52,14 @@ import {
 } from "@/features/classes/utils/attendance";
 import { attendanceStatusLabel } from "@/lib/format";
 import type { AttendanceStatus } from "@/types/attendance";
-import type { ClassScheduleItem } from "@/types/class";
-import type { Student } from "@/types/student";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import type { ClassOverview, ClassScheduleItem } from "@/types/class";
+import type { ClassStudentRosterItem } from "@/types/student";
 
 type AttendanceTabProps = {
-  classId: string;
+  classId: number;
+  className: string;
   scheduleItems: ClassScheduleItem[];
+  availableClasses: ClassOverview[];
 };
 
 type AttendanceCellStatus = AttendanceStatus | undefined;
@@ -149,6 +145,7 @@ function SessionHeader({
   onToggleLock: () => void;
 }) {
   const past = isPastDate(session.date, today);
+  const current = isSameDay(session.date, today);
 
   return (
     <div className={["min-w-36 space-y-2", past ? "opacity-70" : ""].join(" ")}>
@@ -174,7 +171,7 @@ function SessionHeader({
             </span>
           </Button>
         ) : null}
-        {isSameDay(session.date, today) ? (
+        {current ? (
           <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">Hôm nay</Badge>
         ) : null}
         {session.isMakeup ? (
@@ -184,7 +181,12 @@ function SessionHeader({
           <Badge className="bg-red-100 text-red-900 hover:bg-red-100">Nghỉ</Badge>
         ) : null}
       </div>
-      <div className="text-center text-sm text-muted-foreground">
+      <div
+        className={[
+          "mx-auto w-fit rounded-full px-2 py-0.5 text-center text-sm font-medium",
+          getSessionDateToneClass(session.date, today),
+        ].join(" ")}
+      >
         {formatDayMonth(session.date)}
       </div>
       <div className="flex flex-wrap justify-center gap-1">
@@ -216,7 +218,7 @@ function SessionHeader({
 }
 
 type PendingStudentMakeup = {
-  student: Student;
+  student: ClassStudentRosterItem;
   session: WeeklySession;
   options: StudentMakeupSessionOption[];
 };
@@ -239,6 +241,7 @@ function WeekPicker({
     month: "2-digit",
     year: "numeric",
   }).format(visibleMonth);
+  const currentWeekStart = getWeekStart(today);
 
   return (
     <div className="absolute top-full left-0 z-40 mt-2 w-[320px] rounded-lg border bg-white p-3 shadow-lg">
@@ -269,10 +272,15 @@ function WeekPicker({
           <span key={label}>{label}</span>
         ))}
       </div>
+      <div className="mb-2 flex items-center gap-2 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-900">
+        <span className="size-2 rounded-full bg-emerald-500" />
+        Tuần hiện tại
+      </div>
       <div className="space-y-1">
         {calendarWeeks.map((week) => {
           const weekStartDate = week[0];
           const selected = isSameDay(weekStartDate, selectedWeekStart);
+          const currentWeek = isSameDay(weekStartDate, currentWeekStart);
 
           return (
             <button
@@ -282,7 +290,9 @@ function WeekPicker({
                 "grid w-full grid-cols-7 gap-1 rounded-lg p-1 text-center text-sm transition",
                 selected
                   ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-700 hover:bg-emerald-50 hover:text-emerald-950",
+                  : currentWeek
+                    ? "bg-emerald-50 text-emerald-950 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                    : "text-slate-700 hover:bg-emerald-50 hover:text-emerald-950",
               ].join(" ")}
               onClick={() => onSelectWeek(weekStartDate)}
             >
@@ -332,7 +342,12 @@ function getCalendarWeeks(monthDate: Date) {
   return weeks;
 }
 
-export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
+export function AttendanceTab({
+  classId,
+  className,
+  scheduleItems,
+  availableClasses,
+}: AttendanceTabProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(today));
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
@@ -344,8 +359,13 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     null,
   );
   const [selectedStudentMakeupSessionId, setSelectedStudentMakeupSessionId] = useState("");
-  const students = getStudentsByClassId(classId);
-  const currentClassName = classes.find((classItem) => classItem.id === classId)?.name ?? "";
+  const {
+    students,
+    isLoading: isLoadingStudents,
+    errorMessage: studentsErrorMessage,
+  } = useClassStudents(classId);
+  const classIdKey = String(classId);
+  const currentClassName = className;
   const {
     sessions,
     allMakeupSessions,
@@ -366,13 +386,14 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     removeStudentMakeupRecordForOriginal,
   } = useMockAttendance(weekStart, scheduleItems);
   const todaySession = sessions.find((session) => isSameDay(session.date, today));
+  const isSelectedWeekCurrent = isSameDay(weekStart, getWeekStart(today));
   const isTodaySessionCancelled = todaySession
     ? cancelledSessionIds.includes(todaySession.id)
     : false;
   const canMarkTodayPresent = Boolean(todaySession) && !isTodaySessionCancelled;
   const visibleStudentMakeupRecords = studentMakeupRecords.filter(
     (record) =>
-      record.receivingClassId === classId &&
+      record.receivingClassId === classIdKey &&
       sessions.some((session) => session.id === record.receivingSessionId),
   );
 
@@ -390,7 +411,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     return studentMakeupRecords
       .filter(
         (record) =>
-          record.receivingClassId === classId && record.receivingSessionId === sessionId,
+          record.receivingClassId === classIdKey && record.receivingSessionId === sessionId,
       )
       .map((record) => record.id);
   }
@@ -398,10 +419,12 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   function markWholeSessionAbsent(sessionId: string) {
     // Học sinh đang "Học bù" ở buổi này phải gỡ liên kết học bù trước khi ghi đè thành Nghỉ.
     students.forEach((student) => {
-      if (getStatus(sessionId, student.id) === "makeup") {
+      const studentKey = getRosterStudentKey(student);
+
+      if (getStatus(sessionId, studentKey) === "makeup") {
         removeStudentMakeupRecordForOriginal({
-          studentId: student.id,
-          originalClassId: classId,
+          studentId: studentKey,
+          originalClassId: classIdKey,
           originalSessionId: sessionId,
         });
       }
@@ -409,7 +432,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
 
     markSessionForStudents(
       sessionId,
-      students.map((student) => student.id),
+      students.map(getRosterStudentKey),
       "absent",
       getMakeupRecordIdsForSession(sessionId),
     );
@@ -447,7 +470,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
 
     markSessionForStudents(
       todaySession.id,
-      students.map((student) => student.id),
+      students.map(getRosterStudentKey),
       "present",
       getMakeupRecordIdsForSession(todaySession.id),
     );
@@ -483,17 +506,19 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
   }
 
   function handleOfficialStatusSelect(
-    student: Student,
+    student: ClassStudentRosterItem,
     session: WeeklySession,
     nextStatus: AttendanceCellStatus,
   ) {
+    const studentKey = getRosterStudentKey(student);
+
     if (nextStatus === "makeup") {
-      const options = getEligibleStudentMakeupSessions({
+      const options = getEligibleDbStudentMakeupSessions({
         sourceClassId: classId,
         sourceSession: session,
         sourceSessions: sessions,
         weekStart,
-        classes,
+        classes: availableClasses,
       });
 
       setPendingStudentMakeup({ student, session, options });
@@ -501,17 +526,17 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
       return;
     }
 
-    const currentStatus = getStatus(session.id, student.id);
+    const currentStatus = getStatus(session.id, studentKey);
 
     if (currentStatus === "makeup") {
       removeStudentMakeupRecordForOriginal({
-        studentId: student.id,
-        originalClassId: classId,
+        studentId: studentKey,
+        originalClassId: classIdKey,
         originalSessionId: session.id,
       });
     }
 
-    setAttendanceStatus(session.id, student.id, nextStatus);
+    setAttendanceStatus(session.id, studentKey, nextStatus);
   }
 
   function confirmStudentMakeup() {
@@ -529,8 +554,9 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
 
     const record: StudentMakeupRecord = {
       id: `student-makeup-${Date.now()}`,
-      studentId: pendingStudentMakeup.student.id,
-      originalClassId: classId,
+      studentId: getRosterStudentKey(pendingStudentMakeup.student),
+      studentName: pendingStudentMakeup.student.fullName,
+      originalClassId: classIdKey,
       originalClassName: currentClassName,
       originalSessionId: pendingStudentMakeup.session.id,
       originalSessionDate: formatDayMonth(pendingStudentMakeup.session.date),
@@ -544,7 +570,11 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     };
 
     addStudentMakeupRecord(record);
-    setAttendanceStatus(pendingStudentMakeup.session.id, pendingStudentMakeup.student.id, "makeup");
+    setAttendanceStatus(
+      pendingStudentMakeup.session.id,
+      getRosterStudentKey(pendingStudentMakeup.student),
+      "makeup",
+    );
     setPendingStudentMakeup(null);
     setSelectedStudentMakeupSessionId("");
   }
@@ -553,7 +583,7 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
     return studentMakeupRecords.find(
       (record) =>
         record.studentId === studentId &&
-        record.originalClassId === classId &&
+        record.originalClassId === classIdKey &&
         record.originalSessionId === sessionId,
     );
   }
@@ -587,10 +617,21 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                 />
               ) : null}
             </div>
+            {isSelectedWeekCurrent ? (
+              <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
+                Tuần hiện tại
+              </Badge>
+            ) : null}
             <Button variant="outline" className="gap-2" onClick={goToNextWeek}>
               Tuần sau
               <ChevronRight className="size-4" />
             </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-500">Màu ngày:</span>
+            <DateToneLegendItem className="bg-slate-100 text-slate-500" label="Quá khứ" />
+            <DateToneLegendItem className="bg-emerald-100 text-emerald-900" label="Hôm nay" />
+            <DateToneLegendItem className="bg-sky-50 text-sky-800" label="Tương lai" />
           </div>
         </div>
       </section>
@@ -622,10 +663,21 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
         </div>
       </section>
 
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <span className="font-medium text-slate-900">Chú thích:</span> Chưa điểm danh, Học, Nghỉ,
-        Học bù
-      </div>
+      {isLoadingStudents ? (
+        <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+          Đang tải danh sách học sinh...
+        </p>
+      ) : null}
+      {studentsErrorMessage ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {studentsErrorMessage}
+        </p>
+      ) : null}
+      {!isLoadingStudents && !studentsErrorMessage && students.length === 0 ? (
+        <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+          Lớp này chưa có học sinh trong database.
+        </p>
+      ) : null}
 
       <div className="min-w-0 rounded-lg border bg-white">
         <Table className="min-w-[900px]">
@@ -649,17 +701,20 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {students.map((student, index) => (
-              <TableRow key={student.id}>
-                <TableCell>{index + 1}</TableCell>
-                <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
-                {sessions.map((session) => {
+            {students.map((student, index) => {
+              const studentKey = getRosterStudentKey(student);
+
+              return (
+                <TableRow key={studentKey}>
+                  <TableCell>{index + 1}</TableCell>
+                  <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
+                  {sessions.map((session) => {
                   const isCancelled = cancelledSessionIds.includes(session.id);
                   const isUnlocked = unlockedSessionIds.includes(session.id);
-                  const status = getStatus(session.id, student.id);
+                  const status = getStatus(session.id, studentKey);
                   const makeupRecord =
                     status === "makeup"
-                      ? getStudentMakeupRecord(student.id, session.id)
+                      ? getStudentMakeupRecord(studentKey, session.id)
                       : undefined;
                   const makeupDetail = makeupRecord
                     ? `Học bù tại ${makeupRecord.receivingClassName} - ${makeupRecord.receivingSessionDate}`
@@ -701,9 +756,10 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                       )}
                     </TableCell>
                   );
-                })}
-              </TableRow>
-            ))}
+                  })}
+                </TableRow>
+              );
+            })}
             {visibleStudentMakeupRecords.length > 0 ? (
               <>
                 <TableRow className="bg-violet-50/70">
@@ -715,13 +771,11 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
                   </TableCell>
                 </TableRow>
                 {visibleStudentMakeupRecords.map((record) => {
-                  const student = allMockStudents.find((item) => item.id === record.studentId);
-
                   return (
                     <TableRow key={record.id}>
                       <TableCell>HB</TableCell>
                       <TableCell className="font-medium text-slate-950">
-                        {student?.fullName ?? "Học sinh học bù"}
+                        {record.studentName ?? "Học sinh học bù"}
                         <div className="text-xs font-normal text-slate-500">
                           Từ {record.originalClassName} - buổi {record.originalSessionDate}
                         </div>
@@ -848,12 +902,12 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Chọn lớp học bù</DialogTitle>
           </DialogHeader>
           {pendingStudentMakeup ? (
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               <div className="grid gap-2 rounded-lg bg-slate-50 p-4 text-sm">
                 <ReadonlyInfo label="Học sinh" value={pendingStudentMakeup.student.fullName} />
                 <ReadonlyInfo label="Lớp gốc" value={currentClassName} />
@@ -873,22 +927,39 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
               </div>
 
               {pendingStudentMakeup.options.length > 0 ? (
-                <Select
-                  value={selectedStudentMakeupSessionId}
-                  onValueChange={setSelectedStudentMakeupSessionId}
-                >
-                  <SelectTrigger className="w-full bg-white">
-                    <SelectValue placeholder="Chọn lớp học bù" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {pendingStudentMakeup.options.map((option) => (
-                      <SelectItem key={option.sessionId} value={option.sessionId}>
-                        {option.className} - {weekdayLabel(option.date)}{" "}
-                        {formatDayMonth(option.date)} - {option.startTime} đến {option.endTime}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="max-h-56 min-w-0 space-y-2 overflow-y-auto pr-1">
+                  {pendingStudentMakeup.options.map((option) => {
+                    const isSelected = option.sessionId === selectedStudentMakeupSessionId;
+
+                    return (
+                      <button
+                        key={option.sessionId}
+                        type="button"
+                        onClick={() => setSelectedStudentMakeupSessionId(option.sessionId)}
+                        className={[
+                          "w-full min-w-0 rounded-lg border px-3 py-2 text-left transition-colors",
+                          "hover:border-emerald-200 hover:bg-emerald-50/60",
+                          isSelected
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-slate-200 bg-white",
+                        ].join(" ")}
+                      >
+                        <span className="flex min-w-0 items-start justify-between gap-3">
+                          <span className="min-w-0 truncate font-medium text-slate-950">
+                            {option.className}
+                          </span>
+                          {isSelected ? (
+                            <Check className="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                          ) : null}
+                        </span>
+                        <span className="mt-1 block min-w-0 text-sm text-slate-600">
+                          {weekdayLabel(option.date)} {formatDayMonth(option.date)} -{" "}
+                          {option.startTime} đến {option.endTime}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                   Tuần này chưa có lớp cùng khối, cùng thứ tự buổi để chọn học bù.
@@ -918,9 +989,82 @@ export function AttendanceTab({ classId, scheduleItems }: AttendanceTabProps) {
 
 function ReadonlyInfo({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-3">
+    <div className="grid grid-cols-[112px_minmax(0,1fr)] gap-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium text-slate-950">{value}</span>
+      <span className="min-w-0 break-words text-right font-medium text-slate-950">{value}</span>
     </div>
   );
+}
+
+function DateToneLegendItem({ className, label }: { className: string; label: string }) {
+  return (
+    <span className={["rounded-full px-2 py-0.5 font-medium", className].join(" ")}>
+      {label}
+    </span>
+  );
+}
+
+function getRosterStudentKey(student: ClassStudentRosterItem) {
+  return String(student.membershipId);
+}
+
+function getSessionDateToneClass(date: Date, today: Date) {
+  if (isSameDay(date, today)) {
+    return "bg-emerald-100 text-emerald-900";
+  }
+
+  if (isPastDate(date, today)) {
+    return "bg-slate-100 text-slate-500";
+  }
+
+  return "bg-sky-50 text-sky-800";
+}
+
+function getEligibleDbStudentMakeupSessions({
+  sourceClassId,
+  sourceSession,
+  sourceSessions,
+  weekStart,
+  classes,
+}: {
+  sourceClassId: number;
+  sourceSession: WeeklySession;
+  sourceSessions: WeeklySession[];
+  weekStart: Date;
+  classes: ClassOverview[];
+}): StudentMakeupSessionOption[] {
+  const sourceClass = classes.find((classItem) => classItem.id === sourceClassId);
+
+  if (!sourceClass) {
+    return [];
+  }
+
+  const sourceOrder = getSessionOrderInWeek(sourceSession, sourceSessions);
+
+  return classes
+    .filter(
+      (classItem) =>
+        classItem.id !== sourceClassId &&
+        classItem.academicYearId === sourceClass.academicYearId &&
+        classItem.grade === sourceClass.grade,
+    )
+    .flatMap((classItem) => {
+      const classSessions = getRegularSessionsForWeek(weekStart, classItem.scheduleItems);
+      const matchingSession = classSessions[sourceOrder - 1];
+
+      if (!matchingSession) {
+        return [];
+      }
+
+      return [
+        {
+          sessionId: matchingSession.id,
+          classId: String(classItem.id),
+          className: classItem.name,
+          date: matchingSession.date,
+          startTime: matchingSession.startTime,
+          endTime: matchingSession.endTime,
+        },
+      ];
+    });
 }
