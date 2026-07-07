@@ -223,6 +223,7 @@ Create class hiện tại:
 - Không còn field `Ghi chú` trong dialog tạo lớp.
 - Lịch học dùng bộ chọn checkbox từng thứ + giờ bắt đầu/kết thúc (component `ScheduleItemsEditor`, dùng chung với `EditClassScheduleDialog`), không còn nhập text tự do.
 - Validation: tên lớp bắt buộc, khối phải là 8 hoặc 9, học phí là số nguyên không âm, phải chọn ít nhất một buổi học.
+- UI cũng kiểm tra giờ kết thúc sau giờ bắt đầu và không trùng khoảng giờ với các lớp đã load trong năm học đang xem, kể cả khác khối. Rule này hiện ở frontend, chưa có service/constraint backend riêng.
 - Khi lưu, gọi command `create_class`, insert vào bảng `classes` (gồm `grade`) và `class_schedules`.
 - Class mới được append vào `classOverviews` ở `App.tsx` từ response DB.
 - Khối mặc định trong dialog là khối đang chọn trên Home.
@@ -256,6 +257,7 @@ Schedule behavior:
 - Nếu nhiều ngày có cùng giờ, `formatScheduleLines` gộp chung một dòng, ví dụ `"Thứ 3, Thứ 6 - 18:00 đến 20:00"`.
 - Nếu các ngày khác giờ, sẽ tách thành nhiều dòng.
 - Lịch học trong header được truyền xuống `AttendanceTab` bằng prop `scheduleItems`, nên cột điểm danh đồng bộ với lịch đang chỉnh trong phiên hiện tại.
+- Dialog sửa lịch kiểm tra giờ kết thúc sau giờ bắt đầu và không trùng khoảng giờ với các lớp khác đã load trong năm học. Rule này hiện ở frontend, chưa được enforce ở Rust command.
 
 State/persistence:
 
@@ -350,12 +352,12 @@ Attendance statuses:
 - Trạng thái rỗng/undefined hiển thị `"Chưa điểm danh"`.
 - UI labels:
   - empty/undefined: Chưa điểm danh
-  - `present`: Học
+  - `present`: Có học
   - `absent`: Nghỉ
   - `makeup`: Học bù
 - Mỗi ô chỉ lưu một trạng thái duy nhất; hiển thị luôn suy ra từ trạng thái đó.
 - MVP hiện tại không có `"Có phép"` và không có `"Đi muộn"`.
-- Legend hiện tại: `"Chú thích: Chưa điểm danh, Học, Nghỉ, Học bù"`.
+- Không còn legend trạng thái dạng text dài; UI hiện có chú thích màu ngày: Quá khứ, Hôm nay, Tương lai.
 - `"Học bù"` có 2 khái niệm khác nhau trong code:
   - Class-level makeup: một session/cột học bù cả lớp (`session.isMakeup`) và header có badge `"Học bù cả lớp"`.
   - Student-level makeup: trạng thái `makeup` của một học sinh ở buổi gốc, có record liên kết sang lớp/buổi nhận học bù.
@@ -365,11 +367,11 @@ Cell behavior (nút trạng thái, không dùng click cycle):
 - Buổi bị khóa: cell chỉ hiển thị badge trạng thái, không có nút.
 - Buổi nghỉ (cancelled): cell hiển thị `"Nghỉ"` thống nhất một màu đỏ (giống badge Nghỉ của từng học sinh), không có nút, không sửa được cho đến khi hủy nghỉ.
 - Buổi mở khóa: cell hiển thị các nút nhỏ theo ngữ cảnh, nút đang chọn được highlight:
-  - Buổi thường + học sinh chính thức: `Học` / `Nghỉ` / `Học bù`.
-  - Buổi học bù cả lớp + học sinh chính thức: `Học` / `Nghỉ` (không có `Học bù`).
-  - Dòng học sinh học bù ở lớp nhận: `Học` / `Nghỉ` (không có `Học bù`).
+  - Buổi thường + học sinh chính thức: `Có học` / `Nghỉ` / `Học bù`.
+  - Buổi học bù cả lớp + học sinh chính thức: `Có học` / `Nghỉ` (không có `Học bù`).
+  - Dòng học sinh học bù ở lớp nhận: `Có học` / `Nghỉ` (không có `Học bù`).
 - Bấm lại nút đang chọn để bỏ trạng thái, quay về `"Chưa điểm danh"`.
-- Bấm `Học`/`Nghỉ`: set ngay bằng `setAttendanceStatus`; nếu ô đang `makeup` thì xóa liên kết học bù cũ qua `removeStudentMakeupRecordForOriginal`.
+- Bấm `Có học`/`Nghỉ`: set ngay bằng `setAttendanceStatus`; nếu ô đang `makeup` thì xóa liên kết học bù cũ qua `removeStudentMakeupRecordForOriginal`.
 - Bấm `Học bù`: không set ngay mà mở dialog `"Chọn lớp học bù"`.
 - Nếu cancel dialog học bù, giữ nguyên trạng thái cũ.
 - Nếu confirm dialog học bù:
@@ -385,21 +387,22 @@ Student-level makeup dialog:
   - Lớp gốc
   - Buổi gốc
   - Thứ tự buổi, ví dụ `"Buổi 1 trong tuần"`
-- Danh sách lớp/buổi học bù lấy từ `getEligibleStudentMakeupSessions`.
+- Danh sách lớp/buổi học bù lấy từ `getEligibleDbStudentMakeupSessions`.
 - Điều kiện hiện tại của eligible session:
   - Chỉ lấy lớp khác `sourceClassId`.
   - Chỉ lấy lớp cùng `academicYearId` với lớp gốc.
   - Chỉ lấy lớp CÙNG KHỐI (`grade`) với lớp gốc.
   - Chỉ lấy buổi có cùng thứ tự trong tuần với buổi gốc.
+  - Dựa trên `availableClasses` truyền từ `ClassDetailPage`, hiện là class overview đã load từ SQLite.
+- Dialog chọn lớp học bù đã tách sang `features/classes/components/attendance/StudentMakeupDialog.tsx` và hiển thị option dạng danh sách/card để tránh tràn text dài.
   - Không giới hạn quá khứ/tương lai: cho phép ghi học bù buổi đã qua (khi quên cập nhật), miễn cùng tuần và cùng thứ tự buổi. Giới hạn tương lai chỉ áp dụng cho việc tạo buổi học bù cả lớp.
-  - Dựa trên danh sách `classes` mock và schedule parse từ `mockData.ts`.
 - Student-level makeup hiện đã có UI và local state, nhưng vẫn là mock/in-memory, chưa persist database.
 
 Receiving makeup students:
 
 - Khi xem lớp/buổi nhận học bù, nếu có `StudentMakeupRecord` trỏ về class/session hiện tại, table hiện thêm section `"Học sinh học bù"`.
 - Dòng học sinh học bù không thêm vào danh sách học sinh chính thức của lớp nhận.
-- Dòng học sinh học bù chỉ có nút `Học` / `Nghỉ`; trạng thái có thể là empty/present/absent.
+- Dòng học sinh học bù chỉ có nút `Có học` / `Nghỉ`; trạng thái có thể là empty/present/absent.
 - Không cho dòng học sinh học bù chọn `"Học bù"` tiếp.
 - Các cell không phải session nhận học bù hiển thị `"-"`.
 - Trường hợp đặc biệt: nếu học sinh nghỉ buổi học bù cả lớp và qua lớp khác học, giáo viên đánh dấu `"Nghỉ"` ở buổi bù cả lớp rồi quay lại buổi gốc đánh dấu `"Học bù"`; record học bù liên kết với buổi gốc, không liên kết buổi bù cả lớp.
@@ -425,19 +428,21 @@ Cancel session behavior:
 Makeup session:
 
 - Nút `"Thêm buổi học bù"` mở `AddMakeupSessionDialog`.
-- Fields: ngày học bù, giờ học bù, bù cho buổi nào (bắt buộc chọn).
+- Fields: ngày học bù, giờ bắt đầu, giờ kết thúc, bù cho buổi nào (bắt buộc chọn).
 - Validation khi lưu:
   - Phải chọn buổi gốc cần bù.
+  - Giờ kết thúc phải sau giờ bắt đầu.
   - Ngày học bù phải sau ngày hôm nay; lỗi: `"Ngày học bù phải sau ngày hôm nay."` Input date có `min` là ngày mai.
-  - Ngày học bù không được rơi vào các thứ trong lịch học cố định của lớp; lỗi: `"Ngày học bù không được trùng với lịch học cố định của lớp."`
-  - Không cho trùng ngày với buổi học bù đã có.
+  - Không được trùng khoảng giờ với lịch cố định của các lớp đang có trong danh sách đã load, kể cả khác khối.
+  - Không cho trùng khoảng giờ với buổi học bù cả lớp đã có của chính lớp đó trong mock state.
 - Khi lưu hợp lệ:
-  - Thêm một `WeeklySession` local với `isMakeup: true`, `makeupForSessionId` trỏ về buổi gốc.
+  - Thêm một `WeeklySession` local với `classId`, `startTime`, `endTime`, `isMakeup: true`, `makeupForSessionId` trỏ về buổi gốc.
   - Buổi gốc tự động chuyển sang trạng thái nghỉ (cancelled) và bị khóa.
   - Buổi học bù mới được mở khóa sẵn để điểm danh.
 - Nếu ngày học bù nằm trong tuần đang xem thì session hiện thành cột mới.
 - Header có badge `"Học bù cả lớp"` nếu `session.isMakeup`.
 - Header buổi học bù có nút `"Hủy buổi bù"` với dialog xác nhận; khi xác nhận: xóa buổi bù, khôi phục buổi gốc về buổi học bình thường, xóa dữ liệu điểm danh của buổi bù.
+- `ClassDetailPage` nhận danh sách buổi học bù cả lớp sắp tới từ `AttendanceTab` và hiển thị thêm dòng `"Học bù cả lớp: ..."` trong khung thông tin lớp cho đến khi qua giờ kết thúc buổi bù. Đây vẫn là state mock/local, không persist sau reload/restart.
 - Đây là class-level makeup, tức khái niệm session-level, khác với trạng thái student-level `makeup`.
 
 Quick action:
@@ -719,7 +724,8 @@ State/data source:
 - UI AttendanceTab hiện tại không dùng trực tiếp các array này; nó sinh session từ schedule và giữ record trong `useMockAttendance`.
 - `useMockAttendance` dùng key `${sessionId}:${studentKey}` để lưu trạng thái; AttendanceTab truyền `membershipId` dạng string làm `studentKey` cho học sinh chính thức.
 - Helper type trong `features/classes/utils/attendance.ts`:
-  - `WeeklySession`: session sinh từ lịch học hoặc session học bù cả lớp (`isMakeup`, `makeupForSessionId`).
+  - `WeeklySession`: session sinh từ lịch học hoặc session học bù cả lớp (`classId?`, `date`, `startTime`, `endTime`, `isMakeup`, `makeupForSessionId`).
+  - `MakeupSessionInput`: input tạo học bù cả lớp gồm `classId`, `date`, `startTime`, `endTime`, `makeupForSessionId`.
   - `StudentMakeupRecord`: liên kết học sinh từ buổi gốc sang class/session nhận học bù.
   - `StudentMakeupSessionOption`: option hiển thị trong dialog chọn lớp học bù.
 - `useMockAttendance` giữ thêm module-level mock stores:
@@ -800,12 +806,12 @@ State/data source:
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
 | Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; payments chưa ảnh hưởng summary |
-| Create class | CreateClassDialog | Gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9, không còn field ghi chú |
+| Create class | CreateClassDialog | Validate bắt buộc lịch, giờ hợp lệ, không trùng giờ với lớp đã load; gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9, không còn field ghi chú; backend chưa enforce trùng lịch |
 | Select grade tab | HomePage | Lọc class cards và summary theo Khối 8/Khối 9 | UI only | none | Grade đọc từ `classes.grade` |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
 | Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
-| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance records chưa nối DB |
+| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, validate không trùng giờ với lớp khác đã load, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance records chưa nối DB; backend chưa enforce trùng lịch |
 | Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment records chưa nối DB |
 | Search student | StudentListTab | Lọc table local trên dữ liệu đã load từ DB | UI only | none | Query/filter backend khi data lớn |
 | Add student | StudentListTab | Thêm dòng mới inline, lưu tạo `students` + `class_memberships` | `students`, `class_memberships` | SQLite khi bấm Lưu cập nhật | Có thể thêm validate nâng cao sau |
@@ -813,15 +819,15 @@ State/data source:
 | Edit student | StudentListTab | Sửa fields và status trong edit mode, bấm lưu gọi DB | `students`, `class_memberships.status` | SQLite | Update student/class membership/status |
 | Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar | `weekStart` | local only | Có thể query session theo week |
-| Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Validate ngày/buổi gốc, thêm session `"Học bù cả lớp"`, buổi gốc chuyển nghỉ | `makeupSessions`, `cancelledSessionIds`, `unlockedSessionIds` | local only | Insert `attendance_sessions` type makeup, link tới buổi gốc |
+| Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Validate ngày, giờ bắt đầu/kết thúc, buổi gốc, không trùng giờ với lớp đã load; thêm session `"Học bù cả lớp"`, buổi gốc chuyển nghỉ | `makeupSessions`, `cancelledSessionIds`, `unlockedSessionIds` | local only | Insert `attendance_sessions` type makeup, link tới buổi gốc, backend cần enforce trùng giờ |
 | Remove class-level makeup session | AttendanceTab | Nút `"Hủy buổi bù"` với xác nhận; xóa buổi bù, khôi phục buổi gốc | `makeupSessions`, `cancelledSessionIds`, `unlockedSessionIds`, `attendance` | local only | Delete/cancel makeup session, restore original |
 | Mark today present | AttendanceTab | Nếu có session hôm nay chưa nghỉ, set học sinh chính thức thành present | `attendance` | local only | Batch update attendance_records |
 | Cancel/restored session | AttendanceTab | Dialog xác nhận nghỉ/hủy nghỉ, lock/unlock tương ứng | `cancelledSessionIds`, `unlockedSessionIds` | local only | Session status cancelled/restored |
 | Lock/unlock session | AttendanceTab | Toggle khả năng sửa cell | `unlockedSessionIds` | local only | Cần field locked hoặc rule theo date |
-| Set official attendance status | AttendanceTab | Nút Học/Nghỉ/Học bù theo ngữ cảnh; Học bù mở dialog chọn lớp; bấm lại nút đang chọn để bỏ trạng thái | `attendance`, `pendingStudentMakeup` | local only | Upsert attendance_record, có thể cần transaction khi chọn makeup |
+| Set official attendance status | AttendanceTab | Nút Có học/Nghỉ/Học bù theo ngữ cảnh; Học bù mở dialog chọn lớp; bấm lại nút đang chọn để bỏ trạng thái | `attendance`, `pendingStudentMakeup` | local only | Upsert attendance_record, có thể cần transaction khi chọn makeup |
 | Confirm student-level makeup | AttendanceTab dialog | Tạo liên kết học bù và set buổi gốc thành makeup | `attendance`, `studentMakeupRecords` | local only | Có thể cần bảng `student_makeup_records` hoặc link trong attendance record |
 | Remove student-level makeup by cycling off | AttendanceTab | Khi cell đang makeup chuyển sang status khác, xóa liên kết học bù cũ | `attendance`, `studentMakeupRecords` | local only | Cần delete/update record liên kết và xử lý attendance ở lớp nhận |
-| Set receiving makeup student status | AttendanceTab receiving class | Dòng học sinh học bù chỉ có nút Học/Nghỉ | `attendance` | local only | Lưu attendance cho học sinh khách nhưng không thêm vào roster chính thức |
+| Set receiving makeup student status | AttendanceTab receiving class | Dòng học sinh học bù chỉ có nút Có học/Nghỉ | `attendance` | local only | Lưu attendance cho học sinh khách nhưng không thêm vào roster chính thức |
 | Export attendance Excel | AttendanceTab | Chưa có behavior | none | none | Export sheet theo week/class |
 | Change score month | ScoresTab | Chuyển sheet tháng, thoát edit | `selectedMonth`, draft | local only | Query score columns/values by month |
 | Add score column/test | ScoresTab | Thêm cột mới, vào edit mode | `draftSheets` | local only | Insert score column |
@@ -861,7 +867,8 @@ State/data source:
 - Attendance MVP không có `"Có phép"` và không có `"Đi muộn"`; nếu muốn dùng lại cần xác nhận model mới.
 - Class-level makeup và student-level makeup đã được tách trong UI/code, nhưng vẫn chỉ là mock/local.
 - Student-level makeup hiện đã có flow chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận, nhưng chưa có persistence thật.
-- Danh sách lớp/buổi đủ điều kiện học bù theo học sinh vẫn chỉ là mock/local. Sau P0 không còn mapping DB class sang mock class id, nên class DB không tự xuất hiện trong danh sách lớp học bù cho đến khi Phase Attendance có query DB thật.
+- Danh sách lớp/buổi đủ điều kiện học bù theo học sinh hiện lấy từ `availableClasses` đã load từ SQLite, lọc cùng năm học/cùng khối/cùng thứ tự buổi và loại chính lớp hiện tại. Tuy nhiên record học bù tạo ra vẫn chỉ nằm ở mock/local state.
+- Validation trùng lịch khi tạo/sửa lớp và tạo buổi học bù cả lớp hiện chạy ở frontend dựa trên danh sách lớp đã load; Rust command/database chưa có service rule hay constraint để chặn nếu bị gọi trực tiếp.
 - Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
 - Chưa có transaction/service backend cho payments, scores, attendance.
 
@@ -874,10 +881,10 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 | `app_settings` | Implemented: lưu password hash/salt và năm học hiện tại |
 | `academic_years` | Implemented Phase 3: Home có bộ chọn năm học và class thuộc năm học |
 | `classes` | Implemented Phase 3: lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
-| `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch |
+| `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch; UI hiện kiểm tra trùng giờ với lớp đã load |
 | `students` | Implemented Phase 4: lưu thông tin học sinh, không hard delete trong flow hiện tại |
 | `class_memberships` | Implemented Phase 4: quan hệ học sinh-lớp, status active/paused thuộc membership |
-| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, lock/cancel state, link optional tới buổi gốc |
+| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, giờ bắt đầu/kết thúc, lock/cancel state, link optional tới buổi gốc |
 | `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
 | `student_makeup_records` | Lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần; hoặc gộp vào attendance schema nếu thiết kế khác |
 | `makeup_attendance_records` hoặc field liên kết | Nếu học sinh học bù ở lớp nhận cần lưu trạng thái có học/nghỉ riêng mà không thêm vào roster chính thức |
@@ -909,12 +916,14 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 - Buổi nghỉ nên lưu như một trạng thái của session hay tạo attendance record `"Nghỉ"` cho từng học sinh?
 - Đã chốt: hủy buổi (cancel) ghi Nghỉ cho toàn bộ học sinh của buổi đó; khi mở khóa/khôi phục, trạng thái Nghỉ từng học sinh giữ nguyên.
 - Class-level makeup có cần bắt buộc link tới một buổi nghỉ gốc không, hay có thể là một buổi học bù độc lập?
-- Student-level makeup nên lưu bằng bảng riêng `student_makeup_records`, hay lưu bằng attendance record có field `receivingSessionId`?
+- Đã chốt trong plan: student-level makeup dùng bảng riêng `student_makeup_records`; cần chốt thêm trạng thái lớp nhận sẽ lưu trong bảng này hay qua attendance record guest.
 - Ở buổi/lớp nhận học bù, trạng thái có học/nghỉ của học sinh khách nên lưu chung trong `attendance_records` hay bảng riêng?
 - Khi học sinh chuyển khỏi trạng thái `"Học bù"` ở buổi gốc, backend có xóa record ở lớp nhận học bù không?
 - Điều kiện chọn lớp học bù có luôn là cùng năm học và cùng thứ tự buổi trong tuần không, hay thầy cần override thủ công?
 - Học sinh học bù có được chọn sang lớp khác khối/lệch nội dung nếu thầy muốn không?
-- MVP xác nhận bỏ hẳn `"Có phép"` và `"Đi muộn"` chứ không lưu ẩn trong backend?
+- Đã chốt cho backend: rule chống trùng lịch nên áp dụng trên toàn bộ lớp active trong DB vì chỉ có một giáo viên dạy. UI hiện mới kiểm tra theo danh sách lớp của năm học đang load, nên cần hardening ở Rust service.
+- Buổi học bù cả lớp có được đặt cùng ngày học cố định nếu không trùng khoảng giờ không? UI hiện cho phép nếu không overlap.
+- Đã chốt: MVP bỏ hẳn `"Có phép"` và `"Đi muộn"`, không lưu ẩn trong backend.
 - Button `"Đánh dấu cả lớp đi học"` có áp dụng cho học sinh `"Đã nghỉ"` không?
 - Buổi đã qua có tự khóa không, và ai được mở khóa?
 - Học phí `"Chưa đóng"` nên hiển thị amount là 0 hay học phí dự kiến?

@@ -37,7 +37,7 @@ Nguyên tắc dữ liệu đã chốt:
 - Trạng thái học sinh được lưu theo quan hệ học sinh-lớp, không lưu global trên `students`.
 - Attendance statuses là enum một giá trị duy nhất cho mỗi ô học sinh/buổi:
   - empty / Chưa điểm danh
-  - present / Học
+  - present / Có học
   - absent / Nghỉ
   - makeup / Học bù
 - Không lưu nhiều boolean trạng thái; hiển thị suy ra từ một trường status.
@@ -45,6 +45,8 @@ Nguyên tắc dữ liệu đã chốt:
 - Attendance persistence vẫn thuộc Phase 7, chưa triển khai trong Phase 4.5/P0.
 - Class-level makeup là session type.
 - Student-level makeup dùng `student_makeup_records`.
+- Vì chỉ có một giáo viên dạy, lịch học cố định của các lớp không được trùng khoảng giờ với nhau, kể cả khác khối.
+- Buổi học bù cả lớp phải có giờ bắt đầu/giờ kết thúc và không được trùng khoảng giờ với lịch học hoặc buổi học bù khác đã có trong DB.
 - Payment statuses:
   - unpaid
   - paid
@@ -293,6 +295,7 @@ Notes:
 - `weekday`: 0-6 hoặc 1-7 cần chốt. Khuyến nghị dùng 0-6 như TypeScript hiện tại nếu code đang dùng `WeekdayIndex`.
 - `sort_order` giúp xác định thứ tự buổi trong tuần nếu cần override.
 - `session_index_in_week` có thể tính từ schedule đã sort, nhưng khi tạo `attendance_sessions` nên lưu lại snapshot.
+- Service tạo/sửa lịch phải kiểm tra không overlap theo cùng `weekday` + khoảng `start_time`/`end_time` với các lớp active khác. Rule nghiệp vụ hiện tại: một giáo viên dạy nên không cho trùng giờ kể cả khác khối.
 
 ### students
 
@@ -482,6 +485,8 @@ Rules:
 - Nếu học bù cho một buổi nghỉ cụ thể, lưu `makeup_for_session_id`.
 - `session_index_in_week` dùng để matching student-level makeup.
 - Session quá khứ có thể tự khóa bằng service rule.
+- `class_makeup` phải lưu `start_time` và `end_time`; service validate `end_time > start_time`.
+- Service tạo class-level makeup phải kiểm tra không overlap với lịch cố định và các session học bù đã có của những lớp active khác trong DB.
 
 ### attendance_records
 
@@ -722,6 +727,10 @@ Quy tắc phân lớp:
 
 Ví dụ service rules:
 
+- `ClassService.createOrUpdateSchedule`:
+  - Validate `end_time > start_time`.
+  - Validate không overlap với lịch cố định của lớp active khác.
+  - Không rewrite các attendance sessions quá khứ khi sửa lịch.
 - `PaymentService.markPaid`:
   - Validate membership tồn tại.
   - Set status `paid`.
@@ -798,6 +807,7 @@ Deliverables:
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
 - Lưu ý hiện tại: sau Phase 4 và refactor ID local, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` vẫn tạm trả `0` cho đến Phase 5.
+- Lưu ý hiện tại: UI đã có kiểm tra trùng lịch theo danh sách lớp đã load, nhưng Rust command/service chưa enforce. Khi quay lại Phase 3 hardening hoặc trước Attendance DB, cần đưa rule chống trùng lịch xuống backend.
 
 ### Phase 4. Students/class memberships
 
@@ -891,6 +901,7 @@ Deliverables:
 - Sinh hoặc materialize sessions theo lịch.
 - Set status official student.
 - Tạo class-level makeup session.
+- Tạo class-level makeup cần nhập ngày, giờ bắt đầu, giờ kết thúc, buổi gốc; service kiểm tra không trùng giờ với lịch/session khác.
 - Tạo student-level makeup record.
 - Receiving class hiển thị học sinh học bù.
 - Transaction cho mọi thao tác học bù.
@@ -951,6 +962,7 @@ Classes/schedules:
 - Sửa học phí lớp không làm mất payment cũ.
 - Sửa lịch học cập nhật AttendanceTab.
 - Lịch nhiều ngày cùng giờ hiển thị gọn.
+- Không cho tạo/sửa lịch lớp nếu trùng khoảng giờ với lớp active khác, kể cả khác khối.
 - Lịch khác giờ hiển thị tách dòng.
 
 Students/memberships:
@@ -989,7 +1001,8 @@ Attendance:
 - Mở khóa cho phép sửa.
 - Cancel session ghi Nghỉ cho toàn bộ học sinh của session đó.
 - Mở khóa hoặc restore session vẫn giữ trạng thái Nghỉ đã ghi cho từng học sinh.
-- Class-level makeup tạo session `class_makeup`.
+- Class-level makeup tạo session `class_makeup` có ngày, giờ bắt đầu, giờ kết thúc.
+- Class-level makeup không được trùng giờ với lịch học/session khác của các lớp active.
 - Official attendance statuses chỉ là empty/present/absent/makeup.
 - Không có late/excused trong DB/UI.
 - Chọn makeup mở flow chọn receiving session.
@@ -1045,6 +1058,8 @@ Excel import/export:
 - Regular attendance sessions có thể được materialize khi mở tuần hoặc khi có thao tác đầu tiên.
 - Sửa lịch học không rewrite các attendance sessions trong quá khứ.
 - Class-level makeup là `attendance_sessions.type = class_makeup`.
+- Class-level makeup phải có `start_time` và `end_time`.
+- Backend service phải chặn lịch học/lịch học bù trùng khoảng giờ giữa các lớp active, vì app chỉ phục vụ một giáo viên dạy trực tiếp.
 - Student-level makeup dùng `student_makeup_records`.
 - Payment statuses là unpaid/paid/waived.
 - Payment amount lưu theo từng tháng.

@@ -21,7 +21,7 @@ Trạng thái điểm danh của một học sinh trong một buổi học:
 | Code | Nhãn UI | Ý nghĩa |
 |---|---|---|
 | empty | Chưa điểm danh | Chưa nhập trạng thái cho học sinh ở buổi đó |
-| present | Học | Học sinh có tham gia buổi học |
+| present | Có học | Học sinh có tham gia buổi học |
 | absent | Nghỉ | Học sinh không tham gia buổi học |
 | makeup | Học bù | Học sinh của lớp gốc học bù ở một lớp/buổi khác |
 
@@ -90,14 +90,15 @@ Luồng đã chốt:
 
 1. Giáo viên tạo một buổi học bù cho cả lớp và bắt buộc chọn buổi gốc cần bù.
 2. Session gốc tự động chuyển `status = cancelled` khi buổi học bù được tạo.
-3. Buổi học bù được lưu thành một session riêng với `type = class_makeup` và lưu `makeup_for_session_id` trỏ về buổi gốc.
+3. Buổi học bù được lưu thành một session riêng với `type = class_makeup`, có `start_time`, `end_time`, và lưu `makeup_for_session_id` trỏ về buổi gốc.
 4. Ngày học bù phải sau ngày hôm nay. Lỗi hiển thị: `"Ngày học bù phải sau ngày hôm nay."`
-5. Ngày học bù không được trùng với các thứ trong lịch học cố định của lớp. Lỗi hiển thị: `"Ngày học bù không được trùng với lịch học cố định của lớp."`
-6. Trong buổi học bù cả lớp, học sinh chính thức chỉ được điểm danh:
+5. Giờ kết thúc phải sau giờ bắt đầu.
+6. UI hiện tại kiểm tra buổi học bù không trùng khoảng giờ với lịch cố định của các lớp đã load, kể cả khác khối, và không trùng khoảng giờ với buổi học bù cả lớp đã có của chính lớp đó trong mock state.
+7. Trong buổi học bù cả lớp, học sinh chính thức chỉ được điểm danh:
    - Chưa điểm danh
-   - Học
+   - Có học
    - Nghỉ
-7. Buổi học bù cả lớp KHÔNG có lựa chọn `"Học bù"` cho từng học sinh, để tránh học bù đệ quy/khó hiểu.
+8. Buổi học bù cả lớp KHÔNG có lựa chọn `"Học bù"` cho từng học sinh, để tránh học bù đệ quy/khó hiểu.
 
 Hủy buổi học bù cả lớp:
 
@@ -115,7 +116,7 @@ Ví dụ:
 - Lớp Văn 9 nghỉ buổi Thứ 3.
 - Giáo viên tạo buổi học bù vào Chủ nhật, chọn buổi gốc Thứ 3; buổi Thứ 3 tự chuyển sang nghỉ.
 - Chủ nhật là một `attendance_session` riêng, `type = class_makeup`.
-- Học sinh trong lớp Văn 9 được điểm danh ở buổi Chủ nhật với hai lựa chọn Học/Nghỉ.
+- Học sinh trong lớp Văn 9 được điểm danh ở buổi Chủ nhật với hai lựa chọn Có học/Nghỉ.
 
 ## 6. Student-level makeup flow
 
@@ -158,7 +159,7 @@ Khi xác nhận học bù:
 3. Ở lớp nhận, học sinh xuất hiện như một extra makeup row.
 4. Extra makeup row chỉ được điểm danh:
    - Chưa điểm danh
-   - Học
+   - Có học
    - Nghỉ
 5. Extra makeup row KHÔNG có lựa chọn `"Học bù"` — không cho học bù tiếp từ một buổi học bù.
 
@@ -185,12 +186,12 @@ UI điểm danh hoạt động như sau:
   - Chỉ một trạng thái được chọn tại một thời điểm; nút đang chọn được highlight.
   - Bấm lại nút đang chọn để bỏ trạng thái, quay về Chưa điểm danh.
 - Quy tắc nút theo loại buổi/dòng:
-  - Buổi thường + học sinh chính thức: Học / Nghỉ / Học bù.
+  - Buổi thường + học sinh chính thức: Có học / Nghỉ / Học bù.
   - Buổi nghỉ (cancelled): không có nút, mọi ô hiển thị `"Nghỉ"` thống nhất một màu đỏ, giống hệt khi tick Nghỉ từng học sinh.
-  - Buổi học bù cả lớp + học sinh chính thức: Học / Nghỉ.
-  - Dòng học sinh học bù ở lớp nhận: Học / Nghỉ.
+  - Buổi học bù cả lớp + học sinh chính thức: Có học / Nghỉ.
+  - Dòng học sinh học bù ở lớp nhận: Có học / Nghỉ.
 - Trạng thái `"Nghỉ"` dùng chung một màu đỏ ở mọi cấp (session nghỉ và học sinh nghỉ); phân biệt nội bộ bằng session.status vs attendance.status, không phân biệt bằng màu.
-- Bấm `"Học"` hoặc `"Nghỉ"`: set trạng thái ngay và xóa record học bù cũ của ô đó nếu có.
+- Bấm `"Có học"` hoặc `"Nghỉ"`: set trạng thái ngay và xóa record học bù cũ của ô đó nếu có.
 - Bấm `"Học bù"`: mở dialog chọn lớp/buổi học bù; chưa set trạng thái.
 - Nếu hủy dialog, giữ nguyên trạng thái cũ.
 - Nếu xác nhận dialog, buổi gốc hiển thị `"Học bù"` và chi tiết:
@@ -205,7 +206,7 @@ Các nút UI trong MVP:
 - Tuần trước
 - Chọn tuần bằng lịch mini
 - Tuần sau
-- Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, validate ngày không trùng lịch cố định, buổi gốc tự chuyển nghỉ
+- Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, có giờ bắt đầu/giờ kết thúc, validate không trùng khoảng giờ với lịch lớp đã load, buổi gốc tự chuyển nghỉ
 - Hủy buổi bù: trên header buổi học bù cả lớp, có xác nhận, khôi phục buổi gốc
 - Đánh dấu cả lớp đi học: chỉ áp dụng cho buổi hôm nay chưa nghỉ; áp dụng cả buổi học bù cả lớp; đánh dấu luôn cả dòng học sinh học bù đang nhận ở buổi hôm nay
 - Xuất Excel, UI only trong MVP
@@ -224,8 +225,8 @@ Fields đề xuất:
 
 | Field | Type gợi ý | Ghi chú |
 |---|---|---|
-| id | text/uuid | Khóa chính |
-| class_id | text | Lớp sở hữu session |
+| id | integer autoincrement | Khóa chính nội bộ |
+| class_id | integer | Lớp sở hữu session |
 | session_date | text/date | Ngày học |
 | start_time | text | Giờ bắt đầu |
 | end_time | text | Giờ kết thúc |
@@ -233,7 +234,7 @@ Fields đề xuất:
 | type | text | `regular` hoặc `class_makeup` |
 | status | text | `active` hoặc `cancelled` |
 | is_locked | boolean | Khóa chỉnh sửa điểm danh |
-| makeup_for_session_id | text/null | Nếu là buổi học bù cả lớp cho một session đã nghỉ |
+| makeup_for_session_id | integer/null | Nếu là buổi học bù cả lớp cho một session đã nghỉ |
 | note | text/null | Ghi chú buổi học |
 | created_at | text/datetime | Metadata |
 | updated_at | text/datetime | Metadata |
@@ -246,10 +247,10 @@ Fields đề xuất:
 
 | Field | Type gợi ý | Ghi chú |
 |---|---|---|
-| id | text/uuid | Khóa chính |
-| session_id | text | Buổi học |
-| student_id | text | Học sinh |
-| class_id | text | Lớp đang hiển thị session |
+| id | integer autoincrement | Khóa chính nội bộ |
+| session_id | integer | Buổi học |
+| student_id | integer | Học sinh |
+| class_id | integer | Lớp đang hiển thị session |
 | status | text/null | `present`, `absent`, `makeup`, hoặc null/không có record cho Chưa điểm danh |
 | note | text/null | Ghi chú riêng |
 | created_at | text/datetime | Metadata |
@@ -257,8 +258,7 @@ Fields đề xuất:
 
 Ghi chú:
 
-- Có thể không tạo record khi trạng thái là Chưa điểm danh.
-- Hoặc có thể tạo record với `status = null`; cần chốt trước khi làm backend.
+- Theo quyết định backend hiện tại, không tạo record khi trạng thái là Chưa điểm danh; không có row nghĩa là empty.
 - Với học sinh học bù ở lớp nhận, có thể dùng `attendance_records` nếu có field phân biệt record chính thức/guest, hoặc dùng bảng riêng.
 
 ### student_makeup_records
@@ -269,12 +269,12 @@ Fields đề xuất:
 
 | Field | Type gợi ý | Ghi chú |
 |---|---|---|
-| id | text/uuid | Khóa chính |
-| student_id | text | Học sinh học bù |
-| original_class_id | text | Lớp gốc |
-| original_session_id | text | Buổi học bị nghỉ ở lớp gốc |
-| receiving_class_id | text | Lớp nhận học bù |
-| receiving_session_id | text | Buổi nhận học bù |
+| id | integer autoincrement | Khóa chính nội bộ |
+| student_id | integer | Học sinh học bù |
+| original_class_id | integer | Lớp gốc |
+| original_session_id | integer | Buổi học bị nghỉ ở lớp gốc |
+| receiving_class_id | integer | Lớp nhận học bù |
+| receiving_session_id | integer | Buổi nhận học bù |
 | session_index_in_week | integer | Thứ tự buổi tương ứng trong tuần |
 | receiving_attendance_status | text/null | Trạng thái ở lớp nhận: null, `present`, `absent` |
 | note | text/null | Ghi chú nếu cần |
