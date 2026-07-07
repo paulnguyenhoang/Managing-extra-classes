@@ -1,4 +1,5 @@
 mod db;
+mod payments;
 mod school;
 mod settings;
 mod students;
@@ -56,7 +57,12 @@ pub fn run() {
             students::list_students_by_class,
             students::create_student_for_class,
             students::update_student,
-            students::update_class_membership_status
+            students::update_class_membership_status,
+            payments::list_payments_by_class_month,
+            payments::set_payment_paid,
+            payments::set_payment_unpaid,
+            payments::set_payment_waived,
+            payments::update_payment_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

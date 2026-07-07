@@ -47,15 +47,16 @@ export function TuitionWaiverDialog({
 
   const numericAmount = Number(amount);
   const hasValidAmount = isValidWaivedAmount(numericAmount, monthlyFee);
+  const hasNote = note.trim().length > 0;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!hasValidAmount) {
+    if (!hasValidAmount || !hasNote) {
       return;
     }
 
-    onSave(numericAmount, note);
+    onSave(numericAmount, note.trim());
   }
 
   return (
@@ -102,6 +103,9 @@ export function TuitionWaiverDialog({
               onChange={(event) => setNote(event.target.value)}
               placeholder="Ví dụ: Giảm còn 300.000"
             />
+            {!hasNote ? (
+              <p className="text-sm text-amber-700">Miễn giảm học phí cần có ghi chú lý do.</p>
+            ) : null}
           </div>
           <DialogFooter>
             <DialogClose asChild>
@@ -109,7 +113,7 @@ export function TuitionWaiverDialog({
                 Hủy
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={!hasValidAmount}>
+            <Button type="submit" disabled={!hasValidAmount || !hasNote}>
               Lưu
             </Button>
           </DialogFooter>

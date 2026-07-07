@@ -1,14 +1,6 @@
-import type { Payment, PaymentStatus } from "@/types/payment";
-import type { ClassStudentRosterItem, Student } from "@/types/student";
+import type { PaymentRow, PaymentStatus } from "@/types/payment";
 
 export type PaymentFilter = "all" | PaymentStatus;
-
-export type PaymentRow = {
-  student: PaymentRosterStudent;
-  payment: Payment;
-};
-
-export type PaymentRosterStudent = Student | ClassStudentRosterItem;
 
 export type PaymentSummary = {
   totalStudents: number;
@@ -38,51 +30,20 @@ export const paymentSelectClasses: Record<PaymentStatus, string> = {
     "!border-violet-200 !bg-violet-50 !text-violet-900 hover:!bg-violet-100 [&_svg]:!text-violet-800",
 };
 
-export function getPaymentStudentKey(student: PaymentRosterStudent) {
-  return String("membershipId" in student ? student.membershipId : student.id);
-}
-
-export function getPaymentRows(
-  students: PaymentRosterStudent[],
-  payments: Payment[],
-  classId: string | number,
-  month: string,
-) {
-  return students.map<PaymentRow>((student) => {
-    const studentKey = getPaymentStudentKey(student);
-    const payment =
-      payments.find((item) => item.studentId === studentKey) ??
-      createUnpaidPayment(studentKey, String(classId), month);
-
-    return { student, payment };
-  });
-}
-
-export function createUnpaidPayment(studentId: string, classId: string, month: string): Payment {
-  return {
-    id: `mock-payment-${month}-${studentId}`,
-    studentId,
-    classId,
-    month,
-    status: "unpaid",
-    amount: 0,
-  };
-}
-
 export function getPaymentSummary(rows: PaymentRow[]): PaymentSummary {
   return {
     totalStudents: rows.length,
-    paid: rows.filter((row) => row.payment.status === "paid").length,
-    unpaid: rows.filter((row) => row.payment.status === "unpaid").length,
-    waived: rows.filter((row) => row.payment.status === "waived").length,
+    paid: rows.filter((row) => row.status === "paid").length,
+    unpaid: rows.filter((row) => row.status === "unpaid").length,
+    waived: rows.filter((row) => row.status === "waived").length,
     collected: rows
-      .filter((row) => row.payment.status === "paid" || row.payment.status === "waived")
-      .reduce((total, row) => total + row.payment.amount, 0),
+      .filter((row) => row.status === "paid" || row.status === "waived")
+      .reduce((total, row) => total + row.amount, 0),
   };
 }
 
 export function filterPaymentRows(rows: PaymentRow[], filter: PaymentFilter) {
-  return filter === "all" ? rows : rows.filter((row) => row.payment.status === filter);
+  return filter === "all" ? rows : rows.filter((row) => row.status === filter);
 }
 
 export function formatPaymentMonth(month: string) {
@@ -94,25 +55,29 @@ export function formatPaymentMonthLabel(month: string) {
   return `Tháng ${formatPaymentMonth(month)}`;
 }
 
-export function todayDateKey() {
-  const today = new Date();
+export function currentMonthKey(today = new Date()) {
   const year = today.getFullYear();
   const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+  return `${year}-${month}`;
 }
 
-export function upsertPayment(payments: Payment[], nextPayment: Payment) {
-  const exists = payments.some((payment) => payment.studentId === nextPayment.studentId);
+// TODO(Phase 6+): sinh danh sách tháng từ khoảng startsAt/endsAt của năm học đang chọn
+// thay vì cửa sổ trượt quanh tháng hiện tại. Helper này dự kiến dùng lại cho ScoresTab.
+export function generateMonthOptions(
+  today = new Date(),
+  monthsBack = 12,
+  monthsForward = 1,
+): string[] {
+  const months: string[] = [];
 
-  return exists
-    ? payments.map((payment) =>
-        payment.studentId === nextPayment.studentId ? nextPayment : payment,
-      )
-    : [...payments, nextPayment];
+  for (let offset = -monthsBack; offset <= monthsForward; offset += 1) {
+    const date = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    months.push(currentMonthKey(date));
+  }
+
+  return months;
 }
 
 export function isValidWaivedAmount(amount: number, monthlyFee: number) {
-  return amount >= 0 && amount <= monthlyFee;
+  return Number.isInteger(amount) && amount >= 0 && amount <= monthlyFee;
 }

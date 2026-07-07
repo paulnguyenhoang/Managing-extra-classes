@@ -604,6 +604,7 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
     let schedule_items = schedule_items_for_class(connection, class_row.0)?;
     let schedule = format_schedule_text(&schedule_items);
     let student_count = crate::students::count_active_students_by_class(connection, class_row.0)?;
+    let unpaid_count = crate::payments::count_unpaid_by_class_current_month(connection, class_row.0)?;
 
     Ok(ClassOverviewDto {
         id: class_row.0,
@@ -619,7 +620,7 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
             .unwrap_or_else(|| "Phòng học nhà thầy".to_string()),
         note: class_row.6,
         student_count,
-        unpaid_count: 0,
+        unpaid_count,
     })
 }
 

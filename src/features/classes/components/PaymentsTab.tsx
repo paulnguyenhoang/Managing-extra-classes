@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,77 +18,105 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  currentPaymentMonth,
-  paymentMonths,
-} from "@/data/mockData";
 import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
 import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
-import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import {
+  currentMonthKey,
   filterPaymentRows,
   formatPaymentMonth,
   formatPaymentMonthLabel,
-  getPaymentStudentKey,
-  getPaymentRows,
+  generateMonthOptions,
   getPaymentSummary,
   paymentFilterOptions,
   paymentSelectClasses,
   paymentStatusOptions,
-  todayDateKey,
-  upsertPayment,
   type PaymentFilter,
-  type PaymentRow,
 } from "@/features/classes/utils/payments";
 import { formatCurrency, formatDate } from "@/lib/format";
-import type { Payment, PaymentStatus } from "@/types/payment";
+import {
+  listPaymentsByClassMonth,
+  setPaymentPaid,
+  setPaymentUnpaid,
+  setPaymentWaived,
+  updatePaymentNote,
+} from "@/services/paymentApi";
+import type { PaymentRow, PaymentStatus } from "@/types/payment";
 
 type PaymentsTabProps = {
   classId: number;
   monthlyFeeOverride?: number;
 };
 
-type PaymentsByMonth = Record<string, Payment[]>;
-
 export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
-  const [selectedMonth, setSelectedMonth] = useState(currentPaymentMonth);
+  const monthOptions = useMemo(() => generateMonthOptions(), []);
+  const [selectedMonth, setSelectedMonth] = useState(() => currentMonthKey());
   const [filter, setFilter] = useState<PaymentFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [rows, setRows] = useState<PaymentRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [pendingPaidRow, setPendingPaidRow] = useState<PaymentRow | null>(null);
   const [pendingWaivedRow, setPendingWaivedRow] = useState<PaymentRow | null>(null);
-  const {
-    students,
-    isLoading: isLoadingStudents,
-    errorMessage: studentsErrorMessage,
-  } = useClassStudents(classId);
+  const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
   const monthlyFee = monthlyFeeOverride ?? 0;
-  const [paymentsByMonth, setPaymentsByMonth] = useState<PaymentsByMonth>(() =>
-    paymentMonths.reduce<PaymentsByMonth>((result, month) => {
-      result[month] = [];
-      return result;
-    }, {}),
-  );
 
-  const currentPayments = paymentsByMonth[selectedMonth] ?? [];
-  const rows = useMemo(
-    () => getPaymentRows(students, currentPayments, classId, selectedMonth),
-    [classId, currentPayments, selectedMonth, students],
-  );
+  const refreshRows = useCallback(async () => {
+    setErrorMessage("");
+
+    try {
+      const nextRows = await listPaymentsByClassMonth(classId, selectedMonth);
+      setRows(nextRows);
+      setNoteDrafts({});
+    } catch (error) {
+      console.warn("[payments] load failed", error);
+      setRows([]);
+      setErrorMessage("Không tải được dữ liệu học phí từ database.");
+    }
+  }, [classId, selectedMonth]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setIsLoading(true);
+    refreshRows().finally(() => {
+      if (!cancelled) {
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshRows]);
+
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleRows = filterPaymentRows(rows, filter).filter((row) =>
-    normalizedQuery ? row.student.fullName.toLowerCase().includes(normalizedQuery) : true,
+    normalizedQuery ? row.fullName.toLowerCase().includes(normalizedQuery) : true,
   );
   const summary = getPaymentSummary(rows);
   const selectedMonthLabel = formatPaymentMonth(selectedMonth);
 
-  function updatePayment(nextPayment: Payment) {
-    setPaymentsByMonth((current) => ({
-      ...current,
-      [selectedMonth]: upsertPayment(current[selectedMonth] ?? [], nextPayment),
-    }));
+  async function runPaymentAction(action: () => Promise<void>, failureMessage: string) {
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      await action();
+      await refreshRows();
+    } catch (error) {
+      console.warn("[payments] action failed", error);
+      setErrorMessage(typeof error === "string" ? error : failureMessage);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function handleStatusChange(row: PaymentRow, status: PaymentStatus) {
+    if (status === row.status) {
+      return;
+    }
+
     if (status === "paid") {
       setPendingPaidRow(row);
       return;
@@ -99,12 +127,16 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
       return;
     }
 
-    updatePayment({
-      ...row.payment,
-      status: "unpaid",
-      amount: 0,
-      paidAt: undefined,
-    });
+    void runPaymentAction(
+      () =>
+        setPaymentUnpaid({
+          membershipId: row.membershipId,
+          classId: row.classId,
+          studentId: row.studentId,
+          month: selectedMonth,
+        }),
+      "Không lưu được trạng thái chưa đóng.",
+    );
   }
 
   function confirmPaid() {
@@ -112,13 +144,18 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
       return;
     }
 
-    updatePayment({
-      ...pendingPaidRow.payment,
-      status: "paid",
-      amount: monthlyFee,
-      paidAt: todayDateKey(),
-    });
+    const row = pendingPaidRow;
     setPendingPaidRow(null);
+    void runPaymentAction(
+      () =>
+        setPaymentPaid({
+          membershipId: row.membershipId,
+          classId: row.classId,
+          studentId: row.studentId,
+          month: selectedMonth,
+        }),
+      "Không lưu được trạng thái đã đóng.",
+    );
   }
 
   function saveWaiver(amount: number, note: string) {
@@ -126,21 +163,40 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
       return;
     }
 
-    updatePayment({
-      ...pendingWaivedRow.payment,
-      status: "waived",
-      amount,
-      note,
-      paidAt: amount > 0 ? todayDateKey() : undefined,
-    });
+    const row = pendingWaivedRow;
     setPendingWaivedRow(null);
+    void runPaymentAction(
+      () =>
+        setPaymentWaived({
+          membershipId: row.membershipId,
+          classId: row.classId,
+          studentId: row.studentId,
+          month: selectedMonth,
+          amount,
+          note,
+        }),
+      "Không lưu được miễn giảm học phí.",
+    );
   }
 
-  function updateNote(row: PaymentRow, note: string) {
-    updatePayment({
-      ...row.payment,
-      note,
-    });
+  function saveNoteIfChanged(row: PaymentRow) {
+    const draft = noteDrafts[row.membershipId];
+
+    if (draft === undefined || draft === (row.note ?? "")) {
+      return;
+    }
+
+    void runPaymentAction(
+      () =>
+        updatePaymentNote({
+          membershipId: row.membershipId,
+          classId: row.classId,
+          studentId: row.studentId,
+          month: selectedMonth,
+          note: draft,
+        }),
+      "Không lưu được ghi chú học phí.",
+    );
   }
 
   return (
@@ -161,7 +217,7 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
               <SelectValue placeholder="Chọn tháng" />
             </SelectTrigger>
             <SelectContent>
-              {paymentMonths.map((month) => (
+              {monthOptions.map((month) => (
                 <SelectItem key={month} value={month}>
                   {formatPaymentMonthLabel(month)}
                 </SelectItem>
@@ -194,6 +250,12 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
         <SummaryCard label="Tổng đã thu" value={formatCurrency(summary.collected)} />
       </div>
 
+      {errorMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <div className="min-w-0 rounded-lg border bg-white">
         <Table className="min-w-[900px]">
           <TableHeader>
@@ -207,72 +269,79 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoadingStudents ? (
+            {isLoading ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-slate-600">
-                  Đang tải danh sách học sinh...
+                  Đang tải dữ liệu học phí...
                 </TableCell>
               </TableRow>
             ) : null}
-            {studentsErrorMessage ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-red-700">
-                  {studentsErrorMessage}
-                </TableCell>
-              </TableRow>
-            ) : null}
-            {!isLoadingStudents && !studentsErrorMessage && visibleRows.length === 0 ? (
+            {!isLoading && visibleRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-slate-600">
                   Không có học sinh phù hợp.
                 </TableCell>
               </TableRow>
             ) : null}
-            {visibleRows.map((row, index) => (
-              <TableRow key={getPaymentStudentKey(row.student)}>
-                <TableCell>{index + 1}</TableCell>
-                <TableCell className="font-medium text-slate-950">{row.student.fullName}</TableCell>
-                <TableCell>
-                  <Select
-                    value={row.payment.status}
-                    onValueChange={(value) => handleStatusChange(row, value as PaymentStatus)}
-                  >
-                    <SelectTrigger
-                      className={[
-                        "h-8 w-36 justify-between font-medium shadow-none",
-                        paymentSelectClasses[row.payment.status],
-                      ].join(" ")}
+            {!isLoading &&
+              visibleRows.map((row, index) => (
+                <TableRow key={row.membershipId}>
+                  <TableCell>{index + 1}</TableCell>
+                  <TableCell className="font-medium text-slate-950">{row.fullName}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={row.status}
+                      disabled={isSaving}
+                      onValueChange={(value) => handleStatusChange(row, value as PaymentStatus)}
                     >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {paymentStatusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>{formatCurrency(row.payment.amount)}</TableCell>
-                <TableCell>{formatDate(row.payment.paidAt)}</TableCell>
-                <TableCell>
-                  <Input
-                    value={row.payment.note ?? ""}
-                    onChange={(event) => updateNote(row, event.target.value)}
-                    className="h-8 min-w-56 bg-white"
-                    placeholder="Thêm ghi chú"
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
+                      <SelectTrigger
+                        className={[
+                          "h-8 w-36 justify-between font-medium shadow-none",
+                          paymentSelectClasses[row.status],
+                        ].join(" ")}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {paymentStatusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>{formatCurrency(row.amount)}</TableCell>
+                  <TableCell>{formatDate(row.paidAt ?? undefined)}</TableCell>
+                  <TableCell>
+                    <Input
+                      value={noteDrafts[row.membershipId] ?? row.note ?? ""}
+                      disabled={isSaving}
+                      onChange={(event) =>
+                        setNoteDrafts((current) => ({
+                          ...current,
+                          [row.membershipId]: event.target.value,
+                        }))
+                      }
+                      onBlur={() => saveNoteIfChanged(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.currentTarget.blur();
+                        }
+                      }}
+                      className="h-8 min-w-56 bg-white"
+                      placeholder="Thêm ghi chú"
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
           </TableBody>
         </Table>
       </div>
 
       <ConfirmPaidDialog
         open={Boolean(pendingPaidRow)}
-        studentName={pendingPaidRow?.student.fullName ?? ""}
+        studentName={pendingPaidRow?.fullName ?? ""}
         monthLabel={selectedMonthLabel}
         monthlyFee={monthlyFee}
         onOpenChange={(open) => {
@@ -284,11 +353,11 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
       />
       <TuitionWaiverDialog
         open={Boolean(pendingWaivedRow)}
-        studentName={pendingWaivedRow?.student.fullName ?? ""}
+        studentName={pendingWaivedRow?.fullName ?? ""}
         monthLabel={selectedMonthLabel}
         monthlyFee={monthlyFee}
-        defaultAmount={pendingWaivedRow?.payment.amount ?? 0}
-        defaultNote={pendingWaivedRow?.payment.note ?? ""}
+        defaultAmount={pendingWaivedRow?.amount ?? 0}
+        defaultNote={pendingWaivedRow?.note ?? ""}
         onOpenChange={(open) => {
           if (!open) {
             setPendingWaivedRow(null);
