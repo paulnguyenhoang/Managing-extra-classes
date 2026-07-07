@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-4 đã được triển khai một phần trong app code; các phase còn lại vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -858,6 +858,8 @@ Phạm vi:
 
 ### Phase 5. Payments
 
+Trạng thái hiện tại: đã triển khai.
+
 Mục tiêu:
 
 - Lưu học phí theo tháng.
@@ -865,13 +867,21 @@ Mục tiêu:
 - Lưu amount theo tháng.
 - Miễn giảm có note.
 
-Deliverables:
+Deliverables (đã hoàn thành):
 
-- PaymentsTab đọc dữ liệu theo month từ DB.
-- Confirm paid update DB.
-- Waiver dialog lưu amount/note.
-- Search/filter dùng data DB đã load.
-- Summary tính từ DB data.
+- Migration `005_payments`: bảng `payments` + unique `(membership_id, month)` + CHECK status/amount.
+- Module `src-tauri/src/payments/mod.rs` với commands: `list_payments_by_class_month`, `set_payment_paid`, `set_payment_unpaid`, `set_payment_waived`, `update_payment_note`.
+- List trả dòng cho mọi membership active kể cả khi chưa có payment row (dòng ảo unpaid, lazy upsert khi thao tác).
+- PaymentsTab đọc dữ liệu theo month từ DB, refresh sau mỗi thao tác.
+- Confirm paid update DB với amount snapshot học phí và `paid_at = date('now','localtime')`.
+- Waiver dialog lưu amount/note; note bắt buộc ở cả UI và service; amount validate 0..fee.
+- Ghi chú lưu khi blur/Enter; tạo row unpaid nếu chưa có.
+- Search/filter dùng data DB đã load; summary tính từ DB data.
+- `unpaidCount` trong class overview đếm thật theo tháng hệ thống hiện tại.
+
+Hạn chế còn lại:
+
+- Danh sách tháng trong PaymentsTab là cửa sổ trượt quanh tháng hiện tại (12 tháng trước → 1 tháng sau), chưa sinh từ khoảng ngày năm học; sẽ dùng chung helper khi làm Scores.
 
 ### Phase 6. Scores
 

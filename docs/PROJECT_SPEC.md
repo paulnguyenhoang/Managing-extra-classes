@@ -157,7 +157,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 | Tab Danh sách học sinh | `StudentListTab.tsx` | Xem/tìm/sửa/thêm học sinh | implemented | Load/save SQLite qua `students` và `class_memberships` |
 | Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented | Roster SQLite qua `useClassStudents`, record local qua `useMockAttendance` |
 | Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | Roster SQLite qua `useClassStudents`, score local qua `useMockScores` |
-| Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | Roster SQLite qua `useClassStudents`, payment local trong tab |
+| Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | SQLite Phase 5: bảng `payments`, khóa `(membership_id, month)` |
 | Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Placeholder dashboard học phí toàn app | placeholder | Summary card mock tĩnh |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Placeholder backup/restore | placeholder | Button disabled |
@@ -232,7 +232,7 @@ Hạn chế:
 
 - Không có sửa/xóa/archive lớp ở Home.
 - Lớp tạo mới chưa có học sinh cho đến khi thêm ở tab Danh sách học sinh.
-- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` từ DB hiện tạm là `0` cho đến phase payments.
+- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` đếm thật từ bảng `payments` cho tháng hệ thống hiện tại: membership active chưa có payment row hoặc row đang `unpaid` đều tính là chưa đóng; `paid`/`waived` không tính.
 
 ## 10. Class Detail Header hiện tại
 
@@ -541,15 +541,17 @@ State/data source:
 
 ## 14. Tab Học phí hiện tại
 
+Trạng thái: đã nối SQLite (Phase 5). Payment rows lưu trong bảng `payments`, khóa theo `(membership_id, month)`.
+
 Month selector:
 
-- Select tháng từ `paymentMonths`: `2026-05`, `2026-06`, `2026-07`, `2026-08`.
-- Default `currentPaymentMonth = "2026-07"`.
-- Mỗi tháng có state riêng trong `paymentsByMonth`.
+- Danh sách tháng sinh động từ `generateMonthOptions` (cửa sổ trượt: 12 tháng trước đến 1 tháng sau tháng hiện tại).
+- Default là tháng hệ thống hiện tại (`currentMonthKey`).
+- TODO: sau này sinh danh sách tháng từ khoảng ngày của năm học đang chọn; helper dự kiến dùng lại cho ScoresTab.
 
 Search:
 
-- Ô `"Tìm nhanh tên học sinh..."` lọc local theo `student.fullName`.
+- Ô `"Tìm nhanh tên học sinh..."` lọc client-side theo `fullName` trên dữ liệu đã load từ DB.
 
 Filter:
 
@@ -591,35 +593,31 @@ Status change behavior:
 
 - Chọn `"Đã đóng"` không đổi ngay; mở `ConfirmPaidDialog`.
 - Dialog xác nhận gồm tên học sinh, tháng, học phí tháng của lớp.
-- Confirm set:
-  - `status: "paid"`
-  - `amount: monthlyFee`
-  - `paidAt: todayDateKey()`
-- Chọn `"Chưa đóng"` đổi ngay:
-  - `status: "unpaid"`
-  - `amount: 0`
-  - `paidAt: undefined`
-  - giữ nguyên note
+- Confirm gọi command `set_payment_paid`:
+  - `status = paid`
+  - `amount` = snapshot học phí tháng của lớp tại thời điểm đóng
+  - `paid_at` = ngày hiện tại (SQLite `date('now','localtime')`)
+- Chọn `"Chưa đóng"` gọi ngay `set_payment_unpaid`:
+  - `status = unpaid`, `amount = 0`, `paid_at = NULL`
+  - note được giữ nguyên trong DB
 - Chọn `"Miễn giảm"` mở `TuitionWaiverDialog`.
 - Dialog miễn giảm hiển thị readonly: học sinh, tháng, học phí lớp.
-- Form miễn giảm gồm: số tiền thực thu, ghi chú.
-- Validation: amount >= 0 và <= monthlyFee.
-- Lưu miễn giảm set:
-  - `status: "waived"`
-  - `amount` theo input
-  - `note` theo input
-  - `paidAt` là hôm nay nếu amount > 0, ngược lại undefined.
+- Form miễn giảm gồm: số tiền thực thu, ghi chú (BẮT BUỘC — UI disable nút Lưu và backend trả lỗi nếu thiếu).
+- Validation: amount >= 0 và <= monthlyFee (cả UI lẫn service layer).
+- Lưu gọi `set_payment_waived`:
+  - `status = waived`, `amount` theo input, `note` theo input
+  - `paid_at` là hôm nay nếu amount > 0, ngược lại NULL.
+- Sau mỗi thao tác, tab refresh lại danh sách từ DB; control trạng thái bị disable trong lúc đang lưu.
 
 Amount behavior:
 
-- Dòng có payment trong mock dùng amount từ payment.
-- Dòng không có payment tạo unpaid payment với amount 0 bằng `createUnpaidPayment`.
-- Trong `mockData.ts`, có dòng unpaid tháng 07 của `s2` amount 700000; code hiện vẫn hiển thị amount đó cho payment tồn tại.
+- Backend trả về dòng cho MỌI membership active của lớp trong tháng; nếu chưa có payment row thì trả dòng ảo `unpaid`, `amount = 0`, `paymentId = null`.
+- Không tự insert row unpaid khi chỉ xem tháng; row chỉ được tạo khi có thao tác (lazy upsert).
 
 Note behavior:
 
-- Cột ghi chú là input inline.
-- Gõ note gọi `updateNote`, cập nhật local state của tháng đang chọn.
+- Cột ghi chú là input inline, lưu khi blur hoặc Enter (chỉ ghi DB khi giá trị thay đổi).
+- Sửa note khi chưa có payment row sẽ tạo row `unpaid` kèm note (`update_payment_note`).
 
 Export:
 
@@ -627,11 +625,12 @@ Export:
 
 State/data source:
 
-- Roster học sinh lấy từ `useClassStudents(classId)` qua SQLite.
-- Initial payment records theo tháng hiện là local rỗng; UI ghép roster DB thành các dòng mặc định `Chưa đóng`.
-- `PaymentsTab` giữ `paymentsByMonth` local.
-- `monthlyFee` lấy từ prop `monthlyFeeOverride` từ ClassDetail header.
-- Thay đổi mất khi reload.
+- Dòng học phí load từ command `list_payments_by_class_month(classId, month)` — backend join `class_memberships` + `students` + LEFT JOIN `payments`.
+- Đổi classId hoặc tháng sẽ load lại từ DB; có loading state và thông báo lỗi tiếng Việt.
+- `monthlyFee` cho dialog lấy từ prop `monthlyFeeOverride` từ ClassDetail header (backend tự đọc lại fee khi ghi).
+- Summary cards tính từ dữ liệu DB đang load; "Tổng đã thu" = tổng amount của paid + waived.
+- STT tính theo `index + 1` của dòng đang hiển thị sau search/filter, không dùng database ID.
+- Dữ liệu học phí persist sau reload/restart.
 
 ## 15. Các trang/sidebar page khác hiện tại
 
@@ -691,7 +690,7 @@ State/data source:
   - `ClassGrade = 8 | 9`
 - SQLite Phase 3 có bảng `classes` và `class_schedules`, đều dùng id số tự tăng; `classes.academic_year_id` và `class_schedules.class_id` là foreign key số.
 - Seed DB hiện tạo các lớp mẫu tương ứng Văn 9/Văn 8/Văn 7/khóa trước nếu bảng năm học/lớp đang rỗng; các khóa mock cũ chỉ còn dùng nội bộ khi seed/map dữ liệu mẫu, không lưu làm database id.
-- `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` hiện tạm trả `0` vì payments chưa nối DB.
+- `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` đếm từ bảng `payments` theo tháng hệ thống hiện tại (thiếu row hoặc `unpaid` = chưa đóng).
 - Quan hệ: class thuộc academic year qua `academicYearId` số; class có nhiều `class_schedules`; student dùng `class_memberships`; payment/score/attendance records vẫn mock/local nhưng roster trong tab dùng DB `classId` số.
 
 ### Student data
@@ -751,12 +750,14 @@ State/data source:
 
 ### Payment data
 
-- Type: `Payment` trong `src/types/payment.ts`.
-- Fields: `id`, `studentId`, `classId`, `month`, `status`, `amount`, `paidAt?`, `note?`.
-- Status type: `"paid" | "unpaid" | "waived"`.
-- `currentPaymentMonth = "2026-07"`.
-- `paymentMonths = ["2026-05", "2026-06", "2026-07", "2026-08"]`.
-- Quan hệ: payment liên kết student và class qua `studentId`, `classId`, theo tháng `month`.
+- SQLite Phase 5: bảng `payments` (migration `005_payments`), khóa duy nhất `(membership_id, month)`.
+- Fields DB: `id`, `membership_id`, `class_id`, `student_id`, `month` (YYYY-MM), `status`, `amount`, `paid_at`, `note`, timestamps.
+- Status type: `"paid" | "unpaid" | "waived"` (CHECK constraint trong DB).
+- Rules: unpaid lưu `amount = 0`, `paid_at = NULL`; paid lưu snapshot học phí tháng + ngày đóng; waived lưu số thực thu và BẮT BUỘC note; amount không âm và waived <= học phí lớp.
+- Type frontend: `PaymentRow` trong `src/types/payment.ts` (DTO trả về từ `list_payments_by_class_month`, gồm cả thông tin roster).
+- Type `Payment` cũ (string id) vẫn còn cho `mockData.ts`, không dùng trong PaymentsTab nữa.
+- Frontend API: `src/services/paymentApi.ts`.
+- Quan hệ: payment gắn với `class_memberships` qua `membership_id`; membership phải active mới thao tác được học phí.
 
 ### Settings/other data
 
@@ -793,9 +794,9 @@ State/data source:
 - ScoresTab/useMockScores:
   - `selectedMonth`, `savedSheets`, `draftSheets`, `isEditing`, `errorMessage`.
 - PaymentsTab:
-  - `selectedMonth`, `filter`, `searchQuery`, `pendingPaidRow`, `pendingWaivedRow`, `paymentsByMonth`.
+  - `selectedMonth`, `filter`, `searchQuery`, `pendingPaidRow`, `pendingWaivedRow`, `rows` (load từ DB), `noteDrafts`, loading/saving/error.
 - State của năm học/lớp/lịch học/học sinh-membership được load lại từ SQLite sau restart.
-- State của điểm danh, điểm, học phí trong các tab vẫn là local/mock và reset khi reload/restart.
+- Học phí đã persist qua SQLite (Phase 5). State của điểm danh và điểm trong các tab vẫn là local/mock và reset khi reload/restart.
 - Một số state reset khi đổi class hoặc đổi month.
 
 ## 18. UI action inventory
@@ -840,10 +841,10 @@ State/data source:
 | Change payment month | PaymentsTab | Chuyển month state | `selectedMonth` | local only | Query payment_records by month |
 | Search payment student | PaymentsTab | Lọc tên học sinh local | UI only | none | Search/filter khi data lớn |
 | Filter payment status | PaymentsTab | Lọc rows local | UI only | none | Query/filter |
-| Change status to paid | PaymentsTab | Mở confirm, confirm set paid/amount/date | `paymentsByMonth` | local only | Update payment_records |
-| Change status to unpaid | PaymentsTab | Set unpaid, amount 0, clear paidAt | `paymentsByMonth` | local only | Update payment_records |
-| Change status to waived | PaymentsTab | Mở waiver dialog, save amount/note/date | `paymentsByMonth` | local only | Update payment_records with waiver info |
-| Edit payment note | PaymentsTab | Input inline cập nhật note | `paymentsByMonth` | local only | Update note field |
+| Change status to paid | PaymentsTab | Mở confirm, confirm gọi `set_payment_paid` (snapshot fee + paid_at) | `payments` | SQLite | Refresh list sau khi lưu |
+| Change status to unpaid | PaymentsTab | Gọi `set_payment_unpaid` (amount 0, paid_at NULL, giữ note) | `payments` | SQLite | Refresh list sau khi lưu |
+| Change status to waived | PaymentsTab | Mở waiver dialog (note bắt buộc), gọi `set_payment_waived` | `payments` | SQLite | Validate amount 0..fee ở UI và service |
+| Edit payment note | PaymentsTab | Input inline, lưu khi blur/Enter qua `update_payment_note` | `payments` | SQLite | Tạo row unpaid kèm note nếu chưa có row |
 | Export payment Excel | PaymentsTab | Chưa có behavior | none | none | Export payment sheet |
 | Backup buttons | BackupPage | Disabled | none | none | Implement backup/restore later |
 | Settings cards | SettingsPage | Static only | none | none | Implement settings later |
@@ -851,7 +852,7 @@ State/data source:
 ## 19. Current limitations / chưa có
 
 - SQLite/database đã có cho settings/password, academic years, classes, class schedules, students và class memberships; các domain còn lại chưa nối DB.
-- Điểm danh, điểm, học phí vẫn là mock/local; reload/restart mất các thay đổi trong các tab đó.
+- Điểm danh và điểm vẫn là mock/local; reload/restart mất các thay đổi trong hai tab đó. Học phí đã lưu SQLite.
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite qua `useClassStudents`, nhưng records trong các tab này chưa persist database.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
@@ -890,7 +891,7 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 | `makeup_attendance_records` hoặc field liên kết | Nếu học sinh học bù ở lớp nhận cần lưu trạng thái có học/nghỉ riêng mà không thêm vào roster chính thức |
 | `score_columns` | Lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
 | `score_values` | Lưu điểm từng học sinh từng cột |
-| `payment_records` | Lưu học phí theo student/class/month/status/amount/paidAt/note |
+| `payments` | Implemented Phase 5: học phí theo membership/month, status unpaid/paid/waived, amount snapshot, paid_at, note |
 | `backup_logs` hoặc metadata backup | Nếu muốn hiển thị lịch sử sao lưu sau này |
 
 ## 21. Suggested backend integration order
