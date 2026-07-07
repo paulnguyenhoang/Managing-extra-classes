@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { Download, LockKeyhole, Search, UnlockKeyhole } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -45,9 +54,14 @@ import type { PaymentRow, PaymentStatus } from "@/types/payment";
 type PaymentsTabProps = {
   classId: number;
   monthlyFeeOverride?: number;
+  onPaymentsChanged?: () => void | Promise<void>;
 };
 
-export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
+export function PaymentsTab({
+  classId,
+  monthlyFeeOverride,
+  onPaymentsChanged,
+}: PaymentsTabProps) {
   const monthOptions = useMemo(() => generateMonthOptions(), []);
   const [selectedMonth, setSelectedMonth] = useState(() => currentMonthKey());
   const [filter, setFilter] = useState<PaymentFilter>("all");
@@ -58,6 +72,8 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
   const [errorMessage, setErrorMessage] = useState("");
   const [pendingPaidRow, setPendingPaidRow] = useState<PaymentRow | null>(null);
   const [pendingWaivedRow, setPendingWaivedRow] = useState<PaymentRow | null>(null);
+  const [pendingUnlockRow, setPendingUnlockRow] = useState<PaymentRow | null>(null);
+  const [unlockedPaymentKeys, setUnlockedPaymentKeys] = useState<Set<string>>(() => new Set());
   const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
   const monthlyFee = monthlyFeeOverride ?? 0;
 
@@ -90,6 +106,10 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
     };
   }, [refreshRows]);
 
+  useEffect(() => {
+    setUnlockedPaymentKeys(new Set());
+  }, [classId, selectedMonth]);
+
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleRows = filterPaymentRows(rows, filter).filter((row) =>
     normalizedQuery ? row.fullName.toLowerCase().includes(normalizedQuery) : true,
@@ -104,12 +124,50 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
     try {
       await action();
       await refreshRows();
+      void Promise.resolve(onPaymentsChanged?.()).catch((error) => {
+        console.warn("[payments] refresh class overview failed", error);
+      });
     } catch (error) {
       console.warn("[payments] action failed", error);
       setErrorMessage(typeof error === "string" ? error : failureMessage);
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function paymentLockKey(row: PaymentRow) {
+    return `${selectedMonth}:${row.membershipId}`;
+  }
+
+  function isPaymentLocked(row: PaymentRow) {
+    return row.status !== "unpaid" && !unlockedPaymentKeys.has(paymentLockKey(row));
+  }
+
+  function getStatusLabel(status: PaymentStatus) {
+    return paymentStatusOptions.find((option) => option.value === status)?.label ?? status;
+  }
+
+  function lockPaymentRow(row: PaymentRow) {
+    const key = paymentLockKey(row);
+    setUnlockedPaymentKeys((current) => {
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  function confirmUnlockPayment() {
+    if (!pendingUnlockRow) {
+      return;
+    }
+
+    const key = paymentLockKey(pendingUnlockRow);
+    setUnlockedPaymentKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+    setPendingUnlockRow(null);
   }
 
   function handleStatusChange(row: PaymentRow, status: PaymentStatus) {
@@ -145,6 +203,7 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
     }
 
     const row = pendingPaidRow;
+    lockPaymentRow(row);
     setPendingPaidRow(null);
     void runPaymentAction(
       () =>
@@ -164,6 +223,7 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
     }
 
     const row = pendingWaivedRow;
+    lockPaymentRow(row);
     setPendingWaivedRow(null);
     void runPaymentAction(
       () =>
@@ -289,27 +349,52 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
                   <TableCell>{index + 1}</TableCell>
                   <TableCell className="font-medium text-slate-950">{row.fullName}</TableCell>
                   <TableCell>
-                    <Select
-                      value={row.status}
-                      disabled={isSaving}
-                      onValueChange={(value) => handleStatusChange(row, value as PaymentStatus)}
-                    >
-                      <SelectTrigger
-                        className={[
-                          "h-8 w-36 justify-between font-medium shadow-none",
-                          paymentSelectClasses[row.status],
-                        ].join(" ")}
+                    {isPaymentLocked(row) ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div
+                          className={[
+                            "flex h-8 w-36 items-center justify-between rounded-md border px-3 text-sm font-medium",
+                            paymentSelectClasses[row.status],
+                          ].join(" ")}
+                        >
+                          <span>{getStatusLabel(row.status)}</span>
+                          <LockKeyhole className="size-3.5 shrink-0" />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isSaving}
+                          className="h-8 gap-1.5 px-2 text-xs"
+                          onClick={() => setPendingUnlockRow(row)}
+                        >
+                          <UnlockKeyhole className="size-3.5" />
+                          Mở khóa
+                        </Button>
+                      </div>
+                    ) : (
+                      <Select
+                        value={row.status}
+                        disabled={isSaving}
+                        onValueChange={(value) => handleStatusChange(row, value as PaymentStatus)}
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {paymentStatusOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                        <SelectTrigger
+                          className={[
+                            "h-8 w-36 justify-between font-medium shadow-none",
+                            paymentSelectClasses[row.status],
+                          ].join(" ")}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentStatusOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </TableCell>
                   <TableCell>{formatCurrency(row.amount)}</TableCell>
                   <TableCell>{formatDate(row.paidAt ?? undefined)}</TableCell>
@@ -365,6 +450,40 @@ export function PaymentsTab({ classId, monthlyFeeOverride }: PaymentsTabProps) {
         }}
         onSave={saveWaiver}
       />
+      <Dialog
+        open={Boolean(pendingUnlockRow)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingUnlockRow(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mở khóa trạng thái học phí</DialogTitle>
+            <DialogDescription>
+              Sau khi mở khóa, thầy có thể đổi lại trạng thái học phí của học sinh này.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-slate-700">
+            Mở khóa trạng thái học phí tháng {selectedMonthLabel} của{" "}
+            <span className="font-semibold text-slate-950">
+              {pendingUnlockRow?.fullName ?? ""}
+            </span>
+            ?
+          </p>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Hủy
+              </Button>
+            </DialogClose>
+            <Button type="button" onClick={confirmUnlockPayment}>
+              Xác nhận mở khóa
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

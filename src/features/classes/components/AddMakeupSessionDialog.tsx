@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { CalendarPlus } from "lucide-react";
+import { CalendarPlus, Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   addDays,
   formatDayMonth,
@@ -161,21 +154,45 @@ export function AddMakeupSessionDialog({
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label>Bù cho buổi nào</Label>
-              <Select
-                value={form.makeupForSessionId}
-                onValueChange={(value) => updateField("makeupForSessionId", value)}
-              >
-                <SelectTrigger className="w-full bg-white">
-                  <SelectValue placeholder="Chọn buổi cần học bù" />
-                </SelectTrigger>
-                <SelectContent>
-                  {regularSessions.map((session) => (
-                    <SelectItem key={session.id} value={session.id}>
-                      {weekdayLabel(session.date)} - {formatDayMonth(session.date)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {regularSessions.length > 0 ? (
+                <div className="max-h-48 min-w-0 space-y-2 overflow-y-auto pr-1">
+                  {regularSessions.map((session, index) => {
+                    const isSelected = session.id === form.makeupForSessionId;
+
+                    return (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => updateField("makeupForSessionId", session.id)}
+                        className={[
+                          "w-full min-w-0 rounded-lg border px-3 py-2 text-left transition-colors",
+                          "hover:border-emerald-200 hover:bg-emerald-50/60",
+                          isSelected
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-slate-200 bg-white",
+                        ].join(" ")}
+                      >
+                        <span className="flex min-w-0 items-start justify-between gap-3">
+                          <span className="min-w-0 truncate font-medium text-slate-950">
+                            Buổi {index + 1}
+                          </span>
+                          {isSelected ? (
+                            <Check className="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                          ) : null}
+                        </span>
+                        <span className="mt-1 block min-w-0 text-sm text-slate-600">
+                          {weekdayLabel(session.date)} {formatDayMonth(session.date)} -{" "}
+                          {session.startTime} đến {session.endTime}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Tuần này chưa có buổi học cố định để chọn học bù.
+                </p>
+              )}
             </div>
           </div>
           <p className="text-sm text-muted-foreground">

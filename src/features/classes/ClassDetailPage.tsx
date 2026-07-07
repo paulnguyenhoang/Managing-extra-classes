@@ -29,6 +29,7 @@ type ClassDetailPageProps = {
   classOverviews: ClassOverview[];
   onBack: () => void;
   onClassUpdate: (classId: number, updates: Partial<ClassOverview>) => void;
+  onClassListRefresh: () => void | Promise<void>;
 };
 
 export function ClassDetailPage({
@@ -36,6 +37,7 @@ export function ClassDetailPage({
   classOverviews,
   onBack,
   onClassUpdate,
+  onClassListRefresh,
 }: ClassDetailPageProps) {
   const classId = classItem.id;
   const [className, setClassName] = useState(() => classItem?.name ?? "");
@@ -379,7 +381,11 @@ export function ClassDetailPage({
           <ScoresTab classId={classId} />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="payments" className="outline-none">
-          <PaymentsTab classId={classId} monthlyFeeOverride={monthlyFee} />
+          <PaymentsTab
+            classId={classId}
+            monthlyFeeOverride={monthlyFee}
+            onPaymentsChanged={onClassListRefresh}
+          />
         </TabsPrimitive.Content>
       </TabsPrimitive.Root>
     </div>

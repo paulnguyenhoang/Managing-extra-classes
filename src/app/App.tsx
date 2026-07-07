@@ -116,6 +116,20 @@ function App() {
     }
   }
 
+  async function refreshClassOverviews() {
+    if (selectedYearId === null) {
+      return;
+    }
+
+    try {
+      setClassOverviews(await listClassOverviewsByYear(selectedYearId));
+      setSchoolDataError("");
+    } catch (error) {
+      console.warn("[school-data] refresh classes failed", error);
+      setSchoolDataError("Không tải lại được danh sách lớp học.");
+    }
+  }
+
   function handleOpenClass(classId: number) {
     const openedClass = classOverviews.find((classItem) => classItem.id === classId);
     if (openedClass && (openedClass.grade === 8 || openedClass.grade === 9)) {
@@ -128,6 +142,7 @@ function App() {
   function handleBackHome() {
     setSelectedClassId(null);
     setScreen("home");
+    void refreshClassOverviews();
   }
 
   function handleNavigate(nextScreen: SidebarScreen) {
@@ -174,6 +189,7 @@ function App() {
           classOverviews={classOverviews}
           onBack={handleBackHome}
           onClassUpdate={handleUpdateClass}
+          onClassListRefresh={refreshClassOverviews}
         />
       );
     }
