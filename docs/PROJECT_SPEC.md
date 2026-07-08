@@ -219,7 +219,8 @@ Sidebar hiện có 5 item:
 
 Create class hiện tại:
 
-- Dialog fields: `Tên lớp`, `Khối` (select Khối 8/Khối 9), `Học phí tháng`, `Lịch học`.
+- Dialog fields: `Tên lớp`, `Khối` (select Khối 8/Khối 9), `Học phí tháng`, `Tháng bắt đầu`, `Tháng kết thúc`, `Lịch học`.
+- Tháng bắt đầu/kết thúc mặc định theo khoảng ngày của năm học đang chọn; options là các tháng trong năm học; validate bắt buộc và start <= end.
 - Không còn field `Ghi chú` trong dialog tạo lớp.
 - Lịch học dùng bộ chọn checkbox từng thứ + giờ bắt đầu/kết thúc (component `ScheduleItemsEditor`, dùng chung với `EditClassScheduleDialog`), không còn nhập text tự do.
 - Validation: tên lớp bắt buộc, khối phải là 8 hoặc 9, học phí là số nguyên không âm, phải chọn ít nhất một buổi học.
@@ -232,7 +233,7 @@ Hạn chế:
 
 - Không có sửa/xóa/archive lớp ở Home.
 - Lớp tạo mới chưa có học sinh cho đến khi thêm ở tab Danh sách học sinh.
-- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` đếm thật từ bảng `payments` cho tháng hệ thống hiện tại: membership active chưa có payment row hoặc row đang `unpaid` đều tính là chưa đóng; `paid`/`waived` không tính.
+- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` đếm thật từ bảng `payments` cho tháng hệ thống hiện tại: membership active, đang thuộc lớp trong tháng (joined/left), chưa có payment row hoặc row đang `unpaid`; `paid`/`waived` không tính. Nếu tháng hiện tại nằm ngoài `start_month..end_month` của lớp thì `unpaidCount = 0`.
 
 ## 10. Class Detail Header hiện tại
 
@@ -279,7 +280,8 @@ Table columns:
 - Lớp ở trường
 - Trường
 - SĐT phụ huynh
-- Trạng thái
+- Bắt đầu học (joinedMonth, hiển thị MM/YYYY)
+- Trạng thái (kèm "Nghỉ từ MM/YYYY" và badge "Còn nợ X tháng" nếu có)
 - Ghi chú
 
 Search/filter:
@@ -291,15 +293,30 @@ Add student:
 
 - Nút `"Thêm học sinh"` không mở dialog.
 - Khi bấm, thêm một dòng mới trực tiếp vào table với fields rỗng, `status: "active"`, `classId` hiện tại.
+- Dòng mới có select `"Tháng bắt đầu học"`; mặc định là tháng hiện tại nếu nằm trong thời gian học của lớp, ngược lại là tháng bắt đầu của lớp; options giới hạn trong khoảng start/end của lớp.
 - Dòng mới tự đưa tab vào edit mode.
 - Dòng mới có icon thùng rác cạnh STT để xóa dòng mới.
 - Icon thùng rác chỉ xuất hiện cho các dòng mới chưa lưu, không xuất hiện với học sinh đã lưu trong DB.
+- Dòng mới không có select trạng thái (luôn tạo active); cho nghỉ dùng flow riêng sau khi lưu.
 
 Edit/update:
 
 - Nút `"Cập nhật"` chuyển sang edit mode.
-- Trong edit mode có thể sửa: họ tên, lớp ở trường, trường, SĐT phụ huynh, trạng thái, ghi chú.
+- Trong edit mode có thể sửa: họ tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú.
 - Nút đổi thành `"Lưu cập nhật"`; bấm lưu thoát edit mode và clear danh sách `newStudentIds`, khiến dòng mới thành dòng bình thường.
+
+Cho học sinh nghỉ / học lại (Phase 5.5):
+
+- Đổi trạng thái áp dụng NGAY qua command riêng, không đợi "Lưu cập nhật".
+- Chọn `"Đã nghỉ"` KHÔNG đổi ngay mà mở dialog `"Cho học sinh nghỉ"`:
+  - Hiển thị học sinh + tháng bắt đầu học.
+  - Field bắt buộc `"Tháng bắt đầu nghỉ"` (leftMonth): >= joinedMonth, tối đa một tháng sau khi lớp kết thúc.
+  - Giải thích: `"Tháng nghỉ là tháng đầu tiên học sinh không còn học lớp này."`
+  - Trước khi xác nhận, gọi `get_unpaid_months_for_membership` để liệt kê các tháng chưa đóng học phí (từ joinedMonth đến tháng trước leftMonth); nếu có nợ hiển thị cảnh báo `"Học sinh còn chưa đóng học phí các tháng: ..."` + `"Vẫn xác nhận nghỉ?"`.
+  - Vẫn cho phép xác nhận nghỉ dù còn nợ (chỉ cảnh báo, không chặn).
+  - Xác nhận gọi `pause_student_membership` (status = paused, left_month set).
+- Chọn `"Đang học"` cho học sinh đã nghỉ gọi `reactivate_student_membership` (status = active, left_month = NULL).
+- Badge `"Còn nợ X tháng"` cho học sinh đã nghỉ được tính từ bảng `payments` mỗi lần load, không lưu tay — đóng thêm học phí sẽ tự giảm nợ.
 
 Delete/archive/mark inactive:
 
@@ -315,10 +332,11 @@ Export:
 
 State/data source:
 
-- Initial data từ command `list_students_by_class` qua `src/services/studentApi.ts`.
+- Initial data từ command `list_students_by_class` qua `src/services/studentApi.ts` (DTO gồm `joinedMonth`/`leftMonth`).
 - `StudentListTab` tự giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`, loading/error trong lúc thao tác.
 - Khi `classId` đổi, tab load lại danh sách từ SQLite.
-- Khi lưu, dòng mới gọi `create_student_for_class`; dòng hiện có gọi `update_student` và `update_class_membership_status`.
+- Khi lưu, dòng mới gọi `create_student_for_class` (kèm `joinedMonth`); dòng hiện có gọi `update_student`. Trạng thái không còn lưu qua nút "Lưu cập nhật" — dùng pause/reactivate command ngay khi đổi.
+- `update_class_membership_status` backend từ chối set `paused` (bắt buộc dùng `pause_student_membership` có leftMonth).
 - Status `"Đang học"`/`"Đã nghỉ"` được lưu trên `class_memberships`, không lưu global trên `students`.
 - Sau khi lưu, `ClassDetailPage` refresh class detail để `studentCount` trong header/Home đồng bộ theo active memberships.
 - Hook `useClassStudents(classId)` là nguồn roster chung cho StudentListTab, AttendanceTab, ScoresTab và PaymentsTab.
@@ -543,11 +561,18 @@ State/data source:
 
 Trạng thái: đã nối SQLite (Phase 5). Payment rows lưu trong bảng `payments`, khóa theo `(membership_id, month)`.
 
-Month selector:
+Month selector (Phase 5.5):
 
-- Danh sách tháng sinh động từ `generateMonthOptions` (cửa sổ trượt: 12 tháng trước đến 1 tháng sau tháng hiện tại).
-- Default là tháng hệ thống hiện tại (`currentMonthKey`).
-- TODO: sau này sinh danh sách tháng từ khoảng ngày của năm học đang chọn; helper dự kiến dùng lại cho ScoresTab.
+- Danh sách tháng sinh từ `monthsInRange(class.startMonth, class.endMonth)` (`src/lib/months.ts`) — không còn hardcode/cửa sổ trượt.
+- Default là tháng hiện tại clamp vào khoảng start/end của lớp.
+- Nếu sửa thời gian học của lớp làm tháng đang chọn rơi ra ngoài khoảng, tab tự reset về tháng hợp lệ.
+- Payment row nằm ngoài khoảng mới (nếu có) vẫn giữ trong DB, chỉ không hiển thị trong PaymentsTab.
+
+Eligibility theo tháng (Phase 5.5):
+
+- `list_payments_by_class_month` chỉ trả học sinh "thuộc lớp trong tháng đó": `joined_month <= month` và (`left_month IS NULL` hoặc `month < left_month`).
+- Học sinh vào lớp muộn không xuất hiện ở các tháng trước joinedMonth; học sinh đã nghỉ không xuất hiện từ leftMonth trở đi nhưng VẪN xuất hiện ở các tháng đã học (để thầy ghi nhận trả nợ).
+- Thao tác học phí không yêu cầu membership đang active, chỉ yêu cầu tháng nằm trong khoảng joined/left của học sinh.
 
 Search:
 
@@ -682,7 +707,9 @@ State/data source:
 ### Class data
 
 - Type: `ExtraClass` và `ClassOverview` trong `src/types/class.ts`.
-- Fields: `id`, `academicYearId`, `name`, `grade`, `schedule`, `scheduleItems`, `monthlyFee`, `room`, `note?`, `studentCount`, `unpaidCount`.
+- Fields: `id`, `academicYearId`, `name`, `grade`, `startMonth`, `endMonth`, `status` (active/completed), `schedule`, `scheduleItems`, `monthlyFee`, `room`, `note?`, `studentCount`, `unpaidCount`.
+- Phase 5.5 (migration `006_class_month_lifecycle`): `classes` có `start_month`/`end_month`/`status`; `class_memberships` có `joined_month` (tháng đầu học) và `left_month` (tháng ĐẦU TIÊN không còn học — exclusive; NULL nếu đang học). Sau schema change này nên reset `data.sqlite` dev để có seed sạch.
+- ClassDetail header hiển thị `"Thời gian học: MM/YYYY - MM/YYYY"`, có dialog sửa khoảng tháng (`update_class_month_range`) và hành động `"Kết thúc lớp"` (`complete_class` — chọn tháng kết thúc thực tế, status → completed, hiển thị badge `"Đã kết thúc"`).
 - `grade` lưu trong bảng `classes` (INTEGER, migration `004_class_grade`); MVP chỉ dùng Khối 8 và Khối 9.
 - Type phụ:
   - `WeekdayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6`

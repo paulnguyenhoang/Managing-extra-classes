@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5.5 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -881,7 +881,33 @@ Deliverables (đã hoàn thành):
 
 Hạn chế còn lại:
 
-- Danh sách tháng trong PaymentsTab là cửa sổ trượt quanh tháng hiện tại (12 tháng trước → 1 tháng sau), chưa sinh từ khoảng ngày năm học; sẽ dùng chung helper khi làm Scores.
+- ~~Danh sách tháng trong PaymentsTab là cửa sổ trượt quanh tháng hiện tại~~ — đã giải quyết ở Phase 5.5: tháng sinh từ `start_month..end_month` của lớp.
+
+### Phase 5.5. Class/membership month lifecycle
+
+Trạng thái hiện tại: đã triển khai.
+
+Mục tiêu:
+
+- Lớp có khoảng tháng hoạt động; membership có tháng vào/ra; payments chỉ hiển thị học sinh hợp lệ theo tháng; cảnh báo nợ khi cho học sinh nghỉ.
+
+Schema (migration `006_class_month_lifecycle`):
+
+- `classes.start_month` / `classes.end_month` (TEXT YYYY-MM, NOT NULL) + `classes.status` ('active'/'completed').
+- `class_memberships.joined_month` (NOT NULL) + `class_memberships.left_month` (nullable).
+- `left_month` là EXCLUSIVE: tháng đầu tiên học sinh KHÔNG còn học. Ví dụ joined 2026-08, left 2026-12 → học từ 08 đến hết 11.
+- Backfill cho DB cũ: start/end từ năm học, joined_month = start_month của lớp, membership paused cũ gán left_month = joined_month. DEV NÊN RESET data.sqlite (+ -wal/-shm) sau schema change này để có seed sạch — chấp nhận được ở giai đoạn phát triển.
+- Seed: lớp lấy start/end theo năm học; membership joined = start lớp, left = NULL; riêng học sinh seed đang paused được gán left_month hợp lệ (2025-10) vì paused bắt buộc có tháng nghỉ.
+
+Commands mới/cập nhật:
+
+- `create_class` nhận startMonth/endMonth; `update_class_month_range`; `complete_class` (set end_month + status completed).
+- `create_student_for_class` nhận joinedMonth (validate trong khoảng lớp); `pause_student_membership` (bắt buộc leftMonth, validate >= joined và <= end+1); `reactivate_student_membership` (active + left_month NULL); `update_class_membership_status` từ chối 'paused'.
+- `list_payments_by_class_month` lọc theo joined/left của membership; các payment action validate "thuộc lớp trong tháng" thay vì "đang active" — để ghi nhận TRẢ NỢ tháng đã học của học sinh đã nghỉ.
+- `get_unpaid_months_for_membership(membershipId, leftMonth)`: các tháng từ joined_month đến tháng trước leftMonth (clamp theo end lớp) chưa paid/waived. KHÔNG chặn việc nghỉ — chỉ trả dữ liệu để frontend cảnh báo. Nợ luôn được TÍNH từ payments, không lưu tay; đóng thêm học phí sẽ tự cập nhật nợ.
+- `unpaidCount` class overview: chỉ đếm membership active hợp lệ trong tháng hiện tại; trả 0 nếu tháng hiện tại ngoài khoảng lớp.
+
+Month helpers dùng chung: `src-tauri/src/months/mod.rs` (Rust) và `src/lib/months.ts` (frontend) — validate/so sánh/cộng tháng/dải tháng/format MM/YYYY; Scores sẽ tái sử dụng.
 
 ### Phase 6. Scores
 
