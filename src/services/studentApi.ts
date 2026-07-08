@@ -24,3 +24,15 @@ export function updateClassMembershipStatus(membershipId: number, status: Studen
     request: { membershipId, status },
   });
 }
+
+export function pauseStudentMembership(membershipId: number, leftMonth: string) {
+  return invoke<void>("pause_student_membership", {
+    request: { membershipId, leftMonth },
+  });
+}
+
+export function reactivateStudentMembership(membershipId: number) {
+  return invoke<void>("reactivate_student_membership", {
+    request: { membershipId },
+  });
+}

@@ -81,6 +81,7 @@ export function HomePage({
           <YearSelector years={academicYears} value={selectedYearId} onChange={onYearChange} />
           <CreateClassDialog
             academicYearId={selectedYearId}
+            academicYear={academicYears.find((year) => year.id === selectedYearId) ?? null}
             defaultGrade={selectedGrade}
             existingClasses={yearClassOverviews}
             onCreate={onCreateClass}
@@ -160,6 +161,7 @@ export function HomePage({
             action={
               <CreateClassDialog
                 academicYearId={selectedYearId}
+                academicYear={academicYears.find((year) => year.id === selectedYearId) ?? null}
                 defaultGrade={selectedGrade}
                 existingClasses={yearClassOverviews}
                 onCreate={onCreateClass}

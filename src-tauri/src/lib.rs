@@ -1,4 +1,5 @@
 mod db;
+mod months;
 mod payments;
 mod school;
 mod settings;
@@ -54,15 +55,20 @@ pub fn run() {
             school::update_class_name,
             school::update_class_monthly_fee,
             school::update_class_schedule,
+            school::update_class_month_range,
+            school::complete_class,
             students::list_students_by_class,
             students::create_student_for_class,
             students::update_student,
             students::update_class_membership_status,
+            students::pause_student_membership,
+            students::reactivate_student_membership,
             payments::list_payments_by_class_month,
             payments::set_payment_paid,
             payments::set_payment_unpaid,
             payments::set_payment_waived,
-            payments::update_payment_note
+            payments::update_payment_note,
+            payments::get_unpaid_months_for_membership
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

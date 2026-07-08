@@ -82,7 +82,10 @@ pub fn list_payments_by_class_month(
                  JOIN students s ON s.id = cm.student_id
                  LEFT JOIN payments p
                    ON p.membership_id = cm.id AND p.month = ?2
-                 WHERE cm.class_id = ?1 AND cm.status = 'active' AND s.is_archived = 0
+                 WHERE cm.class_id = ?1
+                   AND s.is_archived = 0
+                   AND cm.joined_month <= ?2
+                   AND (cm.left_month IS NULL OR ?2 < cm.left_month)
                  ORDER BY cm.created_at ASC, s.full_name ASC",
             )
             .map_err(|error| format!("Không chuẩn bị được truy vấn học phí: {error}"))?;
@@ -129,11 +132,12 @@ pub fn set_payment_paid(
     validate_month(&request.month)?;
 
     database.with_connection_mut(|connection| {
-        ensure_active_membership(
+        ensure_membership_eligible_for_month(
             connection,
             request.membership_id,
             request.class_id,
             request.student_id,
+            &request.month,
         )?;
 
         let monthly_fee = class_monthly_fee(connection, request.class_id)?;
@@ -175,11 +179,12 @@ pub fn set_payment_unpaid(
     validate_month(&request.month)?;
 
     database.with_connection_mut(|connection| {
-        ensure_active_membership(
+        ensure_membership_eligible_for_month(
             connection,
             request.membership_id,
             request.class_id,
             request.student_id,
+            &request.month,
         )?;
 
         // Giữ nguyên note khi chuyển về chưa đóng, khớp hành vi UI trước đây.
@@ -223,11 +228,12 @@ pub fn set_payment_waived(
     }
 
     database.with_connection_mut(|connection| {
-        ensure_active_membership(
+        ensure_membership_eligible_for_month(
             connection,
             request.membership_id,
             request.class_id,
             request.student_id,
+            &request.month,
         )?;
 
         let monthly_fee = class_monthly_fee(connection, request.class_id)?;
@@ -279,11 +285,12 @@ pub fn update_payment_note(
     validate_month(&request.month)?;
 
     database.with_connection_mut(|connection| {
-        ensure_active_membership(
+        ensure_membership_eligible_for_month(
             connection,
             request.membership_id,
             request.class_id,
             request.student_id,
+            &request.month,
         )?;
 
         let note = normalize_optional_text(Some(request.note.as_str()));
@@ -314,17 +321,24 @@ pub fn count_unpaid_by_class_current_month(
     connection: &Connection,
     class_id: i64,
 ) -> Result<i64, String> {
+    // Tháng hiện tại nằm ngoài thời gian học của lớp thì không tính nợ (trả 0);
+    // membership chỉ tính khi active và đang thuộc lớp trong tháng hiện tại.
     connection
         .query_row(
             "SELECT COUNT(*)
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
+             JOIN classes c ON c.id = cm.class_id
              LEFT JOIN payments p
                ON p.membership_id = cm.id
                AND p.month = strftime('%Y-%m', 'now', 'localtime')
              WHERE cm.class_id = ?1
                AND cm.status = 'active'
                AND s.is_archived = 0
+               AND c.start_month <= strftime('%Y-%m', 'now', 'localtime')
+               AND c.end_month >= strftime('%Y-%m', 'now', 'localtime')
+               AND cm.joined_month <= strftime('%Y-%m', 'now', 'localtime')
+               AND (cm.left_month IS NULL OR strftime('%Y-%m', 'now', 'localtime') < cm.left_month)
                AND (p.id IS NULL OR p.status = 'unpaid')",
             params![class_id],
             |row| row.get(0),
@@ -332,27 +346,101 @@ pub fn count_unpaid_by_class_current_month(
         .map_err(|error| format!("Không đếm được học sinh chưa đóng học phí: {error}"))
 }
 
-fn ensure_active_membership(
+#[tauri::command]
+pub fn get_unpaid_months_for_membership(
+    database: tauri::State<'_, AppDatabase>,
+    membership_id: i64,
+    left_month: String,
+) -> Result<Vec<String>, String> {
+    crate::months::validate_month(&left_month)
+        .map_err(|_| "Tháng nghỉ không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+
+    database.with_connection(|connection| {
+        let membership = connection
+            .query_row(
+                "SELECT cm.joined_month, c.end_month
+                 FROM class_memberships cm
+                 JOIN classes c ON c.id = cm.class_id
+                 WHERE cm.id = ?1",
+                params![membership_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được thông tin học sinh trong lớp: {error}"))?
+            .ok_or_else(|| "Không tìm thấy học sinh trong lớp.".to_string())?;
+
+        let (joined_month, class_end_month) = membership;
+
+        // Tính nợ từ joined_month đến tháng TRƯỚC left_month (left_month là exclusive),
+        // không vượt quá tháng kết thúc của lớp.
+        let last_month = crate::months::add_months(&left_month, -1)?;
+        let last_month = if last_month > class_end_month {
+            class_end_month
+        } else {
+            last_month
+        };
+
+        if last_month < joined_month {
+            return Ok(Vec::new());
+        }
+
+        let months = crate::months::months_in_range(&joined_month, &last_month)?;
+        let mut unpaid_months = Vec::new();
+
+        for month in months {
+            let settled: Option<String> = connection
+                .query_row(
+                    "SELECT status FROM payments
+                     WHERE membership_id = ?1 AND month = ?2
+                       AND status IN ('paid', 'waived')",
+                    params![membership_id, month],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| format!("Không kiểm tra được học phí tháng {month}: {error}"))?;
+
+            if settled.is_none() {
+                unpaid_months.push(month);
+            }
+        }
+
+        Ok(unpaid_months)
+    })
+}
+
+/// Học sinh phải "thuộc lớp trong tháng đó" mới thao tác học phí được:
+/// joined_month <= month < left_month. Không yêu cầu membership đang active
+/// để thầy vẫn ghi nhận trả nợ các tháng đã học của học sinh đã nghỉ.
+fn ensure_membership_eligible_for_month(
     connection: &Connection,
     membership_id: i64,
     class_id: i64,
     student_id: i64,
+    month: &str,
 ) -> Result<(), String> {
-    let status = connection
+    let membership = connection
         .query_row(
-            "SELECT cm.status
+            "SELECT cm.joined_month, cm.left_month
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
              WHERE cm.id = ?1 AND cm.class_id = ?2 AND cm.student_id = ?3 AND s.is_archived = 0",
             params![membership_id, class_id, student_id],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )
         .optional()
         .map_err(|error| format!("Không kiểm tra được học sinh trong lớp: {error}"))?
         .ok_or_else(|| "Không tìm thấy học sinh trong lớp này.".to_string())?;
 
-    if status != "active" {
-        return Err("Học sinh đã tạm nghỉ lớp, không thể cập nhật học phí.".to_string());
+    let (joined_month, left_month) = membership;
+
+    if month < joined_month.as_str() {
+        return Err("Học sinh chưa bắt đầu học trong tháng này.".to_string());
+    }
+
+    if let Some(left_month) = left_month {
+        if month >= left_month.as_str() {
+            return Err("Học sinh đã nghỉ lớp từ tháng này, không thể cập nhật học phí.".to_string());
+        }
     }
 
     Ok(())
@@ -371,18 +459,8 @@ fn class_monthly_fee(connection: &Connection, class_id: i64) -> Result<i64, Stri
 }
 
 fn validate_month(month: &str) -> Result<(), String> {
-    let bytes = month.as_bytes();
-    let is_valid = bytes.len() == 7
-        && bytes[..4].iter().all(u8::is_ascii_digit)
-        && bytes[4] == b'-'
-        && bytes[5..].iter().all(u8::is_ascii_digit)
-        && matches!(&month[5..], "01" | "02" | "03" | "04" | "05" | "06" | "07" | "08" | "09" | "10" | "11" | "12");
-
-    if is_valid {
-        Ok(())
-    } else {
-        Err("Tháng học phí không hợp lệ, cần định dạng YYYY-MM.".to_string())
-    }
+    crate::months::validate_month(month)
+        .map_err(|_| "Tháng học phí không hợp lệ, cần định dạng YYYY-MM.".to_string())
 }
 
 fn normalize_optional_text(value: Option<&str>) -> Option<String> {

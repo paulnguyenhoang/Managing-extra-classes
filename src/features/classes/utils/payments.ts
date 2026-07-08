@@ -55,29 +55,6 @@ export function formatPaymentMonthLabel(month: string) {
   return `Tháng ${formatPaymentMonth(month)}`;
 }
 
-export function currentMonthKey(today = new Date()) {
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-// TODO(Phase 6+): sinh danh sách tháng từ khoảng startsAt/endsAt của năm học đang chọn
-// thay vì cửa sổ trượt quanh tháng hiện tại. Helper này dự kiến dùng lại cho ScoresTab.
-export function generateMonthOptions(
-  today = new Date(),
-  monthsBack = 12,
-  monthsForward = 1,
-): string[] {
-  const months: string[] = [];
-
-  for (let offset = -monthsBack; offset <= monthsForward; offset += 1) {
-    const date = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-    months.push(currentMonthKey(date));
-  }
-
-  return months;
-}
-
 export function isValidWaivedAmount(amount: number, monthlyFee: number) {
   return Number.isInteger(amount) && amount >= 0 && amount <= monthlyFee;
 }

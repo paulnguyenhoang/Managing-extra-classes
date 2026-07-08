@@ -19,17 +19,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PauseStudentDialog } from "@/features/classes/components/PauseStudentDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { formatPhoneNumber, normalizePhoneNumber } from "@/lib/format";
 import {
+  clampMonthToRange,
+  currentMonthKey,
+  formatMonthLabel,
+  isValidMonthKey,
+  monthsInRange,
+} from "@/lib/months";
+import { getUnpaidMonthsForMembership } from "@/services/paymentApi";
+import {
   createStudentForClass,
-  updateClassMembershipStatus,
+  pauseStudentMembership,
+  reactivateStudentMembership,
   updateStudent,
 } from "@/services/studentApi";
 import type { StudentListItem, StudentStatus } from "@/types/student";
 
 type StudentListTabProps = {
   classId: number;
+  classStartMonth: string;
+  classEndMonth: string;
   onStudentsChanged?: () => void | Promise<void>;
 };
 
@@ -49,7 +61,12 @@ const studentStatusConfig: Record<
   },
 };
 
-export function StudentListTab({ classId, onStudentsChanged }: StudentListTabProps) {
+export function StudentListTab({
+  classId,
+  classStartMonth,
+  classEndMonth,
+  onStudentsChanged,
+}: StudentListTabProps) {
   const {
     students: dbStudents,
     isLoading,
@@ -62,6 +79,18 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [pendingPauseStudent, setPendingPauseStudent] = useState<StudentListItem | null>(null);
+  const [debtByMembershipId, setDebtByMembershipId] = useState<Record<string, number>>({});
+  const hasValidRange =
+    isValidMonthKey(classStartMonth) &&
+    isValidMonthKey(classEndMonth) &&
+    classStartMonth <= classEndMonth;
+  const defaultJoinedMonth = hasValidRange
+    ? clampMonthToRange(currentMonthKey(), classStartMonth, classEndMonth)
+    : currentMonthKey();
+  const joinedMonthOptions = hasValidRange
+    ? monthsInRange(classStartMonth, classEndMonth)
+    : [defaultJoinedMonth];
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredStudents = normalizedQuery
     ? students.filter((student) =>
@@ -87,6 +116,43 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
     setErrorMessage("");
   }, [dbStudents]);
 
+  // "Còn nợ X tháng" cho học sinh đã nghỉ — tính từ bảng payments, không lưu tay.
+  useEffect(() => {
+    const pausedStudents = dbStudents.filter(
+      (student) => student.status === "paused" && student.leftMonth,
+    );
+
+    if (pausedStudents.length === 0) {
+      setDebtByMembershipId({});
+      return;
+    }
+
+    let cancelled = false;
+
+    Promise.all(
+      pausedStudents.map(async (student) => {
+        try {
+          const months = await getUnpaidMonthsForMembership(
+            Number(student.membershipId),
+            student.leftMonth as string,
+          );
+          return [String(student.membershipId), months.length] as const;
+        } catch (error) {
+          console.warn("[students] debt check failed", error);
+          return [String(student.membershipId), 0] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) {
+        setDebtByMembershipId(Object.fromEntries(entries.filter(([, count]) => count > 0)));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dbStudents]);
+
   function updateStudentField(
     studentId: string,
     field: EditableStudentField,
@@ -99,10 +165,10 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
     );
   }
 
-  function updateStudentStatus(studentId: string, status: StudentStatus) {
+  function updateStudentJoinedMonth(studentId: string, joinedMonth: string) {
     setStudents((current) =>
       current.map((student) =>
-        String(student.id) === studentId ? { ...student, status } : student,
+        String(student.id) === studentId ? { ...student, joinedMonth } : student,
       ),
     );
   }
@@ -122,6 +188,8 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
         school: "",
         parentPhone: "",
         status: "active",
+        joinedMonth: defaultJoinedMonth,
+        leftMonth: null,
         note: "",
       },
     ]);
@@ -155,20 +223,16 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
         };
 
         if (newStudentIds.includes(String(student.id))) {
-          const createdStudent = await createStudentForClass({
+          await createStudentForClass({
             classId,
+            joinedMonth: student.joinedMonth,
             ...input,
           });
-
-          if (student.status !== "active") {
-            await updateClassMembershipStatus(Number(createdStudent.membershipId), student.status);
-          }
         } else {
           await updateStudent({
             studentId: Number(student.studentId),
             ...input,
           });
-          await updateClassMembershipStatus(Number(student.membershipId), student.status);
         }
       }
 
@@ -194,6 +258,48 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
 
     setErrorMessage("");
     setIsEditing(true);
+  }
+
+  function handleStatusChange(student: StudentListItem, nextStatus: StudentStatus) {
+    if (nextStatus === student.status) {
+      return;
+    }
+
+    if (nextStatus === "paused") {
+      setPendingPauseStudent(student);
+      return;
+    }
+
+    void reactivateStudent(student);
+  }
+
+  async function reactivateStudent(student: StudentListItem) {
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      await reactivateStudentMembership(Number(student.membershipId));
+      await refresh();
+      await onStudentsChanged?.();
+    } catch (error) {
+      console.warn("[students] reactivate failed", error);
+      setErrorMessage(
+        typeof error === "string" ? error : "Không kích hoạt lại được học sinh.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function confirmPauseStudent(leftMonth: string) {
+    if (!pendingPauseStudent) {
+      return;
+    }
+
+    await pauseStudentMembership(Number(pendingPauseStudent.membershipId), leftMonth);
+    setPendingPauseStudent(null);
+    await refresh();
+    await onStudentsChanged?.();
   }
 
   return (
@@ -246,7 +352,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
       )}
 
       <div className="min-w-0 rounded-lg border bg-white">
-        <Table className="min-w-[1040px]">
+        <Table className="min-w-[1180px]">
           <TableHeader>
             <TableRow className="bg-slate-50">
               <TableHead className="w-20">STT</TableHead>
@@ -254,6 +360,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
               <TableHead>Lớp ở trường</TableHead>
               <TableHead>Trường</TableHead>
               <TableHead>SĐT phụ huynh</TableHead>
+              <TableHead>Bắt đầu học</TableHead>
               <TableHead>Trạng thái</TableHead>
               <TableHead>Ghi chú</TableHead>
             </TableRow>
@@ -263,6 +370,7 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
               const studentRowId = String(student.id);
               const isNewStudent = newStudentIds.includes(studentRowId);
               const canEditRow = isEditing || isNewStudent;
+              const debtMonths = debtByMembershipId[String(student.membershipId)] ?? 0;
 
               return (
                 <TableRow key={student.id}>
@@ -310,11 +418,61 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
                       updateStudentField(studentRowId, "parentPhone", normalizePhoneNumber(value))
                     }
                   />
-                  <EditableStatusCell
-                    isEditing={canEditRow}
-                    status={student.status}
-                    onChange={(status) => updateStudentStatus(studentRowId, status)}
-                  />
+                  <TableCell>
+                    {isNewStudent ? (
+                      <Select
+                        value={student.joinedMonth}
+                        onValueChange={(value) => updateStudentJoinedMonth(studentRowId, value)}
+                      >
+                        <SelectTrigger className="h-8 min-w-32 bg-white">
+                          <SelectValue placeholder="Tháng bắt đầu" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {joinedMonthOptions.map((month) => (
+                            <SelectItem key={month} value={month}>
+                              Tháng {formatMonthLabel(month)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-slate-700">
+                        {student.joinedMonth ? formatMonthLabel(student.joinedMonth) : "-"}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {canEditRow && !isNewStudent ? (
+                        <Select
+                          value={student.status}
+                          onValueChange={(value) =>
+                            handleStatusChange(student, value as StudentStatus)
+                          }
+                        >
+                          <SelectTrigger className="h-8 min-w-32 bg-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Đang học</SelectItem>
+                            <SelectItem value="paused">Đã nghỉ</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <StudentStatusBadge status={student.status} />
+                      )}
+                      {student.status === "paused" && student.leftMonth ? (
+                        <span className="text-xs text-slate-500">
+                          Nghỉ từ {formatMonthLabel(student.leftMonth)}
+                        </span>
+                      ) : null}
+                      {debtMonths > 0 ? (
+                        <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">
+                          Còn nợ {debtMonths} tháng
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <EditableCell
                     isEditing={canEditRow}
                     value={student.note ?? ""}
@@ -328,6 +486,22 @@ export function StudentListTab({ classId, onStudentsChanged }: StudentListTabPro
           </TableBody>
         </Table>
       </div>
+
+      <PauseStudentDialog
+        open={Boolean(pendingPauseStudent)}
+        studentName={pendingPauseStudent?.fullName ?? ""}
+        membershipId={
+          pendingPauseStudent ? Number(pendingPauseStudent.membershipId) : null
+        }
+        joinedMonth={pendingPauseStudent?.joinedMonth ?? classStartMonth}
+        classEndMonth={classEndMonth}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingPauseStudent(null);
+          }
+        }}
+        onConfirm={confirmPauseStudent}
+      />
     </div>
   );
 }
@@ -336,38 +510,6 @@ function StudentStatusBadge({ status }: { status: StudentStatus }) {
   const config = studentStatusConfig[status];
 
   return <Badge className={config.className}>{config.label}</Badge>;
-}
-
-function EditableStatusCell({
-  isEditing,
-  status,
-  onChange,
-}: {
-  isEditing: boolean;
-  status: StudentStatus;
-  onChange: (status: StudentStatus) => void;
-}) {
-  if (!isEditing) {
-    return (
-      <TableCell>
-        <StudentStatusBadge status={status} />
-      </TableCell>
-    );
-  }
-
-  return (
-    <TableCell>
-      <Select value={status} onValueChange={(value) => onChange(value as StudentStatus)}>
-        <SelectTrigger className="h-8 min-w-32 bg-white">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="active">Đang học</SelectItem>
-          <SelectItem value="paused">Đã nghỉ</SelectItem>
-        </SelectContent>
-      </Select>
-    </TableCell>
-  );
 }
 
 function EditableCell({

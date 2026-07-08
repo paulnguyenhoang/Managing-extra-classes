@@ -14,6 +14,9 @@ export type MonthlyScoreSheet = {
 
 export type MonthlyScoreSheets = Record<string, MonthlyScoreSheet>;
 
+// TODO(Phase 6 - Scores DB): thay danh sách tháng hardcode bằng monthsInRange(class.startMonth,
+// class.endMonth) từ src/lib/months.ts, giống PaymentsTab. Mock sheets hiện key theo các tháng
+// cố định này nên đổi sớm sẽ phá dữ liệu mẫu; sẽ xử lý khi nối SQLite cho điểm.
 export const scoreMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
 
 export function formatScoreMonthLabel(month: string) {

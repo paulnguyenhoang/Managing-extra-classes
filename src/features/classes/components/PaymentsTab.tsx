@@ -30,11 +30,9 @@ import {
 import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
 import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
 import {
-  currentMonthKey,
   filterPaymentRows,
   formatPaymentMonth,
   formatPaymentMonthLabel,
-  generateMonthOptions,
   getPaymentSummary,
   paymentFilterOptions,
   paymentSelectClasses,
@@ -42,6 +40,7 @@ import {
   type PaymentFilter,
 } from "@/features/classes/utils/payments";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
 import {
   listPaymentsByClassMonth,
   setPaymentPaid,
@@ -53,17 +52,42 @@ import type { PaymentRow, PaymentStatus } from "@/types/payment";
 
 type PaymentsTabProps = {
   classId: number;
+  classStartMonth: string;
+  classEndMonth: string;
   monthlyFeeOverride?: number;
   onPaymentsChanged?: () => void | Promise<void>;
 };
 
 export function PaymentsTab({
   classId,
+  classStartMonth,
+  classEndMonth,
   monthlyFeeOverride,
   onPaymentsChanged,
 }: PaymentsTabProps) {
-  const monthOptions = useMemo(() => generateMonthOptions(), []);
-  const [selectedMonth, setSelectedMonth] = useState(() => currentMonthKey());
+  const hasValidRange =
+    isValidMonthKey(classStartMonth) &&
+    isValidMonthKey(classEndMonth) &&
+    classStartMonth <= classEndMonth;
+  const monthOptions = useMemo(
+    () =>
+      hasValidRange
+        ? monthsInRange(classStartMonth, classEndMonth)
+        : [currentMonthKey()],
+    [classEndMonth, classStartMonth, hasValidRange],
+  );
+  const [selectedMonth, setSelectedMonth] = useState(() =>
+    hasValidRange
+      ? clampMonthToRange(currentMonthKey(), classStartMonth, classEndMonth)
+      : currentMonthKey(),
+  );
+
+  // Nếu thời gian học của lớp thay đổi làm tháng đang chọn rơi ra ngoài, kéo về tháng hợp lệ.
+  useEffect(() => {
+    if (hasValidRange && (selectedMonth < classStartMonth || selectedMonth > classEndMonth)) {
+      setSelectedMonth(clampMonthToRange(currentMonthKey(), classStartMonth, classEndMonth));
+    }
+  }, [classEndMonth, classStartMonth, hasValidRange, selectedMonth]);
   const [filter, setFilter] = useState<PaymentFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [rows, setRows] = useState<PaymentRow[]>([]);

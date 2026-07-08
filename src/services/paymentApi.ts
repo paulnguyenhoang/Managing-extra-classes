@@ -26,3 +26,7 @@ export function setPaymentWaived(input: PaymentWaiverInput) {
 export function updatePaymentNote(input: PaymentNoteInput) {
   return invoke<void>("update_payment_note", { request: input });
 }
+
+export function getUnpaidMonthsForMembership(membershipId: number, leftMonth: string) {
+  return invoke<string[]>("get_unpaid_months_for_membership", { membershipId, leftMonth });
+}

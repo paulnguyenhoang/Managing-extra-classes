@@ -28,6 +28,14 @@ import {
   sortScheduleItems,
 } from "@/features/classes/utils/classSchedule";
 import {
+  addMonths,
+  currentMonthKey,
+  formatMonthLabel,
+  isValidMonthKey,
+  monthsInRange,
+} from "@/lib/months";
+import type { AcademicYear } from "@/types/academic-year";
+import {
   classGradeOptions,
   type ClassGrade,
   type ClassOverview,
@@ -37,6 +45,7 @@ import {
 
 type CreateClassDialogProps = {
   academicYearId: number | null;
+  academicYear?: AcademicYear | null;
   defaultGrade?: ClassGrade;
   disabled?: boolean;
   existingClasses: ClassOverview[];
@@ -50,14 +59,20 @@ const initialForm = {
 
 export function CreateClassDialog({
   academicYearId,
+  academicYear = null,
   defaultGrade = 9,
   disabled = false,
   existingClasses,
   onCreate,
 }: CreateClassDialogProps) {
+  const yearStartMonth = academicYear?.startsAt?.slice(0, 7) ?? currentMonthKey();
+  const yearEndMonth = academicYear?.endsAt?.slice(0, 7) ?? addMonths(currentMonthKey(), 9);
+  const monthOptions = monthsInRange(yearStartMonth, yearEndMonth);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [grade, setGrade] = useState<ClassGrade>(defaultGrade);
+  const [startMonth, setStartMonth] = useState(yearStartMonth);
+  const [endMonth, setEndMonth] = useState(yearEndMonth);
   const [scheduleItems, setScheduleItems] = useState<ClassScheduleItem[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,6 +87,8 @@ export function CreateClassDialog({
     if (nextOpen) {
       setForm(initialForm);
       setGrade(defaultGrade);
+      setStartMonth(yearStartMonth);
+      setEndMonth(yearEndMonth);
       setScheduleItems([]);
       setErrorMessage("");
     }
@@ -90,6 +107,16 @@ export function CreateClassDialog({
 
     if (grade !== 8 && grade !== 9) {
       setErrorMessage("Khối lớp phải là Khối 8 hoặc Khối 9.");
+      return;
+    }
+
+    if (!isValidMonthKey(startMonth) || !isValidMonthKey(endMonth)) {
+      setErrorMessage("Vui lòng chọn tháng bắt đầu và tháng kết thúc.");
+      return;
+    }
+
+    if (startMonth > endMonth) {
+      setErrorMessage("Tháng bắt đầu phải trước hoặc bằng tháng kết thúc.");
       return;
     }
 
@@ -126,6 +153,8 @@ export function CreateClassDialog({
         academicYearId: academicYearId ?? 0,
         name,
         grade,
+        startMonth,
+        endMonth,
         monthlyFee,
         scheduleItems: sortScheduleItems(scheduleItems),
       });
@@ -135,7 +164,9 @@ export function CreateClassDialog({
       setOpen(false);
     } catch (error) {
       console.warn("[create-class] failed", error);
-      setErrorMessage("Không lưu được lớp học mới. Thầy thử lại giúp em nhé.");
+      setErrorMessage(
+        typeof error === "string" ? error : "Không lưu được lớp học mới. Thầy thử lại giúp em nhé.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -192,6 +223,36 @@ export function CreateClassDialog({
                   onChange={(event) => updateField("monthlyFee", event.target.value)}
                   placeholder="700000"
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="class-start-month">Tháng bắt đầu</Label>
+                <Select value={startMonth} onValueChange={setStartMonth}>
+                  <SelectTrigger id="class-start-month" className="w-full bg-white">
+                    <SelectValue placeholder="Chọn tháng bắt đầu" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {monthOptions.map((month) => (
+                      <SelectItem key={month} value={month}>
+                        Tháng {formatMonthLabel(month)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="class-end-month">Tháng kết thúc</Label>
+                <Select value={endMonth} onValueChange={setEndMonth}>
+                  <SelectTrigger id="class-end-month" className="w-full bg-white">
+                    <SelectValue placeholder="Chọn tháng kết thúc" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {monthOptions.map((month) => (
+                      <SelectItem key={month} value={month}>
+                        Tháng {formatMonthLabel(month)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="space-y-1.5">

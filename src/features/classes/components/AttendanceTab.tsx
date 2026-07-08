@@ -412,6 +412,8 @@ export function AttendanceTab({
     onUpcomingMakeupSessionsChange?.(upcomingMakeupSessions);
   }, [onUpcomingMakeupSessionsChange, upcomingMakeupSessions]);
 
+  // TODO(Phase 7 - Attendance DB): giới hạn điều hướng tuần trong khoảng class.startMonth..endMonth
+  // (tránh đi quá xa trước khi lớp bắt đầu hoặc sau khi lớp kết thúc).
   function goToPreviousWeek() {
     setWeekStart((current) => addDays(current, -7));
     setWeekPickerOpen(false);

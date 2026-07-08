@@ -6,6 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { AttendanceTab } from "@/features/classes/components/AttendanceTab";
+import {
+  CompleteClassDialog,
+  EditClassMonthRangeDialog,
+} from "@/features/classes/components/ClassMonthRangeDialogs";
 import { EditClassScheduleDialog } from "@/features/classes/components/EditClassScheduleDialog";
 import { PaymentsTab } from "@/features/classes/components/PaymentsTab";
 import { ScoresTab } from "@/features/classes/components/ScoresTab";
@@ -16,13 +20,16 @@ import {
 } from "@/features/classes/utils/classSchedule";
 import { formatDayMonth, weekdayLabel, type WeeklySession } from "@/features/classes/utils/attendance";
 import { formatCurrency } from "@/lib/format";
+import { formatMonthLabel } from "@/lib/months";
 import {
+  completeClass,
   getClassDetail,
   updateClassMonthlyFee,
+  updateClassMonthRange,
   updateClassName,
   updateClassSchedule,
 } from "@/services/classApi";
-import type { ClassOverview, ClassScheduleItem } from "@/types/class";
+import type { ClassOverview, ClassScheduleItem, ClassStatus } from "@/types/class";
 
 type ClassDetailPageProps = {
   classItem: ClassOverview;
@@ -51,6 +58,11 @@ export function ClassDetailPage({
       ? classItem.scheduleItems
       : parseScheduleText(classItem?.schedule ?? ""),
   );
+  const [startMonth, setStartMonth] = useState(() => classItem?.startMonth ?? "");
+  const [endMonth, setEndMonth] = useState(() => classItem?.endMonth ?? "");
+  const [classStatus, setClassStatus] = useState<ClassStatus>(
+    () => classItem?.status ?? "active",
+  );
   const [upcomingClassMakeupSessions, setUpcomingClassMakeupSessions] = useState<WeeklySession[]>(
     [],
   );
@@ -73,6 +85,9 @@ export function ClassDetailPage({
         ? classItem.scheduleItems
         : parseScheduleText(classItem?.schedule ?? ""),
     );
+    setStartMonth(classItem?.startMonth ?? "");
+    setEndMonth(classItem?.endMonth ?? "");
+    setClassStatus(classItem?.status ?? "active");
   }, [classItem]);
 
   useEffect(() => {
@@ -89,6 +104,9 @@ export function ClassDetailPage({
         setMonthlyFee(detail.monthlyFee);
         setFeeDraft(String(detail.monthlyFee));
         setScheduleItems(detail.scheduleItems);
+        setStartMonth(detail.startMonth);
+        setEndMonth(detail.endMonth);
+        setClassStatus(detail.status);
         setHeaderError("");
         onClassUpdate(classId, detail);
       })
@@ -121,8 +139,19 @@ export function ClassDetailPage({
     setMonthlyFee(detail.monthlyFee);
     setFeeDraft(String(detail.monthlyFee));
     setScheduleItems(detail.scheduleItems);
+    setStartMonth(detail.startMonth);
+    setEndMonth(detail.endMonth);
+    setClassStatus(detail.status);
     setHeaderError("");
     onClassUpdate(classId, detail);
+  }
+
+  async function saveMonthRange(nextStartMonth: string, nextEndMonth: string) {
+    applyClassDetail(await updateClassMonthRange(classId, nextStartMonth, nextEndMonth));
+  }
+
+  async function handleCompleteClass(actualEndMonth: string) {
+    applyClassDetail(await completeClass(classId, actualEndMonth));
   }
 
   async function refreshClassDetail() {
@@ -274,6 +303,27 @@ export function ClassDetailPage({
                 ))}
               </div>
             </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-base leading-6 text-slate-600">
+              <EditClassMonthRangeDialog
+                startMonth={startMonth}
+                endMonth={endMonth}
+                onSave={saveMonthRange}
+              />
+              <span>
+                Thời gian học: {formatMonthLabel(startMonth)} - {formatMonthLabel(endMonth)}
+              </span>
+              {classStatus === "completed" ? (
+                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">
+                  Đã kết thúc
+                </span>
+              ) : (
+                <CompleteClassDialog
+                  startMonth={startMonth}
+                  endMonth={endMonth}
+                  onComplete={handleCompleteClass}
+                />
+              )}
+            </div>
             {headerError && (
               <p className="mt-2 text-sm text-red-600">{headerError}</p>
             )}
@@ -366,7 +416,12 @@ export function ClassDetailPage({
           </TabsPrimitive.Trigger>
         </TabsPrimitive.List>
         <TabsPrimitive.Content value="students" className="outline-none">
-          <StudentListTab classId={classId} onStudentsChanged={refreshClassDetail} />
+          <StudentListTab
+            classId={classId}
+            classStartMonth={startMonth}
+            classEndMonth={endMonth}
+            onStudentsChanged={refreshClassDetail}
+          />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="attendance" className="outline-none">
           <AttendanceTab
@@ -383,6 +438,8 @@ export function ClassDetailPage({
         <TabsPrimitive.Content value="payments" className="outline-none">
           <PaymentsTab
             classId={classId}
+            classStartMonth={startMonth}
+            classEndMonth={endMonth}
             monthlyFeeOverride={monthlyFee}
             onPaymentsChanged={onClassListRefresh}
           />

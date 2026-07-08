@@ -32,6 +32,9 @@ pub struct ClassOverviewDto {
     academic_year_id: i64,
     name: String,
     grade: i64,
+    start_month: String,
+    end_month: String,
+    status: String,
     schedule: String,
     schedule_items: Vec<ClassScheduleItemDto>,
     monthly_fee: i64,
@@ -47,9 +50,26 @@ pub struct CreateClassRequest {
     academic_year_id: i64,
     name: String,
     grade: i64,
+    start_month: String,
+    end_month: String,
     monthly_fee: i64,
     note: Option<String>,
     schedule_items: Vec<ClassScheduleItemDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateClassMonthRangeRequest {
+    class_id: i64,
+    start_month: String,
+    end_month: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteClassRequest {
+    class_id: i64,
+    end_month: String,
 }
 
 #[derive(Deserialize)]
@@ -123,6 +143,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
         ];
 
         let mut academic_year_ids: HashMap<&'static str, i64> = HashMap::new();
+        let mut academic_year_months: HashMap<&'static str, (String, String)> = HashMap::new();
         for (key, label, starts_at, ends_at, is_current) in academic_years {
             transaction
                 .execute(
@@ -133,6 +154,10 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 )
                 .map_err(|error| format!("Không seed được năm học {label}: {error}"))?;
             academic_year_ids.insert(key, transaction.last_insert_rowid());
+            academic_year_months.insert(
+                key,
+                (starts_at[..7].to_string(), ends_at[..7].to_string()),
+            );
         }
 
         let classes = [
@@ -176,13 +201,17 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 .get(academic_year_key)
                 .copied()
                 .ok_or_else(|| format!("Không tìm thấy năm học seed {academic_year_key}"))?;
+            let (start_month, end_month) = academic_year_months
+                .get(academic_year_key)
+                .cloned()
+                .ok_or_else(|| format!("Không tìm thấy tháng năm học seed {academic_year_key}"))?;
 
             transaction
                 .execute(
                     "INSERT INTO classes
-                     (academic_year_id, name, grade, monthly_fee, room, note, is_archived, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    params![academic_year_id, name, grade, monthly_fee, room],
+                     (academic_year_id, name, grade, start_month, end_month, status, monthly_fee, room, note, is_archived, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    params![academic_year_id, name, grade, start_month, end_month, monthly_fee, room],
                 )
                 .map_err(|error| format!("Không seed được lớp {name}: {error}"))?;
             class_ids.insert(key, transaction.last_insert_rowid());
@@ -395,6 +424,7 @@ pub fn create_class(
 ) -> Result<ClassOverviewDto, String> {
     validate_class_name(&request.name)?;
     validate_class_grade(request.grade)?;
+    validate_month_range(&request.start_month, &request.end_month)?;
     validate_monthly_fee(request.monthly_fee)?;
     validate_schedule_items(&request.schedule_items)?;
 
@@ -410,12 +440,14 @@ pub fn create_class(
         transaction
             .execute(
                 "INSERT INTO classes
-                 (academic_year_id, name, grade, monthly_fee, room, note, is_archived, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                 (academic_year_id, name, grade, start_month, end_month, status, monthly_fee, room, note, is_archived, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 params![
                     request.academic_year_id,
                     name,
                     request.grade,
+                    request.start_month,
+                    request.end_month,
                     request.monthly_fee,
                     "Phòng học nhà thầy",
                     note
@@ -473,6 +505,63 @@ pub fn update_class_monthly_fee(
                 params![request.monthly_fee, request.class_id],
             )
             .map_err(|error| format!("Không cập nhật được học phí lớp: {error}"))?;
+
+        get_class_overview(connection, request.class_id)
+    })
+}
+
+#[tauri::command]
+pub fn update_class_month_range(
+    database: tauri::State<'_, AppDatabase>,
+    request: UpdateClassMonthRangeRequest,
+) -> Result<ClassOverviewDto, String> {
+    validate_month_range(&request.start_month, &request.end_month)?;
+
+    database.with_connection_mut(|connection| {
+        ensure_class_exists(connection, request.class_id)?;
+        connection
+            .execute(
+                "UPDATE classes
+                 SET start_month = ?1, end_month = ?2, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?3",
+                params![request.start_month, request.end_month, request.class_id],
+            )
+            .map_err(|error| format!("Không cập nhật được thời gian học của lớp: {error}"))?;
+
+        get_class_overview(connection, request.class_id)
+    })
+}
+
+#[tauri::command]
+pub fn complete_class(
+    database: tauri::State<'_, AppDatabase>,
+    request: CompleteClassRequest,
+) -> Result<ClassOverviewDto, String> {
+    crate::months::validate_month(&request.end_month)?;
+
+    database.with_connection_mut(|connection| {
+        ensure_class_exists(connection, request.class_id)?;
+
+        let start_month: String = connection
+            .query_row(
+                "SELECT start_month FROM classes WHERE id = ?1",
+                params![request.class_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Không đọc được tháng bắt đầu của lớp: {error}"))?;
+
+        if request.end_month < start_month {
+            return Err("Tháng kết thúc không được trước tháng bắt đầu của lớp.".to_string());
+        }
+
+        connection
+            .execute(
+                "UPDATE classes
+                 SET end_month = ?1, status = 'completed', updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?2",
+                params![request.end_month, request.class_id],
+            )
+            .map_err(|error| format!("Không kết thúc được lớp học: {error}"))?;
 
         get_class_overview(connection, request.class_id)
     })
@@ -581,7 +670,7 @@ fn list_class_overviews(
 fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOverviewDto, String> {
     let class_row = connection
         .query_row(
-            "SELECT id, academic_year_id, name, grade, monthly_fee, room, note
+            "SELECT id, academic_year_id, name, grade, start_month, end_month, status, monthly_fee, room, note
              FROM classes
              WHERE id = ?1 AND is_archived = 0",
             params![class_id],
@@ -591,9 +680,12 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
@@ -611,14 +703,17 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
         academic_year_id: class_row.1,
         name: class_row.2,
         grade: class_row.3.unwrap_or(9),
+        start_month: class_row.4,
+        end_month: class_row.5,
+        status: class_row.6,
         schedule,
         schedule_items,
-        monthly_fee: class_row.4,
+        monthly_fee: class_row.7,
         room: class_row
-            .5
+            .8
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Phòng học nhà thầy".to_string()),
-        note: class_row.6,
+        note: class_row.9,
         student_count,
         unpaid_count,
     })
@@ -732,6 +827,19 @@ fn ensure_class_exists(connection: &Connection, class_id: i64) -> Result<(), Str
 fn validate_class_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Tên lớp không được để trống.".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_month_range(start_month: &str, end_month: &str) -> Result<(), String> {
+    crate::months::validate_month(start_month)
+        .map_err(|_| "Tháng bắt đầu không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+    crate::months::validate_month(end_month)
+        .map_err(|_| "Tháng kết thúc không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+
+    if start_month > end_month {
+        return Err("Tháng bắt đầu phải trước hoặc bằng tháng kết thúc.".to_string());
     }
 
     Ok(())

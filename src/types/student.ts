@@ -21,6 +21,8 @@ export type ClassStudentRosterItem = {
   school: string;
   parentPhone: string;
   status: StudentStatus;
+  joinedMonth: string;
+  leftMonth: string | null;
   note?: string;
 };
 
@@ -34,6 +36,8 @@ export type StudentListItem = {
   school: string;
   parentPhone: string;
   status: StudentStatus;
+  joinedMonth: string;
+  leftMonth: string | null;
   note?: string;
 };
 
@@ -43,6 +47,7 @@ export type CreateStudentForClassInput = {
   schoolClass: string;
   school: string;
   parentPhone: string;
+  joinedMonth: string;
   note?: string;
 };
 

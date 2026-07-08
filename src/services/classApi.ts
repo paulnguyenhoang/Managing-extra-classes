@@ -40,3 +40,19 @@ export function updateClassSchedule(
     request: { classId, scheduleItems },
   });
 }
+
+export function updateClassMonthRange(
+  classId: number,
+  startMonth: string,
+  endMonth: string,
+) {
+  return invoke<ClassOverview>("update_class_month_range", {
+    request: { classId, startMonth, endMonth },
+  });
+}
+
+export function completeClass(classId: number, endMonth: string) {
+  return invoke<ClassOverview>("complete_class", {
+    request: { classId, endMonth },
+  });
+}

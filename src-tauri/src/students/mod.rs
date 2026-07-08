@@ -15,6 +15,8 @@ pub struct StudentListItemDto {
     school: String,
     parent_phone: String,
     status: String,
+    joined_month: String,
+    left_month: Option<String>,
     note: Option<String>,
 }
 
@@ -26,7 +28,21 @@ pub struct CreateStudentForClassRequest {
     school_class: String,
     school: String,
     parent_phone: String,
+    joined_month: String,
     note: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PauseStudentMembershipRequest {
+    membership_id: i64,
+    left_month: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactivateStudentMembershipRequest {
+    membership_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +70,7 @@ struct SeedStudent {
     school: &'static str,
     parent_phone: &'static str,
     status: &'static str,
+    left_month: Option<&'static str>,
     note: Option<&'static str>,
 }
 
@@ -78,6 +95,15 @@ pub fn seed_student_data(database: &AppDatabase) -> Result<(), String> {
 
         for student in seed_students() {
             let class_id = seed_class_id(&transaction, student.class_key)?;
+            let class_start_month: String = transaction
+                .query_row(
+                    "SELECT start_month FROM classes WHERE id = ?1",
+                    params![class_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| {
+                    format!("Không đọc được tháng bắt đầu lớp seed {}: {error}", student.class_key)
+                })?;
 
             transaction
                 .execute(
@@ -100,9 +126,15 @@ pub fn seed_student_data(database: &AppDatabase) -> Result<(), String> {
             transaction
                 .execute(
                     "INSERT INTO class_memberships
-                     (class_id, student_id, status, joined_at, left_at, note, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    params![class_id, student_id, student.status],
+                     (class_id, student_id, status, joined_at, left_at, note, joined_month, left_month, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, NULL, NULL, NULL, ?4, ?5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                    params![
+                        class_id,
+                        student_id,
+                        student.status,
+                        class_start_month,
+                        student.left_month
+                    ],
                 )
                 .map_err(|error| {
                     format!(
@@ -148,8 +180,21 @@ pub fn create_student_for_class(
 ) -> Result<StudentListItemDto, String> {
     validate_student_name(&request.full_name)?;
     validate_class_exists(&database, request.class_id)?;
+    crate::months::validate_month(&request.joined_month)
+        .map_err(|_| "Tháng bắt đầu học không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
 
     database.with_connection_mut(|connection| {
+        let (class_start_month, class_end_month) =
+            class_month_range(connection, request.class_id)?;
+
+        if request.joined_month < class_start_month || request.joined_month > class_end_month {
+            return Err(format!(
+                "Tháng bắt đầu học phải nằm trong thời gian học của lớp ({} - {}).",
+                crate::months::format_month_label(&class_start_month),
+                crate::months::format_month_label(&class_end_month)
+            ));
+        }
+
         let full_name = request.full_name.trim().to_string();
         let school_class = request.school_class.trim().to_string();
         let school = request.school.trim().to_string();
@@ -173,9 +218,9 @@ pub fn create_student_for_class(
         transaction
             .execute(
                 "INSERT INTO class_memberships
-                 (class_id, student_id, status, joined_at, left_at, note, created_at, updated_at)
-                 VALUES (?1, ?2, 'active', CURRENT_DATE, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                params![request.class_id, student_id],
+                 (class_id, student_id, status, joined_at, left_at, note, joined_month, left_month, created_at, updated_at)
+                 VALUES (?1, ?2, 'active', CURRENT_DATE, NULL, NULL, ?3, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                params![request.class_id, student_id, request.joined_month],
             )
             .map_err(|error| format!("Không thêm học sinh vào lớp: {error}"))?;
         let membership_id = transaction.last_insert_rowid();
@@ -232,21 +277,25 @@ pub fn update_class_membership_status(
 ) -> Result<(), String> {
     validate_membership_status(&request.status)?;
 
-    database.with_connection_mut(|connection| {
-        let left_at_update = if request.status == "paused" {
-            "CURRENT_DATE"
-        } else {
-            "NULL"
-        };
-        let sql = format!(
-            "UPDATE class_memberships
-             SET status = ?1,
-                 left_at = {left_at_update},
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?2"
+    // Cho học sinh nghỉ bắt buộc phải có tháng nghỉ — dùng lệnh pause_student_membership.
+    if request.status == "paused" {
+        return Err(
+            "Cho học sinh nghỉ cần chọn tháng bắt đầu nghỉ. Vui lòng dùng chức năng cho nghỉ."
+                .to_string(),
         );
+    }
+
+    database.with_connection_mut(|connection| {
         let updated = connection
-            .execute(&sql, params![request.status, request.membership_id])
+            .execute(
+                "UPDATE class_memberships
+                 SET status = 'active',
+                     left_at = NULL,
+                     left_month = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![request.membership_id],
+            )
             .map_err(|error| {
                 format!("Không cập nhật được trạng thái học sinh trong lớp: {error}")
             })?;
@@ -257,6 +306,94 @@ pub fn update_class_membership_status(
 
         Ok(())
     })
+}
+
+#[tauri::command]
+pub fn pause_student_membership(
+    database: tauri::State<'_, AppDatabase>,
+    request: PauseStudentMembershipRequest,
+) -> Result<(), String> {
+    crate::months::validate_month(&request.left_month)
+        .map_err(|_| "Tháng nghỉ không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+
+    database.with_connection_mut(|connection| {
+        let membership = connection
+            .query_row(
+                "SELECT cm.joined_month, cm.class_id
+                 FROM class_memberships cm
+                 WHERE cm.id = ?1",
+                params![request.membership_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được thông tin học sinh trong lớp: {error}"))?
+            .ok_or_else(|| "Không tìm thấy học sinh trong lớp.".to_string())?;
+
+        let (joined_month, class_id) = membership;
+        let (_, class_end_month) = class_month_range(connection, class_id)?;
+
+        if request.left_month < joined_month {
+            return Err("Tháng nghỉ không được trước tháng bắt đầu học.".to_string());
+        }
+
+        // Tháng nghỉ là exclusive boundary; cho phép tối đa một tháng sau khi lớp kết thúc.
+        let max_left_month = crate::months::add_months(&class_end_month, 1)?;
+        if request.left_month > max_left_month {
+            return Err("Tháng nghỉ không được vượt quá thời gian học của lớp.".to_string());
+        }
+
+        connection
+            .execute(
+                "UPDATE class_memberships
+                 SET status = 'paused',
+                     left_month = ?1,
+                     left_at = CURRENT_DATE,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?2",
+                params![request.left_month, request.membership_id],
+            )
+            .map_err(|error| format!("Không lưu được trạng thái nghỉ: {error}"))?;
+
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn reactivate_student_membership(
+    database: tauri::State<'_, AppDatabase>,
+    request: ReactivateStudentMembershipRequest,
+) -> Result<(), String> {
+    database.with_connection_mut(|connection| {
+        let updated = connection
+            .execute(
+                "UPDATE class_memberships
+                 SET status = 'active',
+                     left_month = NULL,
+                     left_at = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![request.membership_id],
+            )
+            .map_err(|error| format!("Không kích hoạt lại được học sinh: {error}"))?;
+
+        if updated == 0 {
+            return Err("Không tìm thấy học sinh trong lớp.".to_string());
+        }
+
+        Ok(())
+    })
+}
+
+fn class_month_range(connection: &Connection, class_id: i64) -> Result<(String, String), String> {
+    connection
+        .query_row(
+            "SELECT start_month, end_month FROM classes WHERE id = ?1 AND is_archived = 0",
+            params![class_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được thời gian học của lớp: {error}"))?
+        .ok_or_else(|| "Không tìm thấy lớp học.".to_string())
 }
 
 fn list_students_by_class_value(
@@ -274,6 +411,8 @@ fn list_students_by_class_value(
                s.school,
                s.parent_phone,
                cm.status,
+               cm.joined_month,
+               cm.left_month,
                s.note
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
@@ -304,6 +443,8 @@ fn get_student_list_item(
                s.school,
                s.parent_phone,
                cm.status,
+               cm.joined_month,
+               cm.left_month,
                s.note
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
@@ -330,7 +471,9 @@ fn map_student_list_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<StudentLis
         school: row.get(5)?,
         parent_phone: row.get(6)?,
         status: row.get(7)?,
-        note: row.get(8)?,
+        joined_month: row.get(8)?,
+        left_month: row.get(9)?,
+        note: row.get(10)?,
     })
 }
 
@@ -415,6 +558,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Nguyễn Du",
             parent_phone: "0901 234 567",
             status: "active",
+            left_month: None,
             note: Some("Viết văn tốt"),
         },
         SeedStudent {
@@ -424,6 +568,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Lê Quý Đôn",
             parent_phone: "0912 345 678",
             status: "active",
+            left_month: None,
             note: Some("Cần luyện mở bài"),
         },
         SeedStudent {
@@ -433,6 +578,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Nguyễn Du",
             parent_phone: "0988 222 111",
             status: "active",
+            left_month: None,
             note: None,
         },
         SeedStudent {
@@ -442,6 +588,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Trần Phú",
             parent_phone: "0934 555 666",
             status: "paused",
+            left_month: Some("2025-10"),
             note: Some("Nghỉ tạm 2 tuần"),
         },
         SeedStudent {
@@ -451,6 +598,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Nguyễn Du",
             parent_phone: "0909 888 777",
             status: "active",
+            left_month: None,
             note: None,
         },
         SeedStudent {
@@ -460,6 +608,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Lý Thường Kiệt",
             parent_phone: "0977 123 456",
             status: "active",
+            left_month: None,
             note: None,
         },
         SeedStudent {
@@ -469,6 +618,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Trần Phú",
             parent_phone: "0966 321 123",
             status: "active",
+            left_month: None,
             note: None,
         },
         SeedStudent {
@@ -478,6 +628,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Nguyễn Du",
             parent_phone: "0922 444 555",
             status: "active",
+            left_month: None,
             note: None,
         },
         SeedStudent {
@@ -487,6 +638,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THPT Chuyên Lê Hồng Phong",
             parent_phone: "0903 222 333",
             status: "active",
+            left_month: None,
             note: None,
         },
     ]
