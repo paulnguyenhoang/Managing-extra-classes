@@ -15,6 +15,11 @@ export type MonthlyScoreSheet = {
 
 export type MonthlyScoreSheets = Record<string, MonthlyScoreSheet>;
 
+export type ScoreMonthLifecycleStudent = {
+  joinedMonth: string;
+  leftMonth: string | null;
+};
+
 export const scoreMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
 
 export function getScoreMonthsForRange(startMonth: string, endMonth: string) {
@@ -25,6 +30,13 @@ export function getScoreMonthsForRange(startMonth: string, endMonth: string) {
 export function formatScoreMonthLabel(month: string) {
   const [year, monthNumber] = month.split("-");
   return `Tháng ${monthNumber}/${year}`;
+}
+
+export function isScoreStudentEligibleForMonth(
+  student: ScoreMonthLifecycleStudent,
+  month: string,
+) {
+  return student.joinedMonth <= month && (student.leftMonth === null || month < student.leftMonth);
 }
 
 export function getScoreStudentKey(student: ScoreRosterStudent) {

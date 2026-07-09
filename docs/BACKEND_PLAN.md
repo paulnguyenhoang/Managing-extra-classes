@@ -188,8 +188,8 @@ Entities chính cho MVP:
 | students | Hồ sơ học sinh global |
 | class_memberships | Quan hệ học sinh thuộc lớp, kèm trạng thái theo lớp |
 | payments | Học phí theo tháng |
-| score_columns | Planned Phase 6: cột/bài kiểm tra theo lớp và tháng |
-| score_values | Planned Phase 6: điểm từng học sinh theo cột |
+| score_columns | Implemented Phase 6: cột/bài kiểm tra theo lớp và tháng |
+| score_values | Implemented Phase 6: điểm từng membership theo cột |
 | attendance_sessions | Planned Phase 7: buổi học thực tế |
 | attendance_records | Planned Phase 7: điểm danh học sinh chính thức theo session |
 | student_makeup_records | Planned Phase 7: học bù theo từng học sinh |
@@ -821,7 +821,7 @@ Deliverables:
 - Tạo lớp mới insert DB.
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
-- Lưu ý hiện tại: sau Phase 5.6, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`, `payments` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` đã đếm thật từ bảng `payments` theo tháng hiện tại và lifecycle.
+- Lưu ý hiện tại: sau Phase 6, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`, `payments`, `score_columns`, `score_values` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` đã đếm thật từ bảng `payments` theo tháng hiện tại và lifecycle.
 - Lưu ý hiện tại: UI đã có kiểm tra trùng lịch theo danh sách lớp đã load, nhưng Rust command/service chưa enforce. Khi quay lại Phase 3 hardening hoặc trước Attendance DB, cần đưa rule chống trùng lịch xuống backend.
 
 ### Phase 4. Students/class memberships
@@ -846,7 +846,7 @@ Chưa làm trong Phase 4:
 
 - Gán một học sinh đã có vào lớp khác từ UI.
 - Archive/hard delete học sinh hiện có.
-- Persistence cho Attendance/Scores/Payments.
+- Persistence cho Attendance.
 
 ### P0 trước Phase 5. Chuẩn hóa roster cho tab chi tiết lớp
 
@@ -864,12 +864,12 @@ Phạm vi:
 
 - Chỉ chuẩn hóa nguồn roster và id.
 - Không tạo bảng scores/attendance trong P0.
-- Attendance/Scores records vẫn mock/local cho đến Phase 6-7; Payments được triển khai riêng ở Phase 5.
+- Attendance records vẫn mock/local cho đến Phase 7; Payments đã triển khai ở Phase 5 và Scores đã triển khai ở Phase 6.
 
 Ý nghĩa cho các phase sau:
 
 - Phase 5 Payments đã ghi record theo `membership_id`.
-- Phase 6 Scores nên ghi score value theo `membership_id`.
+- Phase 6 Scores đã ghi score value theo `membership_id`.
 - Phase 7 Attendance nên ghi attendance record theo `membership_id`; student-level makeup dùng `student_makeup_records` và không thêm học sinh học bù vào membership của lớp nhận.
 
 ### Phase 5. Payments
@@ -935,7 +935,7 @@ Trạng thái hiện tại: đã triển khai.
 - Pause dialog chỉ cho chọn `leftMonth` từ `joinedMonth` đến `class.endMonth`; cảnh báo nợ dùng dải joinedMonth đến tháng trước leftMonth.
 - PaymentsTab vẫn SQLite-backed và có nút tháng trước/tháng sau quanh select tháng; danh sách tháng vẫn sinh từ khoảng lớp.
 - Attendance persistence vẫn thuộc Phase 7, nhưng roster chính thức trong AttendanceTab hiện đã lọc theo membership lifecycle cho từng session date.
-- ScoresTab vẫn mock/local, nhưng tháng đã chuẩn bị theo `class.startMonth..class.endMonth` và có nút tháng trước/tháng sau.
+- ScoresTab đã SQLite-backed; tháng sinh từ `class.startMonth..class.endMonth`, roster lọc theo lifecycle membership, và vẫn hiển thị danh sách học sinh khi tháng chưa có cột bài kiểm tra.
 - Home class card hiển thị thời gian học `startMonth - endMonth`; khi sửa/kết thúc lớp ở ClassDetail, card Home đồng bộ từ class overview.
 - Dialog thêm buổi học bù hiển thị ngày học bù riêng một dòng, giờ bắt đầu/kết thúc ngang hàng, và có hint khung giờ trống/trùng lớp sau khi chọn ngày.
 

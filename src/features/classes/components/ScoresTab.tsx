@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Download,
   Pencil,
   Plus,
@@ -11,7 +10,6 @@ import {
   X,
 } from "lucide-react";
 
-import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -41,6 +39,7 @@ import {
   canUseScoreInput,
   formatScoreMonthLabel,
   formatScoreValue,
+  isScoreStudentEligibleForMonth,
   isValidScoreText,
   parseScoreText,
 } from "@/features/classes/utils/scores";
@@ -127,10 +126,13 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   }, [refreshSheet]);
 
   const columns = sheet?.columns ?? [];
-  const sortedRows = useMemo(
-    () => sortStudentsByVietnameseName(sheet?.rows ?? []),
-    [sheet],
-  );
+  const sortedRows = useMemo(() => {
+    const rowsInSelectedMonth = (sheet?.rows ?? []).filter((row) =>
+      isScoreStudentEligibleForMonth(row, selectedMonth),
+    );
+
+    return sortStudentsByVietnameseName(rowsInSelectedMonth);
+  }, [selectedMonth, sheet]);
   const hasColumns = columns.length > 0;
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
   const canGoPreviousMonth = selectedMonthIndex > 0;
@@ -243,7 +245,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     }
 
     // Validate toàn bộ ô hiển thị (draft đè lên giá trị DB).
-    for (const row of sheet.rows) {
+    for (const row of sortedRows) {
       for (const column of sheet.columns) {
         if (!isValidScoreText(getCellText(row.membershipId, column.id))) {
           setErrorMessage("Điểm phải là số từ 0 đến 10. Có thể để trống nếu chưa có điểm.");
@@ -264,7 +266,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
         }
       }
 
-      const values: SaveScoreValueInput[] = sheet.rows.flatMap((row) =>
+      const values: SaveScoreValueInput[] = sortedRows.flatMap((row) =>
         sheet.columns.map((column) => ({
           columnId: column.id,
           membershipId: row.membershipId,
@@ -396,21 +398,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
         </p>
       ) : null}
 
-      {!isLoading && !hasColumns ? (
-        <EmptyState
-          icon={ClipboardList}
-          title="Tháng này chưa có bài kiểm tra nào."
-          description="Thầy có thể thêm bài kiểm tra đầu tiên cho tháng đang chọn."
-          action={
-            <Button className="gap-2" onClick={handleAddColumn} disabled={isSaving}>
-              <Plus className="size-4" />
-              Thêm bài kiểm tra
-            </Button>
-          }
-        />
-      ) : null}
-
-      {!isLoading && hasColumns ? (
+      {!isLoading && sheet && sortedRows.length > 0 ? (
         <div className="min-w-0 rounded-lg border bg-white">
           <Table className="min-w-[760px]">
             <TableHeader>
