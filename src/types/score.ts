@@ -24,3 +24,58 @@ export type ScoreRecord = {
   value: number | null;
   note?: string;
 };
+
+// ===== SQLite Phase 6 DTOs =====
+
+export type ScoreColumnDto = {
+  id: number;
+  classId: number;
+  month: string;
+  label: string;
+  sortOrder: number;
+};
+
+export type ScoreSheetRow = {
+  membershipId: number;
+  studentId: number;
+  classId: number;
+  fullName: string;
+  schoolClass: string;
+  school: string;
+  parentPhone: string;
+  membershipStatus: "active" | "paused";
+  joinedMonth: string;
+  leftMonth: string | null;
+  valuesByColumnId: Record<string, number | null>;
+};
+
+export type ScoreSheetDto = {
+  classId: number;
+  month: string;
+  columns: ScoreColumnDto[];
+  rows: ScoreSheetRow[];
+};
+
+export type AddScoreColumnInput = {
+  classId: number;
+  month: string;
+  label: string;
+};
+
+export type RenameScoreColumnInput = {
+  columnId: number;
+  label: string;
+};
+
+export type SaveScoreValueInput = {
+  columnId: number;
+  membershipId: number;
+  studentId: number;
+  value: number | null;
+};
+
+export type SaveScoreValuesInput = {
+  classId: number;
+  month: string;
+  values: SaveScoreValueInput[];
+};

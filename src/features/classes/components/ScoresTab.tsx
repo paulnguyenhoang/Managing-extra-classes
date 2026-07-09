@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -37,15 +37,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
-import { useMockScores } from "@/features/classes/hooks/useMockScores";
 import {
   canUseScoreInput,
   formatScoreMonthLabel,
-  getScoreStudentKey,
-  type MonthlyScoreColumn,
+  formatScoreValue,
+  isValidScoreText,
+  parseScoreText,
 } from "@/features/classes/utils/scores";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
+import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
+import {
+  addScoreColumn,
+  deleteScoreColumn,
+  listScoreSheet,
+  renameScoreColumn,
+  saveScoreValues,
+} from "@/services/scoreApi";
+import type { SaveScoreValueInput, ScoreColumnDto, ScoreSheetDto } from "@/types/score";
 
 type ScoresTabProps = {
   classId: number;
@@ -53,45 +61,232 @@ type ScoresTabProps = {
   classEndMonth: string;
 };
 
+const NEW_COLUMN_LABEL = "Bài kiểm tra mới";
+
 export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTabProps) {
-  const [pendingDeleteColumn, setPendingDeleteColumn] = useState<MonthlyScoreColumn | null>(null);
-  const {
-    students,
-    isLoading: isLoadingStudents,
-    errorMessage: studentsErrorMessage,
-  } = useClassStudents(classId);
-  const sortedStudents = useMemo(
-    () => sortStudentsByVietnameseName(students),
-    [students],
+  const hasValidRange =
+    isValidMonthKey(classStartMonth) &&
+    isValidMonthKey(classEndMonth) &&
+    classStartMonth <= classEndMonth;
+  const availableMonths = useMemo(
+    () => (hasValidRange ? monthsInRange(classStartMonth, classEndMonth) : [currentMonthKey()]),
+    [classEndMonth, classStartMonth, hasValidRange],
   );
-  const {
-    activeSheet,
-    availableMonths,
-    errorMessage,
-    isEditing,
-    selectedMonth,
-    addColumn,
-    cancelEditing,
-    changeMonth,
-    deleteColumn,
-    saveEditing,
-    startEditing,
-    updateColumnLabel,
-    updateScore,
-  } = useMockScores(classId, sortedStudents, classStartMonth, classEndMonth);
-  const hasColumns = activeSheet.columns.length > 0;
+  const [selectedMonth, setSelectedMonth] = useState(() =>
+    hasValidRange
+      ? clampMonthToRange(currentMonthKey(), classStartMonth, classEndMonth)
+      : currentMonthKey(),
+  );
+  const [sheet, setSheet] = useState<ScoreSheetDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  // Draft thưa: chỉ giữ các ô/tên cột đã sửa; hiển thị = draft ?? giá trị DB.
+  const [draftLabels, setDraftLabels] = useState<Record<number, string>>({});
+  const [draftValues, setDraftValues] = useState<Record<number, Record<number, string>>>({});
+  const [pendingDeleteColumn, setPendingDeleteColumn] = useState<ScoreColumnDto | null>(null);
+
+  // Nếu thời gian học của lớp thay đổi làm tháng đang chọn rơi ra ngoài, kéo về tháng hợp lệ.
+  useEffect(() => {
+    if (hasValidRange && (selectedMonth < classStartMonth || selectedMonth > classEndMonth)) {
+      setSelectedMonth(clampMonthToRange(currentMonthKey(), classStartMonth, classEndMonth));
+    }
+  }, [classEndMonth, classStartMonth, hasValidRange, selectedMonth]);
+
+  const refreshSheet = useCallback(async () => {
+    setErrorMessage("");
+
+    try {
+      setSheet(await listScoreSheet(classId, selectedMonth));
+    } catch (error) {
+      console.warn("[scores] load failed", error);
+      setSheet(null);
+      setErrorMessage(
+        typeof error === "string" ? error : "Không tải được bảng điểm từ database.",
+      );
+    }
+  }, [classId, selectedMonth]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setIsLoading(true);
+    setIsEditing(false);
+    setDraftLabels({});
+    setDraftValues({});
+    refreshSheet().finally(() => {
+      if (!cancelled) {
+        setIsLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshSheet]);
+
+  const columns = sheet?.columns ?? [];
+  const sortedRows = useMemo(
+    () => sortStudentsByVietnameseName(sheet?.rows ?? []),
+    [sheet],
+  );
+  const hasColumns = columns.length > 0;
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
   const canGoPreviousMonth = selectedMonthIndex > 0;
   const canGoNextMonth =
     selectedMonthIndex >= 0 && selectedMonthIndex < availableMonths.length - 1;
 
-  function confirmDeleteColumn() {
+  function changeMonth(month: string) {
+    setSelectedMonth(month);
+  }
+
+  function getColumnLabel(column: ScoreColumnDto) {
+    return draftLabels[column.id] ?? column.label;
+  }
+
+  function getCellText(membershipId: number, columnId: number) {
+    const draft = draftValues[membershipId]?.[columnId];
+    if (draft !== undefined) {
+      return draft;
+    }
+
+    const row = sheet?.rows.find((item) => item.membershipId === membershipId);
+    return formatScoreValue(row?.valuesByColumnId[String(columnId)]);
+  }
+
+  function updateDraftValue(membershipId: number, columnId: number, value: string) {
+    setDraftValues((current) => ({
+      ...current,
+      [membershipId]: {
+        ...(current[membershipId] ?? {}),
+        [columnId]: value,
+      },
+    }));
+  }
+
+  function updateDraftLabel(columnId: number, label: string) {
+    setDraftLabels((current) => ({ ...current, [columnId]: label }));
+  }
+
+  function startEditing() {
+    setDraftLabels({});
+    setDraftValues({});
+    setIsEditing(true);
+    setErrorMessage("");
+  }
+
+  function cancelEditing() {
+    setDraftLabels({});
+    setDraftValues({});
+    setIsEditing(false);
+    setErrorMessage("");
+  }
+
+  async function handleAddColumn() {
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      const nextSheet = await addScoreColumn({
+        classId,
+        month: selectedMonth,
+        label: NEW_COLUMN_LABEL,
+      });
+      setSheet(nextSheet);
+      setIsEditing(true);
+    } catch (error) {
+      console.warn("[scores] add column failed", error);
+      setErrorMessage(typeof error === "string" ? error : "Không thêm được bài kiểm tra.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function confirmDeleteColumn() {
     if (!pendingDeleteColumn) {
       return;
     }
 
-    deleteColumn(pendingDeleteColumn.id);
+    const column = pendingDeleteColumn;
     setPendingDeleteColumn(null);
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      await deleteScoreColumn(column.id);
+      // Gỡ draft của cột đã xóa, giữ draft các cột còn lại.
+      setDraftLabels((current) => {
+        const { [column.id]: _removed, ...rest } = current;
+        return rest;
+      });
+      setDraftValues((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([membershipId, values]) => {
+            const { [column.id]: _removed, ...rest } = values;
+            return [membershipId, rest];
+          }),
+        ),
+      );
+      await refreshSheet();
+    } catch (error) {
+      console.warn("[scores] delete column failed", error);
+      setErrorMessage(typeof error === "string" ? error : "Không xóa được cột điểm.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveEditing() {
+    if (!sheet) {
+      return;
+    }
+
+    // Validate toàn bộ ô hiển thị (draft đè lên giá trị DB).
+    for (const row of sheet.rows) {
+      for (const column of sheet.columns) {
+        if (!isValidScoreText(getCellText(row.membershipId, column.id))) {
+          setErrorMessage("Điểm phải là số từ 0 đến 10. Có thể để trống nếu chưa có điểm.");
+          return;
+        }
+      }
+    }
+
+    setIsSaving(true);
+    setErrorMessage("");
+
+    try {
+      // Đổi tên cột trước (chỉ những cột có draft khác giá trị hiện tại).
+      for (const column of sheet.columns) {
+        const nextLabel = (draftLabels[column.id] ?? column.label).trim() || "Bài kiểm tra";
+        if (nextLabel !== column.label) {
+          await renameScoreColumn({ columnId: column.id, label: nextLabel });
+        }
+      }
+
+      const values: SaveScoreValueInput[] = sheet.rows.flatMap((row) =>
+        sheet.columns.map((column) => ({
+          columnId: column.id,
+          membershipId: row.membershipId,
+          studentId: row.studentId,
+          value: parseScoreText(getCellText(row.membershipId, column.id)),
+        })),
+      );
+
+      if (values.length > 0) {
+        await saveScoreValues({ classId, month: selectedMonth, values });
+      }
+
+      setDraftLabels({});
+      setDraftValues({});
+      setIsEditing(false);
+      await refreshSheet();
+    } catch (error) {
+      console.warn("[scores] save failed", error);
+      setErrorMessage(typeof error === "string" ? error : "Không lưu được bảng điểm.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -103,7 +298,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
             variant="outline"
             size="icon-sm"
             className="h-9 w-9"
-            disabled={!canGoPreviousMonth}
+            disabled={!canGoPreviousMonth || isSaving}
             onClick={() => {
               if (canGoPreviousMonth) {
                 changeMonth(availableMonths[selectedMonthIndex - 1]);
@@ -130,7 +325,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
             variant="outline"
             size="icon-sm"
             className="h-9 w-9"
-            disabled={!canGoNextMonth}
+            disabled={!canGoNextMonth || isSaving}
             onClick={() => {
               if (canGoNextMonth) {
                 changeMonth(availableMonths[selectedMonthIndex + 1]);
@@ -145,22 +340,34 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
         <div className="flex flex-wrap justify-end gap-2">
           {isEditing ? (
             <>
-              <Button className="gap-2" onClick={saveEditing}>
+              <Button className="gap-2" onClick={saveEditing} disabled={isSaving}>
                 <Save className="size-4" />
-                <span className="hidden sm:inline">Lưu thay đổi</span>
+                <span className="hidden sm:inline">
+                  {isSaving ? "Đang lưu..." : "Lưu thay đổi"}
+                </span>
               </Button>
-              <Button variant="outline" className="gap-2" onClick={cancelEditing}>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={cancelEditing}
+                disabled={isSaving}
+              >
                 <X className="size-4" />
                 <span className="hidden sm:inline">Hủy</span>
               </Button>
             </>
           ) : (
             <>
-              <Button className="gap-2" onClick={addColumn}>
+              <Button className="gap-2" onClick={handleAddColumn} disabled={isSaving}>
                 <Plus className="size-4" />
                 <span className="hidden sm:inline">Thêm bài kiểm tra</span>
               </Button>
-              <Button variant="outline" className="gap-2" onClick={startEditing}>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={startEditing}
+                disabled={isSaving || !hasColumns}
+              >
                 <Pencil className="size-4" />
                 <span className="hidden sm:inline">Cập nhật</span>
               </Button>
@@ -178,48 +385,45 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
           {errorMessage}
         </div>
       ) : null}
-      {isLoadingStudents ? (
+      {isLoading ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
-          Đang tải danh sách học sinh...
+          Đang tải bảng điểm...
         </p>
       ) : null}
-      {studentsErrorMessage ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {studentsErrorMessage}
-        </p>
-      ) : null}
-      {!isLoadingStudents && !studentsErrorMessage && students.length === 0 ? (
+      {!isLoading && sheet && sortedRows.length === 0 ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
-          Lớp này chưa có học sinh trong database.
+          Tháng này chưa có học sinh nào thuộc lớp.
         </p>
       ) : null}
 
-      {!hasColumns ? (
+      {!isLoading && !hasColumns ? (
         <EmptyState
           icon={ClipboardList}
           title="Tháng này chưa có bài kiểm tra nào."
           description="Thầy có thể thêm bài kiểm tra đầu tiên cho tháng đang chọn."
           action={
-            <Button className="gap-2" onClick={addColumn}>
+            <Button className="gap-2" onClick={handleAddColumn} disabled={isSaving}>
               <Plus className="size-4" />
               Thêm bài kiểm tra
             </Button>
           }
         />
-      ) : (
+      ) : null}
+
+      {!isLoading && hasColumns ? (
         <div className="min-w-0 rounded-lg border bg-white">
           <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow className="bg-slate-50">
                 <TableHead className="w-16">STT</TableHead>
                 <TableHead className="min-w-52">Họ tên</TableHead>
-                {activeSheet.columns.map((column) => (
+                {columns.map((column) => (
                   <TableHead key={column.id} className="min-w-40">
                     {isEditing ? (
                       <div className="flex items-center gap-2">
                         <Input
-                          value={column.label}
-                          onChange={(event) => updateColumnLabel(column.id, event.target.value)}
+                          value={getColumnLabel(column)}
+                          onChange={(event) => updateDraftLabel(column.id, event.target.value)}
                           className="h-8 min-w-36 bg-white font-medium"
                           aria-label="Tên bài kiểm tra"
                         />
@@ -242,47 +446,41 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedStudents.map((student, index) => {
-                const studentKey = getScoreStudentKey(student);
-
-                return (
-                  <TableRow key={studentKey}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell className="font-medium text-slate-950">
-                      {student.fullName}
-                    </TableCell>
-                    {activeSheet.columns.map((column) => {
-                    const score = activeSheet.valuesByStudentId[studentKey]?.[column.id] ?? "";
+              {sortedRows.map((row, index) => (
+                <TableRow key={row.membershipId}>
+                  <TableCell>{index + 1}</TableCell>
+                  <TableCell className="font-medium text-slate-950">{row.fullName}</TableCell>
+                  {columns.map((column) => {
+                    const cellText = getCellText(row.membershipId, column.id);
 
                     return (
                       <TableCell key={column.id}>
                         {isEditing ? (
                           <Input
-                            value={score}
+                            value={cellText}
                             inputMode="decimal"
                             onChange={(event) => {
                               const nextValue = event.target.value;
                               if (canUseScoreInput(nextValue)) {
-                                updateScore(studentKey, column.id, nextValue);
+                                updateDraftValue(row.membershipId, column.id, nextValue);
                               }
                             }}
                             className="h-8 w-24 bg-white"
                             placeholder="-"
-                            aria-label={`Điểm ${column.label} của ${student.fullName}`}
+                            aria-label={`Điểm ${getColumnLabel(column)} của ${row.fullName}`}
                           />
                         ) : (
-                          score || "-"
+                          cellText || "-"
                         )}
                       </TableCell>
                     );
-                    })}
-                  </TableRow>
-                );
-              })}
+                  })}
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </div>
-      )}
+      ) : null}
 
       <Dialog
         open={Boolean(pendingDeleteColumn)}

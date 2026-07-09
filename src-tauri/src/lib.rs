@@ -2,6 +2,7 @@ mod db;
 mod months;
 mod payments;
 mod school;
+mod scores;
 mod settings;
 mod students;
 
@@ -68,7 +69,12 @@ pub fn run() {
             payments::set_payment_unpaid,
             payments::set_payment_waived,
             payments::update_payment_note,
-            payments::get_unpaid_months_for_membership
+            payments::get_unpaid_months_for_membership,
+            scores::list_score_sheet,
+            scores::add_score_column,
+            scores::rename_score_column,
+            scores::delete_score_column,
+            scores::save_score_values
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

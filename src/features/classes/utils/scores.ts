@@ -125,6 +125,32 @@ export function canUseScoreInput(value: string) {
   return /^(?:10(?:\.0{0,2})?|[0-9](?:\.\d{0,2})?)?$/.test(normalizedValue);
 }
 
+/// Kiểm tra text điểm đã nhập xong: rỗng hoặc số 0-10 (cho phép thập phân, phẩy hoặc chấm).
+export function isValidScoreText(value: string) {
+  const normalizedValue = value.trim().replace(",", ".");
+  if (!normalizedValue) {
+    return true;
+  }
+
+  if (!/^\d+(?:\.\d+)?$/.test(normalizedValue)) {
+    return false;
+  }
+
+  const score = Number(normalizedValue);
+  return Number.isFinite(score) && score >= 0 && score <= 10;
+}
+
+/// Chuyển text điểm thành giá trị lưu DB: null nếu trống, ngược lại number (phẩy -> chấm).
+export function parseScoreText(value: string): number | null {
+  const normalizedValue = value.trim().replace(",", ".");
+  return normalizedValue ? Number(normalizedValue) : null;
+}
+
+/// Hiển thị giá trị điểm từ DB thành text (null -> chuỗi rỗng).
+export function formatScoreValue(value: number | null | undefined) {
+  return value === null || value === undefined ? "" : String(value);
+}
+
 export function validateScoreSheet(sheet: MonthlyScoreSheet) {
   for (const studentValues of Object.values(sheet.valuesByStudentId)) {
     for (const score of Object.values(studentValues)) {
