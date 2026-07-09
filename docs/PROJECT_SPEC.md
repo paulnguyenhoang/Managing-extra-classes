@@ -210,6 +210,7 @@ Sidebar hiện có 5 item:
 - Mỗi class card hiển thị:
   - tên lớp
   - lịch học từ `class_schedules`, format qua `formatScheduleLines`
+  - thời gian học từ `startMonth` đến `endMonth`, đồng bộ khi sửa trong ClassDetail
   - số học sinh
   - học phí tháng
   - badge unpaid/paid theo `unpaidCount`
@@ -289,6 +290,12 @@ Search/filter:
 - Ô tìm kiếm lọc local theo tên, lớp ở trường, trường, SĐT phụ huynh, ghi chú và nhãn trạng thái.
 - Không debounce, không gọi backend.
 
+Sorting:
+
+- Danh sách hiển thị được sort bằng helper chung `sortStudentsByVietnameseName` sau search/filter.
+- Quy tắc sort frontend: tên gọi tiếng Việt/từ cuối trước, sau đó fullName, rồi membershipId/studentId để ổn định.
+- STT vẫn là `index + 1` của danh sách sau search/filter/sort, không dùng database ID.
+
 Add student:
 
 - Nút `"Thêm học sinh"` không mở dialog.
@@ -333,6 +340,7 @@ Export:
 State/data source:
 
 - Initial data từ command `list_students_by_class` qua `src/services/studentApi.ts` (DTO gồm `joinedMonth`/`leftMonth`).
+- Backend `list_students_by_class` trả roster ổn định theo `full_name`, rồi `class_memberships.id`; frontend vẫn sort lại bằng helper chung trước khi render.
 - `StudentListTab` tự giữ `students`, `newStudentIds`, `searchQuery`, `isEditing`, loading/error trong lúc thao tác.
 - Khi `classId` đổi, tab load lại danh sách từ SQLite.
 - Khi lưu, dòng mới gọi `create_student_for_class` (kèm `joinedMonth`); dòng hiện có gọi `update_student`. Trạng thái không còn lưu qua nút "Lưu cập nhật" — dùng pause/reactivate command ngay khi đổi.
@@ -358,6 +366,8 @@ Attendance columns:
 - `getRegularSessionsForWeek(weekStart, scheduleItems)` tạo session theo ngày học trong tuần.
 - Buổi học bù được thêm vào `makeupSessions` và chỉ hiện nếu date nằm trong tuần đang xem.
 - Các session được sort theo ngày.
+- Hàng học sinh chính thức được lọc theo membership lifecycle của từng session date rồi sort bằng `sortStudentsByVietnameseName`.
+- Hàng học sinh học bù nhận vào lớp, nếu có, cũng được sort bằng cùng helper dựa trên `studentName`.
 
 Today/current day:
 
@@ -446,7 +456,8 @@ Cancel session behavior:
 Makeup session:
 
 - Nút `"Thêm buổi học bù"` mở `AddMakeupSessionDialog`.
-- Fields: ngày học bù, giờ bắt đầu, giờ kết thúc, bù cho buổi nào (bắt buộc chọn).
+- Fields: ngày học bù, giờ bắt đầu, giờ kết thúc, bù cho buổi nào (bắt buộc chọn). Trong dialog, ngày học bù nằm riêng một dòng; giờ bắt đầu và giờ kết thúc nằm ngang hàng để dễ so sánh.
+- Khi đã chọn ngày, UI hiển thị hint gọn về tình trạng khung giờ: đang trống, trùng lớp nào, hoặc giờ kết thúc chưa hợp lệ.
 - Validation khi lưu:
   - Phải chọn buổi gốc cần bù.
   - Giờ kết thúc phải sau giờ bắt đầu.
@@ -477,7 +488,7 @@ Export:
 
 State/data source:
 
-- Students lấy trực tiếp từ `getStudentsByClassId(classId)`.
+- Students lấy từ `useClassStudents(classId)` qua SQLite; roster chính thức được lọc theo `joinedMonth`/`leftMonth` của từng session rồi sort trước khi render.
 - Attendance state nằm trong `useMockAttendance`: `attendance`, `cancelledSessionIds`, `unlockedSessionIds`, `makeupSessions`, `studentMakeupRecords`.
 - Hook hiện dùng module-level mock stores để giữ dữ liệu qua unmount/remount trong cùng renderer session.
 - Không dùng `attendanceSessions` và `attendanceRecords` trong `mockData.ts` cho UI AttendanceTab hiện tại.
@@ -485,7 +496,6 @@ State/data source:
 Hạn chế:
 
 - Không có lưu database.
-- Không phân biệt active/paused student khi điểm danh; code đang map tất cả student của class.
 - Không có note theo buổi hoặc theo record trong UI hiện tại.
 - Student-level makeup, class-level makeup, lock/unlock và trạng thái nghỉ đều chỉ là mock/local.
 - Dữ liệu module-level có thể giữ khi chuyển tab/class trong cùng phiên renderer, nhưng không phải persistence thật sau reload/restart.
@@ -555,6 +565,7 @@ Export:
 State/data source:
 
 - Students lấy từ `useClassStudents(classId)` qua SQLite.
+- Bảng điểm render học sinh đã sort bằng `sortStudentsByVietnameseName`; STT vẫn là `index + 1` sau sort.
 - Score sheet hiện tại không dùng `scoreColumns` và `scoreRecords` trong `mockData.ts`; nó dùng `createInitialScoreSheets` trong `features/classes/utils/scores.ts`.
 - State nằm trong `useMockScores`, mất khi reload/restart; đổi class reset theo DB `classId` và roster hiện tại.
 
@@ -579,6 +590,7 @@ Eligibility theo tháng (Phase 5.5):
 Search:
 
 - Ô `"Tìm nhanh tên học sinh..."` lọc client-side theo `fullName` trên dữ liệu đã load từ DB.
+- Sau khi search/filter trạng thái, rows học phí được sort bằng `sortStudentsByVietnameseName`; STT vẫn là `index + 1` của rows đang hiển thị.
 
 Filter:
 
@@ -656,7 +668,7 @@ State/data source:
 - Đổi classId hoặc tháng sẽ load lại từ DB; có loading state và thông báo lỗi tiếng Việt.
 - `monthlyFee` cho dialog lấy từ prop `monthlyFeeOverride` từ ClassDetail header (backend tự đọc lại fee khi ghi).
 - Summary cards tính từ dữ liệu DB đang load; "Tổng đã thu" = tổng amount của paid + waived.
-- STT tính theo `index + 1` của dòng đang hiển thị sau search/filter, không dùng database ID.
+- STT tính theo `index + 1` của dòng đang hiển thị sau search/filter/sort, không dùng database ID.
 - Dữ liệu học phí persist sau reload/restart.
 
 ## 15. Các trang/sidebar page khác hiện tại

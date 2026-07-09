@@ -165,11 +165,13 @@ Domain tables dự kiến dùng `INTEGER PRIMARY KEY AUTOINCREMENT`:
 - Database ID không phải STT hiển thị.
 - STT trong frontend table luôn tính từ row đang hiển thị:
   - `STT = index + 1`
+- Roster hiển thị trong các tab chi tiết lớp được sort trước khi render bằng helper chung `sortStudentsByVietnameseName`: sort theo tên gọi tiếng Việt/từ cuối, rồi `fullName`, rồi `membershipId/studentId`.
+- Sorting phải áp dụng sau search/filter để STT phản ánh đúng danh sách đang nhìn thấy.
 - Quy tắc này áp dụng cho:
   - StudentListTab
-  - PaymentsTab sau này
-  - ScoresTab sau này
-  - AttendanceTab sau này
+  - PaymentsTab
+  - ScoresTab
+  - AttendanceTab, gồm cả hàng học sinh chính thức và hàng học sinh học bù nhận vào lớp
   - Excel export sau này
 - Không dùng database ID làm số thứ tự nhìn thấy trong UI hoặc file Excel.
 
@@ -843,6 +845,7 @@ Mục tiêu:
 - Bỏ mapping tạm từ DB class sang mock class id trong ClassDetailPage.
 - Truyền DB `classId` dạng số trực tiếp xuống StudentListTab, AttendanceTab, ScoresTab và PaymentsTab.
 - Dùng cùng roster SQLite từ `list_students_by_class` cho cả 4 tab qua hook `useClassStudents`.
+- `list_students_by_class` trả roster ổn định theo `students.full_name`, rồi `class_memberships.id`; frontend vẫn sort lại theo tên tiếng Việt bằng helper chung trước khi render.
 - Dùng `class_memberships.id` / `membershipId` làm khóa ổn định cho state local của Attendance/Scores/Payments trong giai đoạn chưa persist.
 
 Phạm vi:
@@ -921,6 +924,8 @@ Trạng thái hiện tại: đã triển khai.
 - PaymentsTab vẫn SQLite-backed và có nút tháng trước/tháng sau quanh select tháng; danh sách tháng vẫn sinh từ khoảng lớp.
 - Attendance persistence vẫn thuộc Phase 7, nhưng roster chính thức trong AttendanceTab hiện đã lọc theo membership lifecycle cho từng session date.
 - ScoresTab vẫn mock/local, nhưng tháng đã chuẩn bị theo `class.startMonth..class.endMonth` và có nút tháng trước/tháng sau.
+- Home class card hiển thị thời gian học `startMonth - endMonth`; khi sửa/kết thúc lớp ở ClassDetail, card Home đồng bộ từ class overview.
+- Dialog thêm buổi học bù hiển thị ngày học bù riêng một dòng, giờ bắt đầu/kết thúc ngang hàng, và có hint khung giờ trống/trùng lớp sau khi chọn ngày.
 
 ### Phase 6. Scores
 

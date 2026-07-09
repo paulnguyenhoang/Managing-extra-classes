@@ -137,7 +137,7 @@ export function AddMakeupSessionDialog({
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
+            <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="makeup-date">Ngày học bù</Label>
               <Input
                 id="makeup-date"

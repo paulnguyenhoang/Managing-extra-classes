@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -45,6 +45,7 @@ import {
   getScoreStudentKey,
   type MonthlyScoreColumn,
 } from "@/features/classes/utils/scores";
+import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 
 type ScoresTabProps = {
   classId: number;
@@ -59,6 +60,10 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     isLoading: isLoadingStudents,
     errorMessage: studentsErrorMessage,
   } = useClassStudents(classId);
+  const sortedStudents = useMemo(
+    () => sortStudentsByVietnameseName(students),
+    [students],
+  );
   const {
     activeSheet,
     availableMonths,
@@ -73,7 +78,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     startEditing,
     updateColumnLabel,
     updateScore,
-  } = useMockScores(classId, students, classStartMonth, classEndMonth);
+  } = useMockScores(classId, sortedStudents, classStartMonth, classEndMonth);
   const hasColumns = activeSheet.columns.length > 0;
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
   const canGoPreviousMonth = selectedMonthIndex > 0;
@@ -237,7 +242,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
               </TableRow>
             </TableHeader>
             <TableBody>
-              {students.map((student, index) => {
+              {sortedStudents.map((student, index) => {
                 const studentKey = getScoreStudentKey(student);
 
                 return (

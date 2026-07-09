@@ -206,7 +206,7 @@ Các nút UI trong MVP:
 - Tuần trước
 - Chọn tuần bằng lịch mini
 - Tuần sau
-- Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, có giờ bắt đầu/giờ kết thúc, validate không trùng khoảng giờ với lịch lớp đã load, buổi gốc tự chuyển nghỉ
+- Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, có giờ bắt đầu/giờ kết thúc ngang hàng trong form, validate không trùng khoảng giờ với lịch lớp đã load, hiển thị hint khung giờ trống/trùng sau khi chọn ngày, buổi gốc tự chuyển nghỉ
 - Hủy buổi bù: trên header buổi học bù cả lớp, có xác nhận, khôi phục buổi gốc
 - Đánh dấu cả lớp đi học: chỉ áp dụng cho buổi hôm nay chưa nghỉ; áp dụng cả buổi học bù cả lớp; đánh dấu luôn cả dòng học sinh học bù đang nhận ở buổi hôm nay
 - Xuất Excel, UI only trong MVP

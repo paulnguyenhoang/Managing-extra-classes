@@ -415,7 +415,7 @@ fn list_students_by_class_value(
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
              WHERE cm.class_id = ?1 AND s.is_archived = 0
-             ORDER BY cm.created_at ASC, s.full_name ASC",
+             ORDER BY s.full_name COLLATE NOCASE ASC, cm.id ASC",
         )
         .map_err(|error| format!("Không chuẩn bị được truy vấn học sinh: {error}"))?;
 

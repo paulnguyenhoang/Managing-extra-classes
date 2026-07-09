@@ -39,6 +39,7 @@ import {
   paymentStatusOptions,
   type PaymentFilter,
 } from "@/features/classes/utils/payments";
+import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
 import {
@@ -135,8 +136,14 @@ export function PaymentsTab({
   }, [classId, selectedMonth]);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const visibleRows = filterPaymentRows(rows, filter).filter((row) =>
-    normalizedQuery ? row.fullName.toLowerCase().includes(normalizedQuery) : true,
+  const visibleRows = useMemo(
+    () =>
+      sortStudentsByVietnameseName(
+        filterPaymentRows(rows, filter).filter((row) =>
+          normalizedQuery ? row.fullName.toLowerCase().includes(normalizedQuery) : true,
+        ),
+      ),
+    [filter, normalizedQuery, rows],
   );
   const summary = getPaymentSummary(rows);
   const selectedMonthLabel = formatPaymentMonth(selectedMonth);

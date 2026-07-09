@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { PauseStudentDialog } from "@/features/classes/components/PauseStudentDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
+import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { formatPhoneNumber, normalizePhoneNumber } from "@/lib/format";
 import {
   clampMonthToRange,
@@ -92,22 +93,28 @@ export function StudentListTab({
     ? monthsInRange(classStartMonth, classEndMonth)
     : [defaultJoinedMonth];
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const filteredStudents = normalizedQuery
-    ? students.filter((student) =>
-        [
-          student.fullName,
-          student.schoolClass,
-          student.school,
-          student.parentPhone,
-          formatPhoneNumber(student.parentPhone),
-          student.note,
-          studentStatusConfig[student.status].label,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery),
-      )
-    : students;
+  const filteredStudents = useMemo(
+    () =>
+      sortStudentsByVietnameseName(
+        normalizedQuery
+          ? students.filter((student) =>
+              [
+                student.fullName,
+                student.schoolClass,
+                student.school,
+                student.parentPhone,
+                formatPhoneNumber(student.parentPhone),
+                student.note,
+                studentStatusConfig[student.status].label,
+              ]
+                .join(" ")
+                .toLowerCase()
+                .includes(normalizedQuery),
+            )
+          : students,
+      ),
+    [normalizedQuery, students],
+  );
 
   useEffect(() => {
     setStudents(dbStudents);

@@ -53,6 +53,7 @@ import {
   type StudentMakeupSessionOption,
   type WeeklySession,
 } from "@/features/classes/utils/attendance";
+import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { attendanceStatusLabel } from "@/lib/format";
 import { currentMonthKey, isValidMonthKey } from "@/lib/months";
 import type { AttendanceStatus } from "@/types/attendance";
@@ -418,15 +419,28 @@ export function AttendanceTab({
     Boolean(todaySession) && !isTodaySessionCancelled && hasEligibleStudentToday;
   const visibleStudents = useMemo(
     () =>
-      students.filter((student) =>
-        sessions.some((session) => isStudentEligibleForSession(student, session)),
+      sortStudentsByVietnameseName(
+        students.filter((student) =>
+          sessions.some((session) => isStudentEligibleForSession(student, session)),
+        ),
       ),
     [sessions, students],
   );
-  const visibleStudentMakeupRecords = studentMakeupRecords.filter(
-    (record) =>
-      record.receivingClassId === classIdKey &&
-      sessions.some((session) => session.id === record.receivingSessionId),
+  const visibleStudentMakeupRecords = useMemo(
+    () =>
+      sortStudentsByVietnameseName(
+        studentMakeupRecords.filter(
+          (record) =>
+            record.receivingClassId === classIdKey &&
+            sessions.some((session) => session.id === record.receivingSessionId),
+        ),
+        {
+          getFullName: (record) => record.studentName,
+          getMembershipId: (record) => record.id,
+          getStudentId: (record) => record.studentId,
+        },
+      ),
+    [classIdKey, sessions, studentMakeupRecords],
   );
   const upcomingMakeupSessions = useMemo(
     () =>
