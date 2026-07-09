@@ -41,6 +41,9 @@ function App() {
   const [hasLoadedSchoolData, setHasLoadedSchoolData] = useState(false);
   const [schoolDataError, setSchoolDataError] = useState("");
   const selectedClass = classOverviews.find((classItem) => classItem.id === selectedClassId);
+  const selectedClassAcademicYear = selectedClass
+    ? academicYears.find((year) => year.id === selectedClass.academicYearId) ?? null
+    : null;
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -186,6 +189,7 @@ function App() {
       return (
         <ClassDetailPage
           classItem={selectedClass}
+          academicYear={selectedClassAcademicYear}
           classOverviews={classOverviews}
           onBack={handleBackHome}
           onClassUpdate={handleUpdateClass}

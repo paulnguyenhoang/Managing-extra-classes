@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { ClipboardList, Download, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Download,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -33,15 +43,16 @@ import {
   canUseScoreInput,
   formatScoreMonthLabel,
   getScoreStudentKey,
-  scoreMonths,
   type MonthlyScoreColumn,
 } from "@/features/classes/utils/scores";
 
 type ScoresTabProps = {
   classId: number;
+  classStartMonth: string;
+  classEndMonth: string;
 };
 
-export function ScoresTab({ classId }: ScoresTabProps) {
+export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTabProps) {
   const [pendingDeleteColumn, setPendingDeleteColumn] = useState<MonthlyScoreColumn | null>(null);
   const {
     students,
@@ -50,6 +61,7 @@ export function ScoresTab({ classId }: ScoresTabProps) {
   } = useClassStudents(classId);
   const {
     activeSheet,
+    availableMonths,
     errorMessage,
     isEditing,
     selectedMonth,
@@ -61,8 +73,12 @@ export function ScoresTab({ classId }: ScoresTabProps) {
     startEditing,
     updateColumnLabel,
     updateScore,
-  } = useMockScores(classId, students);
+  } = useMockScores(classId, students, classStartMonth, classEndMonth);
   const hasColumns = activeSheet.columns.length > 0;
+  const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
+  const canGoPreviousMonth = selectedMonthIndex > 0;
+  const canGoNextMonth =
+    selectedMonthIndex >= 0 && selectedMonthIndex < availableMonths.length - 1;
 
   function confirmDeleteColumn() {
     if (!pendingDeleteColumn) {
@@ -76,18 +92,50 @@ export function ScoresTab({ classId }: ScoresTabProps) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Select value={selectedMonth} onValueChange={changeMonth}>
-          <SelectTrigger className="h-9 min-w-44 bg-white">
-            <SelectValue placeholder="Chọn tháng" />
-          </SelectTrigger>
-          <SelectContent>
-            {scoreMonths.map((month) => (
-              <SelectItem key={month} value={month}>
-                {formatScoreMonthLabel(month)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            className="h-9 w-9"
+            disabled={!canGoPreviousMonth}
+            onClick={() => {
+              if (canGoPreviousMonth) {
+                changeMonth(availableMonths[selectedMonthIndex - 1]);
+              }
+            }}
+          >
+            <ChevronLeft className="size-4" />
+            <span className="sr-only">Tháng trước</span>
+          </Button>
+          <Select value={selectedMonth} onValueChange={changeMonth}>
+            <SelectTrigger className="h-9 min-w-44 bg-white">
+              <SelectValue placeholder="Chọn tháng" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableMonths.map((month) => (
+                <SelectItem key={month} value={month}>
+                  {formatScoreMonthLabel(month)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            className="h-9 w-9"
+            disabled={!canGoNextMonth}
+            onClick={() => {
+              if (canGoNextMonth) {
+                changeMonth(availableMonths[selectedMonthIndex + 1]);
+              }
+            }}
+          >
+            <ChevronRight className="size-4" />
+            <span className="sr-only">Tháng sau</span>
+          </Button>
+        </div>
 
         <div className="flex flex-wrap justify-end gap-2">
           {isEditing ? (

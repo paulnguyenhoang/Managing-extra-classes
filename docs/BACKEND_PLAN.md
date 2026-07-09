@@ -644,8 +644,9 @@ Seed strategy:
 - Phase đầu có thể seed dữ liệu tương đương mock hiện tại để app có data demo.
 - Chỉ seed khi database mới hoàn toàn.
 - Seed tối thiểu:
-  - Academic years: 2025-2026 current, 2024-2025, 2026-2027.
-  - Classes: chỉ seed lớp Khối 8 và Khối 9 (Văn 9 ôn thi, Văn 8 nâng cao, Văn 8 cơ bản, Văn 9 khóa trước); không seed lớp Khối 7 nữa.
+  - Academic years: chỉ seed `Năm học 2026 - 2027` và đặt là current.
+  - Classes: chỉ seed lớp Khối 8 và Khối 9 trong năm học 2026-2027 (Văn 9 ôn thi, Văn 8 nâng cao, Văn 8 cơ bản); không seed lớp khóa trước.
+  - Future academic years không seed sẵn; sẽ được tạo bởi tính năng thêm năm học sau này.
   - Class schedules theo lịch hiện tại.
   - Students và memberships.
   - Payments mẫu theo tháng 05/2026-08/2026.
@@ -897,17 +898,29 @@ Schema (migration `006_class_month_lifecycle`):
 - `class_memberships.joined_month` (NOT NULL) + `class_memberships.left_month` (nullable).
 - `left_month` là EXCLUSIVE: tháng đầu tiên học sinh KHÔNG còn học. Ví dụ joined 2026-08, left 2026-12 → học từ 08 đến hết 11.
 - Backfill cho DB cũ: start/end từ năm học, joined_month = start_month của lớp, membership paused cũ gán left_month = joined_month. DEV NÊN RESET data.sqlite (+ -wal/-shm) sau schema change này để có seed sạch — chấp nhận được ở giai đoạn phát triển.
-- Seed: lớp lấy start/end theo năm học; membership joined = start lớp, left = NULL; riêng học sinh seed đang paused được gán left_month hợp lệ (2025-10) vì paused bắt buộc có tháng nghỉ.
+- Seed: lớp lấy start/end theo năm học 2026-2027 (`2026-08..2027-07`); membership joined = start lớp, left = NULL; riêng học sinh seed đang paused được gán left_month hợp lệ (`2026-10`) vì paused bắt buộc có tháng nghỉ.
 
 Commands mới/cập nhật:
 
 - `create_class` nhận startMonth/endMonth; `update_class_month_range`; `complete_class` (set end_month + status completed).
-- `create_student_for_class` nhận joinedMonth (validate trong khoảng lớp); `pause_student_membership` (bắt buộc leftMonth, validate >= joined và <= end+1); `reactivate_student_membership` (active + left_month NULL); `update_class_membership_status` từ chối 'paused'.
+- `create_student_for_class` nhận joinedMonth (validate trong khoảng lớp); `pause_student_membership` (bắt buộc leftMonth, validate từ joinedMonth đến class.endMonth); `reactivate_student_membership` (active + left_month NULL); `update_class_membership_status` từ chối 'paused'.
 - `list_payments_by_class_month` lọc theo joined/left của membership; các payment action validate "thuộc lớp trong tháng" thay vì "đang active" — để ghi nhận TRẢ NỢ tháng đã học của học sinh đã nghỉ.
 - `get_unpaid_months_for_membership(membershipId, leftMonth)`: các tháng từ joined_month đến tháng trước leftMonth (clamp theo end lớp) chưa paid/waived. KHÔNG chặn việc nghỉ — chỉ trả dữ liệu để frontend cảnh báo. Nợ luôn được TÍNH từ payments, không lưu tay; đóng thêm học phí sẽ tự cập nhật nợ.
+- Nếu leftMonth = joinedMonth thì không có tháng nợ để kiểm tra; left_month luôn là exclusive boundary.
 - `unpaidCount` class overview: chỉ đếm membership active hợp lệ trong tháng hiện tại; trả 0 nếu tháng hiện tại ngoài khoảng lớp.
 
 Month helpers dùng chung: `src-tauri/src/months/mod.rs` (Rust) và `src/lib/months.ts` (frontend) — validate/so sánh/cộng tháng/dải tháng/format MM/YYYY; Scores sẽ tái sử dụng.
+
+### Phase 5.6. Lifecycle UX cleanup
+
+Trạng thái hiện tại: đã triển khai.
+
+- Fresh seed chỉ bắt đầu ở năm học 2026-2027; nếu DB dev còn seed cũ thì có thể xóa `data.sqlite`, `data.sqlite-wal`, `data.sqlite-shm`.
+- StudentListTab default `joinedMonth = clamp(currentMonth, class.startMonth, class.endMonth)` và dropdown chỉ hiện tháng trong khoảng lớp.
+- Pause dialog chỉ cho chọn `leftMonth` từ `joinedMonth` đến `class.endMonth`; cảnh báo nợ dùng dải joinedMonth đến tháng trước leftMonth.
+- PaymentsTab vẫn SQLite-backed và có nút tháng trước/tháng sau quanh select tháng; danh sách tháng vẫn sinh từ khoảng lớp.
+- Attendance persistence vẫn thuộc Phase 7, nhưng roster chính thức trong AttendanceTab hiện đã lọc theo membership lifecycle cho từng session date.
+- ScoresTab vẫn mock/local, nhưng tháng đã chuẩn bị theo `class.startMonth..class.endMonth` và có nút tháng trước/tháng sau.
 
 ### Phase 6. Scores
 

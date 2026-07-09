@@ -336,9 +336,7 @@ pub fn pause_student_membership(
             return Err("Tháng nghỉ không được trước tháng bắt đầu học.".to_string());
         }
 
-        // Tháng nghỉ là exclusive boundary; cho phép tối đa một tháng sau khi lớp kết thúc.
-        let max_left_month = crate::months::add_months(&class_end_month, 1)?;
-        if request.left_month > max_left_month {
+        if request.left_month > class_end_month {
             return Err("Tháng nghỉ không được vượt quá thời gian học của lớp.".to_string());
         }
 
@@ -534,7 +532,6 @@ fn seed_class_id(transaction: &rusqlite::Transaction<'_>, class_key: &str) -> Re
         "van-9a" => "Văn 9 - Ôn thi vào 10",
         "van-8a" => "Văn 8 - Nâng cao",
         "van-8b" => "Văn 8 - Cơ bản",
-        "van-9-old" => "Văn 9 - Khóa trước",
         _ => return Err(format!("Không nhận diện được lớp seed {class_key}.")),
     };
 
@@ -549,7 +546,7 @@ fn seed_class_id(transaction: &rusqlite::Transaction<'_>, class_key: &str) -> Re
         .ok_or_else(|| format!("Không tìm thấy lớp seed {class_name}."))
 }
 
-fn seed_students() -> [SeedStudent; 9] {
+fn seed_students() -> [SeedStudent; 8] {
     [
         SeedStudent {
             class_key: "van-9a",
@@ -588,7 +585,7 @@ fn seed_students() -> [SeedStudent; 9] {
             school: "THCS Trần Phú",
             parent_phone: "0934 555 666",
             status: "paused",
-            left_month: Some("2025-10"),
+            left_month: Some("2026-10"),
             note: Some("Nghỉ tạm 2 tuần"),
         },
         SeedStudent {
@@ -627,16 +624,6 @@ fn seed_students() -> [SeedStudent; 9] {
             school_class: "8C2",
             school: "THCS Nguyễn Du",
             parent_phone: "0922 444 555",
-            status: "active",
-            left_month: None,
-            note: None,
-        },
-        SeedStudent {
-            class_key: "van-9-old",
-            full_name: "Nguyễn Hải Long",
-            school_class: "10A1",
-            school: "THPT Chuyên Lê Hồng Phong",
-            parent_phone: "0903 222 333",
             status: "active",
             left_month: None,
             note: None,

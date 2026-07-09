@@ -1,20 +1,45 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   cloneScoreSheets,
   createInitialScoreSheets,
   createNewScoreColumn,
   getScoreStudentKey,
   normalizeScoreSheet,
+  getScoreMonthsForRange,
   scoreMonths,
   type ScoreRosterStudent,
   validateScoreSheet,
   type MonthlyScoreSheets,
 } from "@/features/classes/utils/scores";
+import { clampMonthToRange, currentMonthKey } from "@/lib/months";
 
-export function useMockScores(classId: number, students: ScoreRosterStudent[]) {
-  const [selectedMonth, setSelectedMonth] = useState(scoreMonths[2]);
+export function useMockScores(
+  classId: number,
+  students: ScoreRosterStudent[],
+  classStartMonth?: string,
+  classEndMonth?: string,
+) {
+  const availableMonths = useMemo(
+    () =>
+      getScoreMonthsForRange(
+        classStartMonth ?? scoreMonths[0],
+        classEndMonth ?? scoreMonths[scoreMonths.length - 1],
+      ),
+    [classEndMonth, classStartMonth],
+  );
+  const defaultMonth = useMemo(() => {
+    const currentMonth = currentMonthKey();
+    return availableMonths.includes(currentMonth)
+      ? currentMonth
+      : clampMonthToRange(
+          currentMonth,
+          availableMonths[0],
+          availableMonths[availableMonths.length - 1],
+        );
+  }, [availableMonths]);
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
   const [savedSheets, setSavedSheets] = useState<MonthlyScoreSheets>(() =>
-    createInitialScoreSheets(classId, students),
+    createInitialScoreSheets(classId, students, availableMonths),
   );
   const [draftSheets, setDraftSheets] = useState<MonthlyScoreSheets>(() =>
     cloneScoreSheets(savedSheets),
@@ -25,13 +50,13 @@ export function useMockScores(classId: number, students: ScoreRosterStudent[]) {
   const activeSheet = draftSheets[selectedMonth];
 
   useEffect(() => {
-    const initialSheets = createInitialScoreSheets(classId, students);
+    const initialSheets = createInitialScoreSheets(classId, students, availableMonths);
     setSavedSheets(initialSheets);
     setDraftSheets(cloneScoreSheets(initialSheets));
-    setSelectedMonth(scoreMonths[2]);
+    setSelectedMonth(defaultMonth);
     setIsEditing(false);
     setErrorMessage("");
-  }, [classId, students]);
+  }, [availableMonths, classId, defaultMonth, students]);
 
   function startEditing() {
     setDraftSheets(cloneScoreSheets(savedSheets));
@@ -147,6 +172,7 @@ export function useMockScores(classId: number, students: ScoreRosterStudent[]) {
     isEditing,
     selectedMonth,
     students,
+    availableMonths,
     addColumn,
     cancelEditing,
     changeMonth,

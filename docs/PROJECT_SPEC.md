@@ -310,9 +310,9 @@ Cho học sinh nghỉ / học lại (Phase 5.5):
 - Đổi trạng thái áp dụng NGAY qua command riêng, không đợi "Lưu cập nhật".
 - Chọn `"Đã nghỉ"` KHÔNG đổi ngay mà mở dialog `"Cho học sinh nghỉ"`:
   - Hiển thị học sinh + tháng bắt đầu học.
-  - Field bắt buộc `"Tháng bắt đầu nghỉ"` (leftMonth): >= joinedMonth, tối đa một tháng sau khi lớp kết thúc.
+  - Field bắt buộc `"Tháng bắt đầu nghỉ"` (leftMonth): từ joinedMonth đến class.endMonth.
   - Giải thích: `"Tháng nghỉ là tháng đầu tiên học sinh không còn học lớp này."`
-  - Trước khi xác nhận, gọi `get_unpaid_months_for_membership` để liệt kê các tháng chưa đóng học phí (từ joinedMonth đến tháng trước leftMonth); nếu có nợ hiển thị cảnh báo `"Học sinh còn chưa đóng học phí các tháng: ..."` + `"Vẫn xác nhận nghỉ?"`.
+  - Trước khi xác nhận, gọi `get_unpaid_months_for_membership` để liệt kê các tháng chưa đóng học phí (từ joinedMonth đến tháng trước leftMonth); nếu leftMonth = joinedMonth thì không có tháng nợ cần kiểm tra. Nếu có nợ hiển thị cảnh báo `"Học sinh còn chưa đóng học phí các tháng: ..."` + `"Vẫn xác nhận nghỉ?"`.
   - Vẫn cho phép xác nhận nghỉ dù còn nợ (chỉ cảnh báo, không chặn).
   - Xác nhận gọi `pause_student_membership` (status = paused, left_month set).
 - Chọn `"Đang học"` cho học sinh đã nghỉ gọi `reactivate_student_membership` (status = active, left_month = NULL).
@@ -509,6 +509,7 @@ Score table:
 Dynamic columns:
 
 - `useMockScores` tạo monthly sheets riêng theo tháng dựa trên roster SQLite truyền vào.
+- ScoresTab vẫn mock/local, nhưng danh sách tháng hiện lấy theo `class.startMonth..class.endMonth` và có nút tháng trước/tháng sau quanh select tháng.
 - Score state dùng `membershipId` dạng string làm key local cho từng học sinh trong lớp.
 - Lớp chưa có cột điểm sẽ hiện empty state an toàn.
 
@@ -564,6 +565,7 @@ Trạng thái: đã nối SQLite (Phase 5). Payment rows lưu trong bảng `paym
 Month selector (Phase 5.5):
 
 - Danh sách tháng sinh từ `monthsInRange(class.startMonth, class.endMonth)` (`src/lib/months.ts`) — không còn hardcode/cửa sổ trượt.
+- Có nút tháng trước/tháng sau quanh select tháng; nút trước tắt ở tháng đầu lớp, nút sau tắt ở tháng cuối lớp.
 - Default là tháng hiện tại clamp vào khoảng start/end của lớp.
 - Nếu sửa thời gian học của lớp làm tháng đang chọn rơi ra ngoài khoảng, tab tự reset về tháng hợp lệ.
 - Payment row nằm ngoài khoảng mới (nếu có) vẫn giữ trong DB, chỉ không hiển thị trong PaymentsTab.
@@ -701,7 +703,7 @@ State/data source:
 - File seed/mock cũ: `src/data/mockData.ts`.
 - Type: `AcademicYear` trong `src/types/academic-year.ts`.
 - Fields: `id`, `label`, `startsAt`, `endsAt`, `isCurrent`.
-- SQLite Phase 3 có bảng `academic_years` dùng `INTEGER PRIMARY KEY AUTOINCREMENT`; seed có 3 năm học mẫu và để SQLite tự sinh id.
+- SQLite Phase 3 có bảng `academic_years` dùng `INTEGER PRIMARY KEY AUTOINCREMENT`; seed DB mới chỉ tạo `Năm học 2026 - 2027` và đặt năm này là current. Không seed `2025-2026` hoặc `2024-2025`; năm tương lai sẽ do tính năng thêm năm học tạo sau.
 - Frontend hiện gọi `list_academic_years` và `get_current_academic_year_id`.
 
 ### Class data
@@ -716,7 +718,7 @@ State/data source:
   - `ClassScheduleItem = { weekday, startTime, endTime }`
   - `ClassGrade = 8 | 9`
 - SQLite Phase 3 có bảng `classes` và `class_schedules`, đều dùng id số tự tăng; `classes.academic_year_id` và `class_schedules.class_id` là foreign key số.
-- Seed DB hiện tạo các lớp mẫu tương ứng Văn 9/Văn 8/Văn 7/khóa trước nếu bảng năm học/lớp đang rỗng; các khóa mock cũ chỉ còn dùng nội bộ khi seed/map dữ liệu mẫu, không lưu làm database id.
+- Seed DB hiện tạo các lớp mẫu Văn 9/Văn 8 trong năm học 2026-2027 nếu bảng năm học/lớp đang rỗng; các lớp dùng `startMonth = 2026-08` và `endMonth = 2027-07`. Nếu database dev còn năm/lớp cũ, có thể xóa `data.sqlite`, `data.sqlite-wal`, `data.sqlite-shm` để seed lại sạch.
 - `studentCount` trong class overview đếm membership `active` từ SQLite; `unpaidCount` đếm từ bảng `payments` theo tháng hệ thống hiện tại (thiếu row hoặc `unpaid` = chưa đóng).
 - Quan hệ: class thuộc academic year qua `academicYearId` số; class có nhiều `class_schedules`; student dùng `class_memberships`; payment/score/attendance records vẫn mock/local nhưng roster trong tab dùng DB `classId` số.
 
@@ -880,7 +882,7 @@ State/data source:
 
 - SQLite/database đã có cho settings/password, academic years, classes, class schedules, students và class memberships; các domain còn lại chưa nối DB.
 - Điểm danh và điểm vẫn là mock/local; reload/restart mất các thay đổi trong hai tab đó. Học phí đã lưu SQLite.
-- AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite qua `useClassStudents`, nhưng records trong các tab này chưa persist database.
+- AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite qua `useClassStudents`. AttendanceTab vẫn lưu record mock/local nhưng lọc roster chính thức theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`; Scores records vẫn mock/local; Payments records đã persist SQLite.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Chưa có Excel export thật dù nhiều nút export đã hiện.

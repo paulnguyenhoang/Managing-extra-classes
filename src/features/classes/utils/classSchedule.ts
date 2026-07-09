@@ -107,6 +107,47 @@ export function findScheduleConflict({
   return null;
 }
 
+export type ScheduleConflict = {
+  className: string;
+  weekday: WeekdayIndex;
+  startTime: string;
+  endTime: string;
+};
+
+export function findScheduleConflicts({
+  scheduleItem,
+  classes,
+  ignoreClassId,
+}: {
+  scheduleItem: ClassScheduleItem;
+  classes: ClassOverview[];
+  ignoreClassId?: number;
+}): ScheduleConflict[] {
+  return classes.flatMap((classItem) => {
+    if (classItem.id === ignoreClassId) {
+      return [];
+    }
+
+    return classItem.scheduleItems
+      .filter(
+        (existingItem) =>
+          existingItem.weekday === scheduleItem.weekday &&
+          timeRangesOverlap(
+            scheduleItem.startTime,
+            scheduleItem.endTime,
+            existingItem.startTime,
+            existingItem.endTime,
+          ),
+      )
+      .map((existingItem) => ({
+        className: classItem.name,
+        weekday: scheduleItem.weekday,
+        startTime: existingItem.startTime,
+        endTime: existingItem.endTime,
+      }));
+  });
+}
+
 export function findOneTimeScheduleConflict({
   date,
   startTime,

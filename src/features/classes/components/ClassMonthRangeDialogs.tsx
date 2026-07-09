@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { CalendarRange, Flag } from "lucide-react";
+import { CalendarCheck, CalendarRange, Flag } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { MonthPicker } from "@/components/common/MonthPicker";
 import {
   Dialog,
   DialogClose,
@@ -14,54 +15,47 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   addMonths,
   clampMonthToRange,
   currentMonthKey,
   formatMonthLabel,
-  monthsInRange,
 } from "@/lib/months";
 
 function MonthSelect({
   id,
   value,
-  options,
   onChange,
+  minMonth,
+  maxMonth,
 }: {
   id: string;
   value: string;
-  options: string[];
   onChange: (month: string) => void;
+  minMonth?: string;
+  maxMonth?: string;
 }) {
   return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} className="w-full bg-white">
-        <SelectValue placeholder="Chọn tháng" />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((month) => (
-          <SelectItem key={month} value={month}>
-            Tháng {formatMonthLabel(month)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <MonthPicker
+      id={id}
+      value={value}
+      onChange={onChange}
+      minMonth={minMonth}
+      maxMonth={maxMonth}
+    />
   );
 }
 
 export function EditClassMonthRangeDialog({
   startMonth,
   endMonth,
+  minMonth,
+  maxMonth,
   onSave,
 }: {
   startMonth: string;
   endMonth: string;
+  minMonth?: string;
+  maxMonth?: string;
   onSave: (startMonth: string, endMonth: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -69,14 +63,13 @@ export function EditClassMonthRangeDialog({
   const [endDraft, setEndDraft] = useState(endMonth);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const monthOptions = monthsInRange(addMonths(startMonth, -12), addMonths(endMonth, 12));
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
 
     if (nextOpen) {
-      setStartDraft(startMonth);
-      setEndDraft(endMonth);
+      setStartDraft(clampMonthToRange(startMonth, minMonth ?? startMonth, maxMonth ?? startMonth));
+      setEndDraft(clampMonthToRange(endMonth, minMonth ?? endMonth, maxMonth ?? endMonth));
       setErrorMessage("");
     }
   }
@@ -127,8 +120,9 @@ export function EditClassMonthRangeDialog({
             <MonthSelect
               id="range-start-month"
               value={startDraft}
-              options={monthOptions}
               onChange={setStartDraft}
+              minMonth={minMonth}
+              maxMonth={maxMonth}
             />
           </div>
           <div className="space-y-1.5">
@@ -136,8 +130,9 @@ export function EditClassMonthRangeDialog({
             <MonthSelect
               id="range-end-month"
               value={endDraft}
-              options={monthOptions}
               onChange={setEndDraft}
+              minMonth={minMonth}
+              maxMonth={maxMonth}
             />
           </div>
         </div>
@@ -160,23 +155,32 @@ export function EditClassMonthRangeDialog({
 export function CompleteClassDialog({
   startMonth,
   endMonth,
+  minMonth,
+  maxMonth,
   onComplete,
 }: {
   startMonth: string;
   endMonth: string;
+  minMonth?: string;
+  maxMonth?: string;
   onComplete: (endMonth: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [endDraft, setEndDraft] = useState(endMonth);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const monthOptions = monthsInRange(startMonth, addMonths(endMonth, 6));
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen);
 
     if (nextOpen) {
-      setEndDraft(clampMonthToRange(currentMonthKey(), startMonth, endMonth));
+      setEndDraft(
+        clampMonthToRange(
+          currentMonthKey(),
+          maxMonth && startMonth > maxMonth ? maxMonth : startMonth,
+          maxMonth ?? endMonth,
+        ),
+      );
       setErrorMessage("");
     }
   }
@@ -199,11 +203,11 @@ export function CompleteClassDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button
-          variant="ghost"
-          size="xs"
-          className="h-6 gap-1 px-2 text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          variant="outline"
+          size="sm"
+          className="h-8 gap-2 border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-900 shadow-sm hover:bg-amber-100 hover:text-amber-950"
         >
-          <Flag className="size-3" />
+          <Flag className="size-4" />
           Kết thúc lớp
         </Button>
       </DialogTrigger>
@@ -214,13 +218,29 @@ export function CompleteClassDialog({
             Chọn tháng học cuối cùng thực tế của lớp. Lớp sẽ chuyển sang trạng thái đã kết thúc.
           </DialogDescription>
         </DialogHeader>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <div className="flex items-start gap-2">
+            <CalendarCheck className="mt-0.5 size-4 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-medium">Xác nhận mốc kết thúc lớp</p>
+              <p>
+                Kỳ học hiện tại: {formatMonthLabel(startMonth)} - {formatMonthLabel(endMonth)}.
+              </p>
+              <p>
+                Sau khi xác nhận, lớp được đánh dấu đã kết thúc và các tháng học phí/điểm danh
+                sẽ theo mốc kết thúc mới.
+              </p>
+            </div>
+          </div>
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="complete-end-month">Tháng kết thúc thực tế</Label>
           <MonthSelect
             id="complete-end-month"
             value={endDraft}
-            options={monthOptions}
             onChange={setEndDraft}
+            minMonth={startMonth}
+            maxMonth={maxMonth}
           />
         </div>
         {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}

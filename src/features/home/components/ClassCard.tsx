@@ -1,4 +1,4 @@
-import { CalendarDays, Users, WalletCards } from "lucide-react";
+import { CalendarDays, CalendarRange, Users, WalletCards } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -6,6 +6,7 @@ import {
   parseScheduleText,
 } from "@/features/classes/utils/classSchedule";
 import { formatCurrency } from "@/lib/format";
+import { formatMonthLabel } from "@/lib/months";
 import type { ClassOverview } from "@/types/class";
 
 type ClassCardProps = {
@@ -40,6 +41,13 @@ export function ClassCard({ classItem, onOpen }: ClassCardProps) {
                 </p>
               ))}
             </div>
+          </div>
+          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-sm leading-5 text-slate-600">
+            <CalendarRange className="size-4 shrink-0 text-emerald-700" />
+            <span className="min-w-0 truncate">
+              Thời gian học: {formatMonthLabel(classItem.startMonth)} -{" "}
+              {formatMonthLabel(classItem.endMonth)}
+            </span>
           </div>
         </div>
         {classItem.unpaidCount > 0 ? (

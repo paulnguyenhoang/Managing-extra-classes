@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { MonthPicker } from "@/components/common/MonthPicker";
 import {
   Dialog,
   DialogClose,
@@ -30,9 +31,7 @@ import {
 import {
   addMonths,
   currentMonthKey,
-  formatMonthLabel,
   isValidMonthKey,
-  monthsInRange,
 } from "@/lib/months";
 import type { AcademicYear } from "@/types/academic-year";
 import {
@@ -67,7 +66,8 @@ export function CreateClassDialog({
 }: CreateClassDialogProps) {
   const yearStartMonth = academicYear?.startsAt?.slice(0, 7) ?? currentMonthKey();
   const yearEndMonth = academicYear?.endsAt?.slice(0, 7) ?? addMonths(currentMonthKey(), 9);
-  const monthOptions = monthsInRange(yearStartMonth, yearEndMonth);
+  const allowedStartMonth = `${yearStartMonth.slice(0, 4)}-01`;
+  const allowedEndMonth = `${yearEndMonth.slice(0, 4)}-12`;
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [grade, setGrade] = useState<ClassGrade>(defaultGrade);
@@ -226,33 +226,23 @@ export function CreateClassDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="class-start-month">Tháng bắt đầu</Label>
-                <Select value={startMonth} onValueChange={setStartMonth}>
-                  <SelectTrigger id="class-start-month" className="w-full bg-white">
-                    <SelectValue placeholder="Chọn tháng bắt đầu" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {monthOptions.map((month) => (
-                      <SelectItem key={month} value={month}>
-                        Tháng {formatMonthLabel(month)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <MonthPicker
+                  id="class-start-month"
+                  value={startMonth}
+                  onChange={setStartMonth}
+                  minMonth={allowedStartMonth}
+                  maxMonth={allowedEndMonth}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="class-end-month">Tháng kết thúc</Label>
-                <Select value={endMonth} onValueChange={setEndMonth}>
-                  <SelectTrigger id="class-end-month" className="w-full bg-white">
-                    <SelectValue placeholder="Chọn tháng kết thúc" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {monthOptions.map((month) => (
-                      <SelectItem key={month} value={month}>
-                        Tháng {formatMonthLabel(month)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <MonthPicker
+                  id="class-end-month"
+                  value={endMonth}
+                  onChange={setEndMonth}
+                  minMonth={allowedStartMonth}
+                  maxMonth={allowedEndMonth}
+                />
               </div>
             </div>
             <div className="space-y-1.5">
@@ -261,6 +251,7 @@ export function CreateClassDialog({
                 items={scheduleItems}
                 onChange={setScheduleItems}
                 idPrefix="create-schedule"
+                existingClasses={existingClasses}
               />
             </div>
             {errorMessage && (

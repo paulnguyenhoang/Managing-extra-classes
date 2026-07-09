@@ -1,4 +1,5 @@
 import type { ClassStudentRosterItem, Student } from "@/types/student";
+import { monthsInRange } from "@/lib/months";
 
 export type ScoreRosterStudent = Student | ClassStudentRosterItem;
 
@@ -14,10 +15,12 @@ export type MonthlyScoreSheet = {
 
 export type MonthlyScoreSheets = Record<string, MonthlyScoreSheet>;
 
-// TODO(Phase 6 - Scores DB): thay danh sách tháng hardcode bằng monthsInRange(class.startMonth,
-// class.endMonth) từ src/lib/months.ts, giống PaymentsTab. Mock sheets hiện key theo các tháng
-// cố định này nên đổi sớm sẽ phá dữ liệu mẫu; sẽ xử lý khi nối SQLite cho điểm.
 export const scoreMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
+
+export function getScoreMonthsForRange(startMonth: string, endMonth: string) {
+  const rangeMonths = monthsInRange(startMonth, endMonth);
+  return rangeMonths.length > 0 ? rangeMonths : scoreMonths;
+}
 
 export function formatScoreMonthLabel(month: string) {
   const [year, monthNumber] = month.split("-");
@@ -38,8 +41,9 @@ export function createEmptyScoreSheet(students: ScoreRosterStudent[]): MonthlySc
 export function createInitialScoreSheets(
   classId: string | number,
   students: ScoreRosterStudent[],
+  months = scoreMonths,
 ): MonthlyScoreSheets {
-  const emptySheets = scoreMonths.reduce<MonthlyScoreSheets>((result, month) => {
+  const emptySheets = months.reduce<MonthlyScoreSheets>((result, month) => {
     result[month] = createEmptyScoreSheet(students);
     return result;
   }, {});

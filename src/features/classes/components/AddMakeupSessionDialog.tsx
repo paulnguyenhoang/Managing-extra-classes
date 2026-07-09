@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { CalendarPlus, Check } from "lucide-react";
+import { AlertTriangle, CalendarPlus, Check, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -56,6 +56,19 @@ export function AddMakeupSessionDialog({
     () => sessions.filter((session) => !session.isMakeup),
     [sessions],
   );
+  const timeConflict = useMemo(() => {
+    if (!form.date || !isValidTimeRange(form.startTime, form.endTime)) {
+      return null;
+    }
+
+    return findOneTimeScheduleConflict({
+      date: parseLocalDate(form.date),
+      startTime: form.startTime,
+      endTime: form.endTime,
+      classes: existingClasses,
+    });
+  }, [existingClasses, form.date, form.endTime, form.startTime]);
+  const shouldShowTimeAvailability = Boolean(form.date);
 
   function updateField(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -152,6 +165,14 @@ export function AddMakeupSessionDialog({
                 onChange={(event) => updateField("endTime", event.target.value)}
               />
             </div>
+            {shouldShowTimeAvailability ? (
+              <div className="sm:col-span-2">
+                <OneTimeAvailabilityHint
+                  hasValidRange={isValidTimeRange(form.startTime, form.endTime)}
+                  conflict={timeConflict}
+                />
+              </div>
+            ) : null}
             <div className="space-y-2 sm:col-span-2">
               <Label>Bù cho buổi nào</Label>
               {regularSessions.length > 0 ? (
@@ -210,5 +231,38 @@ export function AddMakeupSessionDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function OneTimeAvailabilityHint({
+  hasValidRange,
+  conflict,
+}: {
+  hasValidRange: boolean;
+  conflict: ReturnType<typeof findOneTimeScheduleConflict>;
+}) {
+  if (!hasValidRange) {
+    return (
+      <p className="flex items-center gap-1.5 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+        <AlertTriangle className="size-4 shrink-0" />
+        Giờ kết thúc phải sau giờ bắt đầu.
+      </p>
+    );
+  }
+
+  if (conflict) {
+    return (
+      <p className="flex items-center gap-1.5 rounded-md bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+        <AlertTriangle className="size-4 shrink-0" />
+        Trùng {conflict.className}: {conflict.startTime} - {conflict.endTime}
+      </p>
+    );
+  }
+
+  return (
+    <p className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+      <CheckCircle2 className="size-4 shrink-0" />
+      Khung giờ học bù đang trống.
+    </p>
   );
 }

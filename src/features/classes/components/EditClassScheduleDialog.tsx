@@ -96,6 +96,8 @@ export function EditClassScheduleDialog({
             items={draftItems}
             onChange={setDraftItems}
             idPrefix="edit-schedule"
+            existingClasses={existingClasses}
+            ignoreClassId={classId}
           />
 
           {errorMessage && (

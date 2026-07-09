@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, LockKeyhole, Search, UnlockKeyhole } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, LockKeyhole, Search, UnlockKeyhole } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -140,6 +140,9 @@ export function PaymentsTab({
   );
   const summary = getPaymentSummary(rows);
   const selectedMonthLabel = formatPaymentMonth(selectedMonth);
+  const selectedMonthIndex = monthOptions.indexOf(selectedMonth);
+  const canGoPreviousMonth = selectedMonthIndex > 0;
+  const canGoNextMonth = selectedMonthIndex >= 0 && selectedMonthIndex < monthOptions.length - 1;
 
   async function runPaymentAction(action: () => Promise<void>, failureMessage: string) {
     setIsSaving(true);
@@ -296,18 +299,50 @@ export function PaymentsTab({
           />
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="h-9 min-w-44 bg-white">
-              <SelectValue placeholder="Chọn tháng" />
-            </SelectTrigger>
-            <SelectContent>
-              {monthOptions.map((month) => (
-                <SelectItem key={month} value={month}>
-                  {formatPaymentMonthLabel(month)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="h-9 w-9"
+              disabled={!canGoPreviousMonth || isSaving}
+              onClick={() => {
+                if (canGoPreviousMonth) {
+                  setSelectedMonth(monthOptions[selectedMonthIndex - 1]);
+                }
+              }}
+            >
+              <ChevronLeft className="size-4" />
+              <span className="sr-only">Tháng trước</span>
+            </Button>
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="h-9 min-w-44 bg-white">
+                <SelectValue placeholder="Chọn tháng" />
+              </SelectTrigger>
+              <SelectContent>
+                {monthOptions.map((month) => (
+                  <SelectItem key={month} value={month}>
+                    {formatPaymentMonthLabel(month)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="h-9 w-9"
+              disabled={!canGoNextMonth || isSaving}
+              onClick={() => {
+                if (canGoNextMonth) {
+                  setSelectedMonth(monthOptions[selectedMonthIndex + 1]);
+                }
+              }}
+            >
+              <ChevronRight className="size-4" />
+              <span className="sr-only">Tháng sau</span>
+            </Button>
+          </div>
           <Select value={filter} onValueChange={(value) => setFilter(value as PaymentFilter)}>
             <SelectTrigger className="h-9 min-w-36 bg-white">
               <SelectValue placeholder="Lọc trạng thái" />

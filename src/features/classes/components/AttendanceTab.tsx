@@ -54,6 +54,7 @@ import {
   type WeeklySession,
 } from "@/features/classes/utils/attendance";
 import { attendanceStatusLabel } from "@/lib/format";
+import { currentMonthKey, isValidMonthKey } from "@/lib/months";
 import type { AttendanceStatus } from "@/types/attendance";
 import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 import type { ClassStudentRosterItem } from "@/types/student";
@@ -63,6 +64,8 @@ type AttendanceTabProps = {
   className: string;
   scheduleItems: ClassScheduleItem[];
   availableClasses: ClassOverview[];
+  classStartMonth: string;
+  classEndMonth: string;
   onUpcomingMakeupSessionsChange?: (sessions: WeeklySession[]) => void;
 };
 
@@ -345,10 +348,29 @@ export function AttendanceTab({
   className,
   scheduleItems,
   availableClasses,
+  classStartMonth,
+  classEndMonth,
   onUpcomingMakeupSessionsChange,
 }: AttendanceTabProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
-  const [weekStart, setWeekStart] = useState(() => getWeekStart(today));
+  const firstAllowedWeekStart = useMemo(
+    () => getWeekStart(parseMonthStart(classStartMonth) ?? today),
+    [classStartMonth, today],
+  );
+  const lastAllowedWeekStart = useMemo(
+    () => getWeekStart(parseMonthEnd(classEndMonth) ?? today),
+    [classEndMonth, today],
+  );
+  const hasValidClassRange =
+    isValidMonthKey(classStartMonth) &&
+    isValidMonthKey(classEndMonth) &&
+    classStartMonth <= classEndMonth;
+  const [weekStart, setWeekStart] = useState(() => {
+    const currentWeek = getWeekStart(today);
+    return hasValidClassRange
+      ? clampWeekStart(currentWeek, firstAllowedWeekStart, lastAllowedWeekStart)
+      : currentWeek;
+  });
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [visibleCalendarMonth, setVisibleCalendarMonth] = useState(() => weekStart);
   const [pendingCancelSession, setPendingCancelSession] = useState<WeeklySession | null>(null);
@@ -389,7 +411,18 @@ export function AttendanceTab({
   const isTodaySessionCancelled = todaySession
     ? cancelledSessionIds.includes(todaySession.id)
     : false;
-  const canMarkTodayPresent = Boolean(todaySession) && !isTodaySessionCancelled;
+  const hasEligibleStudentToday = todaySession
+    ? students.some((student) => isStudentEligibleForSession(student, todaySession))
+    : false;
+  const canMarkTodayPresent =
+    Boolean(todaySession) && !isTodaySessionCancelled && hasEligibleStudentToday;
+  const visibleStudents = useMemo(
+    () =>
+      students.filter((student) =>
+        sessions.some((session) => isStudentEligibleForSession(student, session)),
+      ),
+    [sessions, students],
+  );
   const visibleStudentMakeupRecords = studentMakeupRecords.filter(
     (record) =>
       record.receivingClassId === classIdKey &&
@@ -412,15 +445,41 @@ export function AttendanceTab({
     onUpcomingMakeupSessionsChange?.(upcomingMakeupSessions);
   }, [onUpcomingMakeupSessionsChange, upcomingMakeupSessions]);
 
-  // TODO(Phase 7 - Attendance DB): giới hạn điều hướng tuần trong khoảng class.startMonth..endMonth
-  // (tránh đi quá xa trước khi lớp bắt đầu hoặc sau khi lớp kết thúc).
+  useEffect(() => {
+    if (!hasValidClassRange) {
+      return;
+    }
+
+    setWeekStart((current) =>
+      clampWeekStart(current, firstAllowedWeekStart, lastAllowedWeekStart),
+    );
+    setVisibleCalendarMonth((current) =>
+      clampWeekStart(current, firstAllowedWeekStart, lastAllowedWeekStart),
+    );
+  }, [firstAllowedWeekStart, hasValidClassRange, lastAllowedWeekStart]);
+
+  const canGoPreviousWeek =
+    !hasValidClassRange || addDays(weekStart, -7).getTime() >= firstAllowedWeekStart.getTime();
+  const canGoNextWeek =
+    !hasValidClassRange || addDays(weekStart, 7).getTime() <= lastAllowedWeekStart.getTime();
+
   function goToPreviousWeek() {
-    setWeekStart((current) => addDays(current, -7));
+    setWeekStart((current) => {
+      const nextWeek = addDays(current, -7);
+      return hasValidClassRange
+        ? clampWeekStart(nextWeek, firstAllowedWeekStart, lastAllowedWeekStart)
+        : nextWeek;
+    });
     setWeekPickerOpen(false);
   }
 
   function goToNextWeek() {
-    setWeekStart((current) => addDays(current, 7));
+    setWeekStart((current) => {
+      const nextWeek = addDays(current, 7);
+      return hasValidClassRange
+        ? clampWeekStart(nextWeek, firstAllowedWeekStart, lastAllowedWeekStart)
+        : nextWeek;
+    });
     setWeekPickerOpen(false);
   }
 
@@ -435,7 +494,11 @@ export function AttendanceTab({
 
   function markWholeSessionAbsent(sessionId: string) {
     // Học sinh đang "Học bù" ở buổi này phải gỡ liên kết học bù trước khi ghi đè thành Nghỉ.
-    students.forEach((student) => {
+    const eligibleStudents = students.filter((student) =>
+      isStudentEligibleForSessionId(student, sessionId, sessions),
+    );
+
+    eligibleStudents.forEach((student) => {
       const studentKey = getRosterStudentKey(student);
 
       if (getStatus(sessionId, studentKey) === "makeup") {
@@ -449,7 +512,7 @@ export function AttendanceTab({
 
     markSessionForStudents(
       sessionId,
-      students.map(getRosterStudentKey),
+      eligibleStudents.map(getRosterStudentKey),
       "absent",
       getMakeupRecordIdsForSession(sessionId),
     );
@@ -487,7 +550,9 @@ export function AttendanceTab({
 
     markSessionForStudents(
       todaySession.id,
-      students.map(getRosterStudentKey),
+      students
+        .filter((student) => isStudentEligibleForSession(student, todaySession))
+        .map(getRosterStudentKey),
       "present",
       getMakeupRecordIdsForSession(todaySession.id),
     );
@@ -499,7 +564,12 @@ export function AttendanceTab({
   }
 
   function selectWeek(nextWeekStart: Date) {
-    setWeekStart(startOfDay(nextWeekStart));
+    const normalizedWeek = startOfDay(nextWeekStart);
+    setWeekStart(
+      hasValidClassRange
+        ? clampWeekStart(normalizedWeek, firstAllowedWeekStart, lastAllowedWeekStart)
+        : normalizedWeek,
+    );
     setWeekPickerOpen(false);
   }
 
@@ -612,7 +682,12 @@ export function AttendanceTab({
       <section className="rounded-lg border bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="gap-2" onClick={goToPreviousWeek}>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={goToPreviousWeek}
+              disabled={!canGoPreviousWeek}
+            >
               <ChevronLeft className="size-4" />
               Tuần trước
             </Button>
@@ -641,7 +716,12 @@ export function AttendanceTab({
                 Tuần hiện tại
               </Badge>
             ) : null}
-            <Button variant="outline" className="gap-2" onClick={goToNextWeek}>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={goToNextWeek}
+              disabled={!canGoNextWeek}
+            >
               Tuần sau
               <ChevronRight className="size-4" />
             </Button>
@@ -702,6 +782,11 @@ export function AttendanceTab({
           Lớp này chưa có học sinh trong database.
         </p>
       ) : null}
+      {!isLoadingStudents && !studentsErrorMessage && students.length > 0 && visibleStudents.length === 0 ? (
+        <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
+          Không có học sinh trong thời gian này.
+        </p>
+      ) : null}
 
       <div className="min-w-0 rounded-lg border bg-white">
         <Table className="min-w-[900px]">
@@ -725,7 +810,7 @@ export function AttendanceTab({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {students.map((student, index) => {
+            {visibleStudents.map((student, index) => {
               const studentKey = getRosterStudentKey(student);
 
               return (
@@ -733,6 +818,7 @@ export function AttendanceTab({
                   <TableCell>{index + 1}</TableCell>
                   <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
                   {sessions.map((session) => {
+                  const isEligible = isStudentEligibleForSession(student, session);
                   const isCancelled = cancelledSessionIds.includes(session.id);
                   const isUnlocked = unlockedSessionIds.includes(session.id);
                   const status = getStatus(session.id, studentKey);
@@ -746,7 +832,9 @@ export function AttendanceTab({
 
                   return (
                     <TableCell key={session.id} className="text-center">
-                      {isCancelled ? (
+                      {!isEligible ? (
+                        <span className="text-slate-300">-</span>
+                      ) : isCancelled ? (
                         <Badge className="bg-red-100 text-red-900 hover:bg-red-100">
                           Nghỉ
                         </Badge>
@@ -945,6 +1033,54 @@ function DateToneLegendItem({ className, label }: { className: string; label: st
 
 function getRosterStudentKey(student: ClassStudentRosterItem) {
   return String(student.membershipId);
+}
+
+function isStudentEligibleForSession(student: ClassStudentRosterItem, session: WeeklySession) {
+  const sessionMonth = currentMonthKey(session.date);
+
+  return (
+    student.joinedMonth <= sessionMonth &&
+    (student.leftMonth === null || sessionMonth < student.leftMonth)
+  );
+}
+
+function isStudentEligibleForSessionId(
+  student: ClassStudentRosterItem,
+  sessionId: string,
+  sessions: WeeklySession[],
+) {
+  const session = sessions.find((item) => item.id === sessionId);
+  return session ? isStudentEligibleForSession(student, session) : false;
+}
+
+function parseMonthStart(month: string) {
+  if (!isValidMonthKey(month)) {
+    return null;
+  }
+
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(year, monthNumber - 1, 1);
+}
+
+function parseMonthEnd(month: string) {
+  if (!isValidMonthKey(month)) {
+    return null;
+  }
+
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(year, monthNumber, 0);
+}
+
+function clampWeekStart(weekStart: Date, minWeekStart: Date, maxWeekStart: Date) {
+  if (weekStart.getTime() < minWeekStart.getTime()) {
+    return minWeekStart;
+  }
+
+  if (weekStart.getTime() > maxWeekStart.getTime()) {
+    return maxWeekStart;
+  }
+
+  return weekStart;
 }
 
 function getSessionDateToneClass(date: Date, today: Date) {

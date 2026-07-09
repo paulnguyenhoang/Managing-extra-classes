@@ -19,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  addMonths,
   clampMonthToRange,
   currentMonthKey,
   formatMonthLabel,
@@ -46,10 +45,8 @@ export function PauseStudentDialog({
   onOpenChange,
   onConfirm,
 }: PauseStudentDialogProps) {
-  // Tháng nghỉ là exclusive: học sinh không còn học từ tháng này. Cho phép tối đa
-  // một tháng sau khi lớp kết thúc (nghĩa là học đến hết lớp).
-  const maxLeftMonth = addMonths(classEndMonth, 1);
-  const monthOptions = monthsInRange(joinedMonth, maxLeftMonth);
+  // Tháng nghỉ là exclusive: học sinh không còn học từ tháng này.
+  const monthOptions = monthsInRange(joinedMonth, classEndMonth);
   const [leftMonth, setLeftMonth] = useState("");
   const [unpaidMonths, setUnpaidMonths] = useState<string[]>([]);
   const [isCheckingDebt, setIsCheckingDebt] = useState(false);
@@ -58,7 +55,7 @@ export function PauseStudentDialog({
 
   useEffect(() => {
     if (open) {
-      setLeftMonth(clampMonthToRange(currentMonthKey(), joinedMonth, maxLeftMonth));
+      setLeftMonth(clampMonthToRange(currentMonthKey(), joinedMonth, classEndMonth));
       setUnpaidMonths([]);
       setErrorMessage("");
     }

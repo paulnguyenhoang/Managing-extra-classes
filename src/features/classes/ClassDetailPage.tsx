@@ -30,9 +30,11 @@ import {
   updateClassSchedule,
 } from "@/services/classApi";
 import type { ClassOverview, ClassScheduleItem, ClassStatus } from "@/types/class";
+import type { AcademicYear } from "@/types/academic-year";
 
 type ClassDetailPageProps = {
   classItem: ClassOverview;
+  academicYear: AcademicYear | null;
   classOverviews: ClassOverview[];
   onBack: () => void;
   onClassUpdate: (classId: number, updates: Partial<ClassOverview>) => void;
@@ -41,6 +43,7 @@ type ClassDetailPageProps = {
 
 export function ClassDetailPage({
   classItem,
+  academicYear,
   classOverviews,
   onBack,
   onClassUpdate,
@@ -69,6 +72,7 @@ export function ClassDetailPage({
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [headerError, setHeaderError] = useState("");
   const scheduleLines = formatScheduleLines(scheduleItems);
+  const academicYearMonthBounds = getAcademicYearMonthBounds(academicYear);
   const visibleUpcomingClassMakeupSessions = upcomingClassMakeupSessions.filter(
     (session) => getSessionEndTime(session).getTime() >= nowTick,
   );
@@ -307,6 +311,8 @@ export function ClassDetailPage({
               <EditClassMonthRangeDialog
                 startMonth={startMonth}
                 endMonth={endMonth}
+                minMonth={academicYearMonthBounds.minMonth}
+                maxMonth={academicYearMonthBounds.maxMonth}
                 onSave={saveMonthRange}
               />
               <span>
@@ -320,6 +326,8 @@ export function ClassDetailPage({
                 <CompleteClassDialog
                   startMonth={startMonth}
                   endMonth={endMonth}
+                  minMonth={academicYearMonthBounds.minMonth}
+                  maxMonth={academicYearMonthBounds.maxMonth}
                   onComplete={handleCompleteClass}
                 />
               )}
@@ -429,11 +437,13 @@ export function ClassDetailPage({
             className={className}
             scheduleItems={scheduleItems}
             availableClasses={classOverviews}
+            classStartMonth={startMonth}
+            classEndMonth={endMonth}
             onUpcomingMakeupSessionsChange={setUpcomingClassMakeupSessions}
           />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="scores" className="outline-none">
-          <ScoresTab classId={classId} />
+          <ScoresTab classId={classId} classStartMonth={startMonth} classEndMonth={endMonth} />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="payments" className="outline-none">
           <PaymentsTab
@@ -454,4 +464,14 @@ function getSessionEndTime(session: WeeklySession) {
   const result = new Date(session.date);
   result.setHours(Number.isFinite(hour) ? hour : 23, Number.isFinite(minute) ? minute : 59, 0, 0);
   return result;
+}
+
+function getAcademicYearMonthBounds(academicYear: AcademicYear | null) {
+  const startYear = academicYear?.startsAt?.slice(0, 4);
+  const endYear = academicYear?.endsAt?.slice(0, 4);
+
+  return {
+    minMonth: startYear ? `${startYear}-01` : undefined,
+    maxMonth: endYear ? `${endYear}-12` : undefined,
+  };
 }

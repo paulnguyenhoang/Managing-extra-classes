@@ -118,29 +118,13 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             .transaction()
             .map_err(|error| format!("Không bắt đầu được seed transaction: {error}"))?;
 
-        let academic_years = [
-            (
-                "2025-2026",
-                "Năm học 2025 - 2026",
-                "2025-08-01",
-                "2026-05-31",
-                1,
-            ),
-            (
-                "2024-2025",
-                "Năm học 2024 - 2025",
-                "2024-08-01",
-                "2025-05-31",
-                0,
-            ),
-            (
-                "2026-2027",
-                "Năm học 2026 - 2027",
-                "2026-08-01",
-                "2027-05-31",
-                0,
-            ),
-        ];
+        let academic_years = [(
+            "2026-2027",
+            "Năm học 2026 - 2027",
+            "2026-08-01",
+            "2027-07-31",
+            1,
+        )];
 
         let mut academic_year_ids: HashMap<&'static str, i64> = HashMap::new();
         let mut academic_year_months: HashMap<&'static str, (String, String)> = HashMap::new();
@@ -163,7 +147,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
         let classes = [
             (
                 "van-9a",
-                "2025-2026",
+                "2026-2027",
                 "Văn 9 - Ôn thi vào 10",
                 9,
                 700_000,
@@ -171,7 +155,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             ),
             (
                 "van-8a",
-                "2025-2026",
+                "2026-2027",
                 "Văn 8 - Nâng cao",
                 8,
                 600_000,
@@ -179,18 +163,10 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
             ),
             (
                 "van-8b",
-                "2025-2026",
+                "2026-2027",
                 "Văn 8 - Cơ bản",
                 8,
                 550_000,
-                "Phòng học nhà thầy",
-            ),
-            (
-                "van-9-old",
-                "2024-2025",
-                "Văn 9 - Khóa trước",
-                9,
-                650_000,
                 "Phòng học nhà thầy",
             ),
         ];
@@ -260,20 +236,6 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
                 end_time: "21:00",
                 sort_order: 1,
             },
-            SeedSchedule {
-                class_key: "van-9-old",
-                weekday: 2,
-                start_time: "18:00",
-                end_time: "20:00",
-                sort_order: 0,
-            },
-            SeedSchedule {
-                class_key: "van-9-old",
-                weekday: 5,
-                start_time: "18:00",
-                end_time: "20:00",
-                sort_order: 1,
-            },
         ];
 
         for schedule in schedules {
@@ -301,7 +263,7 @@ pub fn seed_academic_class_data(database: &AppDatabase) -> Result<(), String> {
         }
 
         let current_academic_year_id = academic_year_ids
-            .get("2025-2026")
+            .get("2026-2027")
             .copied()
             .ok_or_else(|| "Không tìm thấy năm học hiện tại khi seed.".to_string())?;
 
@@ -430,6 +392,12 @@ pub fn create_class(
 
     database.with_connection_mut(|connection| {
         ensure_academic_year_exists(connection, request.academic_year_id)?;
+        validate_month_range_within_academic_year(
+            connection,
+            request.academic_year_id,
+            &request.start_month,
+            &request.end_month,
+        )?;
 
         let name = request.name.trim().to_string();
         let note = normalize_optional_text(request.note.as_deref());
@@ -519,6 +487,13 @@ pub fn update_class_month_range(
 
     database.with_connection_mut(|connection| {
         ensure_class_exists(connection, request.class_id)?;
+        let academic_year_id = class_academic_year_id(connection, request.class_id)?;
+        validate_month_range_within_academic_year(
+            connection,
+            academic_year_id,
+            &request.start_month,
+            &request.end_month,
+        )?;
         connection
             .execute(
                 "UPDATE classes
@@ -553,6 +528,14 @@ pub fn complete_class(
         if request.end_month < start_month {
             return Err("Tháng kết thúc không được trước tháng bắt đầu của lớp.".to_string());
         }
+
+        let academic_year_id = class_academic_year_id(connection, request.class_id)?;
+        validate_month_range_within_academic_year(
+            connection,
+            academic_year_id,
+            &start_month,
+            &request.end_month,
+        )?;
 
         connection
             .execute(
@@ -824,6 +807,18 @@ fn ensure_class_exists(connection: &Connection, class_id: i64) -> Result<(), Str
     }
 }
 
+fn class_academic_year_id(connection: &Connection, class_id: i64) -> Result<i64, String> {
+    connection
+        .query_row(
+            "SELECT academic_year_id FROM classes WHERE id = ?1 AND is_archived = 0",
+            params![class_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được năm học của lớp: {error}"))?
+        .ok_or_else(|| "Không tìm thấy lớp học.".to_string())
+}
+
 fn validate_class_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("Tên lớp không được để trống.".to_string());
@@ -843,6 +838,42 @@ fn validate_month_range(start_month: &str, end_month: &str) -> Result<(), String
     }
 
     Ok(())
+}
+
+fn validate_month_range_within_academic_year(
+    connection: &Connection,
+    academic_year_id: i64,
+    start_month: &str,
+    end_month: &str,
+) -> Result<(), String> {
+    let (min_month, max_month) = academic_year_month_bounds(connection, academic_year_id)?;
+
+    if start_month < min_month.as_str() || end_month > max_month.as_str() {
+        return Err(format!(
+            "Thời gian học của lớp phải nằm trong hai năm của năm học ({} - {}).",
+            crate::months::format_month_label(&min_month),
+            crate::months::format_month_label(&max_month)
+        ));
+    }
+
+    Ok(())
+}
+
+fn academic_year_month_bounds(
+    connection: &Connection,
+    academic_year_id: i64,
+) -> Result<(String, String), String> {
+    let (starts_at, ends_at) = connection
+        .query_row(
+            "SELECT starts_at, ends_at FROM academic_years WHERE id = ?1",
+            params![academic_year_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được năm học: {error}"))?
+        .ok_or_else(|| "Không tìm thấy năm học.".to_string())?;
+
+    Ok((format!("{}-01", &starts_at[..4]), format!("{}-12", &ends_at[..4])))
 }
 
 fn validate_class_grade(grade: i64) -> Result<(), String> {
