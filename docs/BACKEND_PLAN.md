@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5.6 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle và lifecycle UX cleanup); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores); Attendance/Backup/Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -153,8 +153,8 @@ Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AU
 - `students`
 - `class_memberships`
 - `payments`
-- `score_columns` (planned Phase 6, chưa có migration)
-- `score_values` (planned Phase 6, chưa có migration)
+- `score_columns` (implemented Phase 6, migration `007_scores`)
+- `score_values` (implemented Phase 6, migration `007_scores`)
 - `attendance_sessions` (planned Phase 7, chưa có migration)
 - `attendance_records` (planned Phase 7, chưa có migration)
 - `student_makeup_records` (planned Phase 7, chưa có migration)
@@ -941,7 +941,7 @@ Trạng thái hiện tại: đã triển khai.
 
 ### Phase 6. Scores
 
-Trạng thái hiện tại: chưa triển khai DB; ScoresTab vẫn mock/local qua `useMockScores`.
+Trạng thái hiện tại: đã triển khai.
 
 Mục tiêu:
 
@@ -949,21 +949,18 @@ Mục tiêu:
 - Lưu điểm theo membership.
 - Không dùng formal score type/hệ số trong MVP.
 
-Deliverables:
+Deliverables (đã hoàn thành):
 
-- ScoresTab đọc cột/điểm theo class/month.
-- Thêm/sửa/xóa cột điểm qua transaction.
-- Lưu điểm validate 0-10.
-- Dùng `class_id`, `month`, `membership_id`, `student_id`.
-- Tận dụng `classes.start_month/end_month` và `class_memberships.joined_month/left_month` để xác định tháng/học sinh hợp lệ nếu rule Scores cần lọc theo lifecycle.
-- Frontend tiếp tục render roster đã sort tiếng Việt bằng `sortStudentsByVietnameseName`; STT = `index + 1` sau filter/sort.
-
-Phase 6 readiness:
-
-- Payments đã SQLite-backed và dùng khóa `(membership_id, month)`, nên Scores có thể theo cùng hướng dữ liệu theo membership/tháng.
-- Class/membership lifecycle đã có sẵn để giới hạn tháng và roster.
-- Score values cần validate 0-10 ở cả UI và service.
-- Attendance vẫn để Phase 7 vì có session sinh từ lịch, nghỉ/bù, lock/unlock và liên kết học bù phức tạp hơn.
+- Migration `007_scores`: bảng `score_columns` (class/month/label/sort_order) + `score_values` (value REAL NULL hoặc 0-10 với CHECK, unique `(column_id, membership_id)`).
+- Module `src-tauri/src/scores/mod.rs` với commands: `list_score_sheet`, `add_score_column`, `rename_score_column`, `delete_score_column`, `save_score_values`.
+- `list_score_sheet` trả columns + rows roster hợp lệ theo tháng — CÙNG rule lifecycle với Payments: `joined_month <= month` và (`left_month IS NULL` hoặc `month < left_month`).
+- `add_score_column` validate tháng trong `classes.start_month..end_month`, `sort_order = max + 1`.
+- `delete_score_column` transaction: xóa values trước rồi xóa cột.
+- `save_score_values` batch transaction, validate 0-10 + cột thuộc lớp/tháng + membership hợp lệ trong tháng; upsert theo `(column_id, membership_id)`; điểm trống set NULL nếu row tồn tại, không tạo row thừa.
+- Điểm keyed theo `membership_id` (không dùng student_id đơn lẻ vì học sinh có thể thuộc nhiều lớp).
+- ScoresTab load sheet từ DB theo classId/tháng, draft thưa khi edit, refresh sau mỗi thao tác; `useMockScores` không còn được dùng.
+- Frontend render roster đã sort tiếng Việt bằng `sortStudentsByVietnameseName`; STT = `index + 1` sau filter/sort.
+- Attendance vẫn để Phase 7 (kế tiếp) vì có session sinh từ lịch, nghỉ/bù, lock/unlock và liên kết học bù phức tạp hơn.
 
 ### Phase 7. Attendance
 
