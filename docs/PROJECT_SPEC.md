@@ -11,8 +11,8 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - App type: ứng dụng desktop Tauri dùng React + TypeScript.
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
-- Trạng thái persistence: đã có SQLite local qua Rust commands. Phase 1-4 hiện lưu được app settings/password, academic years, classes, class schedules, students và class memberships.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; records của Điểm danh/Nhập điểm/Học phí vẫn mock/local.
+- Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 5.6: app settings/password, academic years, classes, class schedules, students, class memberships, payments và class/membership month lifecycle.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments đã persist SQLite; records của Điểm danh/Nhập điểm vẫn mock/local.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -243,6 +243,8 @@ Header chi tiết lớp hiển thị:
 - Nút quay lại danh sách lớp.
 - Tên lớp.
 - Lịch học.
+- Thời gian học `startMonth - endMonth`.
+- Badge/trạng thái lớp nếu lớp đã kết thúc.
 - Card học phí tháng.
 
 Có thể chỉnh sửa:
@@ -250,6 +252,7 @@ Có thể chỉnh sửa:
 - Tên lớp: icon bút cạnh tên; bấm vào đổi sang input, có nút lưu/hủy. Enter cũng lưu.
 - Lịch học: icon lịch mở `EditClassScheduleDialog`; chọn các ngày trong tuần và giờ bắt đầu/kết thúc.
 - Học phí tháng: icon bút trong card học phí; bấm vào đổi sang input, có nút lưu/hủy. Enter cũng lưu.
+- Thời gian học: icon bút mở dialog cập nhật `startMonth/endMonth`; nút `"Kết thúc lớp"` mở dialog chọn tháng kết thúc thực tế và set `status = completed`.
 
 Schedule behavior:
 
@@ -504,9 +507,10 @@ Hạn chế:
 
 Month selector:
 
-- Có select tháng từ `scoreMonths`: `2026-05`, `2026-06`, `2026-07`, `2026-08`.
-- Default selected month là `scoreMonths[2]` tức `2026-07`.
-- Đổi tháng reset edit mode, reset draft từ saved state.
+- Có select tháng sinh từ `getScoreMonthsForRange(classStartMonth, classEndMonth)`, tức dùng khoảng thời gian học của lớp từ `classes.start_month..classes.end_month`.
+- Helper vẫn có fallback legacy `scoreMonths = ["2026-05", "2026-06", "2026-07", "2026-08"]` nếu range truyền vào không hợp lệ, nhưng trong flow ClassDetail hiện tại ScoresTab nhận range từ DB-backed class detail.
+- Default selected month là tháng hiện tại nếu nằm trong range, ngược lại clamp về tháng hợp lệ gần nhất.
+- Có nút tháng trước/tháng sau quanh select; đổi tháng reset edit mode, reset draft từ saved state.
 
 Score table:
 
@@ -521,6 +525,7 @@ Dynamic columns:
 - `useMockScores` tạo monthly sheets riêng theo tháng dựa trên roster SQLite truyền vào.
 - ScoresTab vẫn mock/local, nhưng danh sách tháng hiện lấy theo `class.startMonth..class.endMonth` và có nút tháng trước/tháng sau quanh select tháng.
 - Score state dùng `membershipId` dạng string làm key local cho từng học sinh trong lớp.
+- Chưa có bảng SQLite `score_columns`/`score_values`; mọi cột/điểm hiện nằm trong `useMockScores` và mất sau reload/restart.
 - Lớp chưa có cột điểm sẽ hiện empty state an toàn.
 
 Add test behavior:
@@ -650,7 +655,7 @@ Status change behavior:
 
 Amount behavior:
 
-- Backend trả về dòng cho MỌI membership active của lớp trong tháng; nếu chưa có payment row thì trả dòng ảo `unpaid`, `amount = 0`, `paymentId = null`.
+- Backend trả về dòng cho mọi membership thuộc lớp trong tháng đang xem theo lifecycle (`joined_month <= month` và `left_month IS NULL` hoặc `month < left_month`); nếu chưa có payment row thì trả dòng ảo `unpaid`, `amount = 0`, `paymentId = null`.
 - Không tự insert row unpaid khi chỉ xem tháng; row chỉ được tạo khi có thao tác (lazy upsert).
 
 Note behavior:
@@ -798,7 +803,7 @@ State/data source:
 - Type frontend: `PaymentRow` trong `src/types/payment.ts` (DTO trả về từ `list_payments_by_class_month`, gồm cả thông tin roster).
 - Type `Payment` cũ (string id) vẫn còn cho `mockData.ts`, không dùng trong PaymentsTab nữa.
 - Frontend API: `src/services/paymentApi.ts`.
-- Quan hệ: payment gắn với `class_memberships` qua `membership_id`; membership phải active mới thao tác được học phí.
+- Quan hệ: payment gắn với `class_memberships` qua `membership_id`; thao tác học phí yêu cầu membership thuộc lớp trong tháng đó theo `joined_month/left_month`, không bắt buộc membership còn active để vẫn ghi nhận trả nợ tháng đã học.
 
 ### Settings/other data
 
@@ -847,14 +852,14 @@ State/data source:
 | Login | LoginPage | Tạo/verify mật khẩu qua command settings | `screen`, `app_settings` | SQLite | Không persist session sau restart |
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
-| Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; payments chưa ảnh hưởng summary |
+| Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; `unpaidCount` lấy từ bảng payments theo tháng hiện tại |
 | Create class | CreateClassDialog | Validate bắt buộc lịch, giờ hợp lệ, không trùng giờ với lớp đã load; gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9, không còn field ghi chú; backend chưa enforce trùng lịch |
 | Select grade tab | HomePage | Lọc class cards và summary theo Khối 8/Khối 9 | UI only | none | Grade đọc từ `classes.grade` |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
 | Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
 | Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, validate không trùng giờ với lớp khác đã load, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance records chưa nối DB; backend chưa enforce trùng lịch |
-| Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment records chưa nối DB |
+| Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment cũ giữ amount snapshot đã lưu |
 | Search student | StudentListTab | Lọc table local trên dữ liệu đã load từ DB | UI only | none | Query/filter backend khi data lớn |
 | Add student | StudentListTab | Thêm dòng mới inline, lưu tạo `students` + `class_memberships` | `students`, `class_memberships` | SQLite khi bấm Lưu cập nhật | Có thể thêm validate nâng cao sau |
 | Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
@@ -879,7 +884,7 @@ State/data source:
 | Save scores | ScoresTab | Validate, normalize, save draft vào saved | `savedSheets`, `draftSheets` | local only | Transaction update columns/values |
 | Cancel score edit | ScoresTab | Discard draft | `draftSheets` | local only | Rollback client draft |
 | Export score Excel | ScoresTab | Chưa có behavior | none | none | Export score sheet |
-| Change payment month | PaymentsTab | Chuyển month state | `selectedMonth` | local only | Query payment_records by month |
+| Change payment month | PaymentsTab | Chuyển month state và load lại rows SQLite | `selectedMonth`, `rows` | SQLite read | Query `payments` by class/month |
 | Search payment student | PaymentsTab | Lọc tên học sinh local | UI only | none | Search/filter khi data lớn |
 | Filter payment status | PaymentsTab | Lọc rows local | UI only | none | Query/filter |
 | Change status to paid | PaymentsTab | Mở confirm, confirm gọi `set_payment_paid` (snapshot fee + paid_at) | `payments` | SQLite | Refresh list sau khi lưu |
@@ -892,7 +897,7 @@ State/data source:
 
 ## 19. Current limitations / chưa có
 
-- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students và class memberships; các domain còn lại chưa nối DB.
+- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments và class/membership month lifecycle; Scores, Attendance, Backup và Excel chưa nối DB.
 - Điểm danh và điểm vẫn là mock/local; reload/restart mất các thay đổi trong hai tab đó. Học phí đã lưu SQLite.
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite qua `useClassStudents`. AttendanceTab vẫn lưu record mock/local nhưng lọc roster chính thức theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`; Scores records vẫn mock/local; Payments records đã persist SQLite.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
@@ -912,26 +917,26 @@ State/data source:
 - Danh sách lớp/buổi đủ điều kiện học bù theo học sinh hiện lấy từ `availableClasses` đã load từ SQLite, lọc cùng năm học/cùng khối/cùng thứ tự buổi và loại chính lớp hiện tại. Tuy nhiên record học bù tạo ra vẫn chỉ nằm ở mock/local state.
 - Validation trùng lịch khi tạo/sửa lớp và tạo buổi học bù cả lớp hiện chạy ở frontend dựa trên danh sách lớp đã load; Rust command/database chưa có service rule hay constraint để chặn nếu bị gọi trực tiếp.
 - Dữ liệu attendance module-level có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất.
-- Chưa có transaction/service backend cho payments, scores, attendance.
+- Chưa có transaction/service backend cho scores và attendance; payments đã có Rust commands/service layer cơ bản.
 
 ## 20. Database status / future candidates based on current code
 
-Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn là candidate cho phase sau:
+Một phần đã implemented ở SQLite Phase 1-5.6, các phần còn lại vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
 | `app_settings` | Implemented: lưu password hash/salt và năm học hiện tại |
 | `academic_years` | Implemented Phase 3: Home có bộ chọn năm học và class thuộc năm học |
-| `classes` | Implemented Phase 3: lưu tên lớp, học phí tháng, phòng, ghi chú, năm học |
+| `classes` | Implemented Phase 3 + 5.5: lưu tên lớp, khối, học phí tháng, phòng, ghi chú, năm học, `start_month`, `end_month`, `status` |
 | `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch; UI hiện kiểm tra trùng giờ với lớp đã load |
 | `students` | Implemented Phase 4: lưu thông tin học sinh, không hard delete trong flow hiện tại |
-| `class_memberships` | Implemented Phase 4: quan hệ học sinh-lớp, status active/paused thuộc membership |
-| `attendance_sessions` | Lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, giờ bắt đầu/kết thúc, lock/cancel state, link optional tới buổi gốc |
-| `attendance_records` | Lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
-| `student_makeup_records` | Lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần; hoặc gộp vào attendance schema nếu thiết kế khác |
-| `makeup_attendance_records` hoặc field liên kết | Nếu học sinh học bù ở lớp nhận cần lưu trạng thái có học/nghỉ riêng mà không thêm vào roster chính thức |
-| `score_columns` | Lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
-| `score_values` | Lưu điểm từng học sinh từng cột |
+| `class_memberships` | Implemented Phase 4 + 5.5: quan hệ học sinh-lớp, status active/paused, `joined_month`, `left_month` exclusive thuộc membership |
+| `attendance_sessions` | Planned Phase 7, chưa có bảng SQLite: lưu buổi học thực tế, buổi nghỉ, buổi học bù cả lớp, ngày học, giờ bắt đầu/kết thúc, lock/cancel state, link optional tới buổi gốc |
+| `attendance_records` | Planned Phase 7, chưa có bảng SQLite: lưu trạng thái điểm danh từng học sinh từng session: empty/none, `present`, `absent`, `makeup` |
+| `student_makeup_records` | Planned Phase 7, chưa có bảng SQLite: lưu flow học bù theo học sinh: buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần |
+| `makeup_attendance_records` hoặc field liên kết | Chưa có bảng SQLite; ứng viên nếu học sinh học bù ở lớp nhận cần lưu trạng thái có học/nghỉ riêng mà không thêm vào roster chính thức |
+| `score_columns` | Planned Phase 6, chưa có bảng SQLite: lưu các bài kiểm tra theo class/month, tên cột có thể sửa |
+| `score_values` | Planned Phase 6, chưa có bảng SQLite: lưu điểm từng học sinh từng cột |
 | `payments` | Implemented Phase 5: học phí theo membership/month, status unpaid/paid/waived, amount snapshot, paid_at, note |
 | `backup_logs` hoặc metadata backup | Nếu muốn hiển thị lịch sử sao lưu sau này |
 
@@ -941,8 +946,8 @@ Một phần đã implemented ở SQLite Phase 1-4, các phần còn lại vẫn
 2. App settings/login: đã triển khai Phase 2 cho password local và current academic year.
 3. Academic years/classes/class schedules: đã triển khai Phase 3 cho Home, ClassDetail header và AttendanceTab schedule props.
 4. Students/class membership: đã triển khai Phase 4 cho StudentListTab, active student count, và P0 dùng chung DB roster cho Attendance/Scores/Payments.
-5. Payments: cấu trúc theo tháng rõ, ít phụ thuộc lịch học, có flow confirm/waiver cụ thể.
-6. Scores: cần lưu cột động theo tháng và điểm theo học sinh.
+5. Payments: đã triển khai SQLite Phase 5.
+6. Scores: phase tiếp theo; cần lưu cột động theo tháng và điểm theo học sinh.
 7. Attendance: phức tạp hơn vì liên quan lịch học, session phát sinh, lock/cancel/makeup.
 8. Backup/restore: nên làm sau khi schema ổn định.
 9. Excel export: làm sau khi nguồn dữ liệu thật ổn định để export đúng data.

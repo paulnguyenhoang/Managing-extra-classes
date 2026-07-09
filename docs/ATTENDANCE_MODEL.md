@@ -215,7 +215,7 @@ Các nút UI trong MVP:
 
 ## 8. Proposed database tables
 
-Đây là đề xuất schema ban đầu, chưa phải implementation cuối cùng.
+Đây là đề xuất schema cho Phase 7, chưa được triển khai trong SQLite hiện tại.
 
 ### attendance_sessions
 
@@ -249,8 +249,8 @@ Fields đề xuất:
 |---|---|---|
 | id | integer autoincrement | Khóa chính nội bộ |
 | session_id | integer | Buổi học |
-| student_id | integer | Học sinh |
-| class_id | integer | Lớp đang hiển thị session |
+| membership_id | integer | Membership chính thức của học sinh trong lớp sở hữu session |
+| student_id | integer | Học sinh, lưu kèm để query/report thuận tiện |
 | status | text/null | `present`, `absent`, `makeup`, hoặc null/không có record cho Chưa điểm danh |
 | note | text/null | Ghi chú riêng |
 | created_at | text/datetime | Metadata |
@@ -259,7 +259,8 @@ Fields đề xuất:
 Ghi chú:
 
 - Theo quyết định backend hiện tại, không tạo record khi trạng thái là Chưa điểm danh; không có row nghĩa là empty.
-- Với học sinh học bù ở lớp nhận, có thể dùng `attendance_records` nếu có field phân biệt record chính thức/guest, hoặc dùng bảng riêng.
+- Học sinh chính thức dùng `membership_id` của lớp đó, không dùng database id làm STT.
+- Với học sinh học bù ở lớp nhận, trạng thái có học/nghỉ có thể lưu trong `student_makeup_records.receiving_attendance_status` như backend plan hiện đề xuất, thay vì tạo membership mới ở lớp nhận.
 
 ### student_makeup_records
 
@@ -271,6 +272,7 @@ Fields đề xuất:
 |---|---|---|
 | id | integer autoincrement | Khóa chính nội bộ |
 | student_id | integer | Học sinh học bù |
+| original_membership_id | integer | Membership của học sinh ở lớp gốc |
 | original_class_id | integer | Lớp gốc |
 | original_session_id | integer | Buổi học bị nghỉ ở lớp gốc |
 | receiving_class_id | integer | Lớp nhận học bù |
@@ -285,7 +287,7 @@ Ghi chú:
 
 - `student_makeup_records` giúp tách rõ học bù theo học sinh khỏi roster chính thức của lớp nhận.
 - Nếu dùng `receiving_attendance_status`, có thể không cần tạo `attendance_records` riêng cho học sinh guest.
-- Nếu muốn thống nhất mọi điểm danh vào `attendance_records`, bảng này có thể chỉ giữ link, còn trạng thái ở lớp nhận lưu bằng attendance record có flag guest.
+- Nếu muốn thống nhất mọi điểm danh vào `attendance_records`, bảng này có thể chỉ giữ link, còn trạng thái ở lớp nhận lưu bằng attendance record có flag guest; hiện Backend Plan nghiêng về lưu trạng thái receiving ngay trong `student_makeup_records`.
 
 ## 9. Suggested MVP scope
 

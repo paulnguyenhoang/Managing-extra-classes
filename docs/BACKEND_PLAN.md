@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5.5 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-5.6 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle và lifecycle UX cleanup); Scores/Attendance/Backup/Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -145,7 +145,7 @@ Vị trí database gợi ý:
 - ID có thể bị nhảy số/gap sau khi xóa hoặc rollback; đó là bình thường.
 - Không bao giờ renumber database IDs chỉ để nhìn liên tục hơn.
 
-Domain tables dự kiến dùng `INTEGER PRIMARY KEY AUTOINCREMENT`:
+Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AUTOINCREMENT`:
 
 - `academic_years`
 - `classes`
@@ -153,12 +153,12 @@ Domain tables dự kiến dùng `INTEGER PRIMARY KEY AUTOINCREMENT`:
 - `students`
 - `class_memberships`
 - `payments`
-- `score_columns`
-- `score_values`
-- `attendance_sessions`
-- `attendance_records`
-- `student_makeup_records`
-- `backup_logs` nếu triển khai
+- `score_columns` (planned Phase 6, chưa có migration)
+- `score_values` (planned Phase 6, chưa có migration)
+- `attendance_sessions` (planned Phase 7, chưa có migration)
+- `attendance_records` (planned Phase 7, chưa có migration)
+- `student_makeup_records` (planned Phase 7, chưa có migration)
+- `backup_logs` nếu triển khai sau này
 
 ### UI numbering rule
 
@@ -188,12 +188,12 @@ Entities chính cho MVP:
 | students | Hồ sơ học sinh global |
 | class_memberships | Quan hệ học sinh thuộc lớp, kèm trạng thái theo lớp |
 | payments | Học phí theo tháng |
-| score_columns | Cột/bài kiểm tra theo lớp và tháng |
-| score_values | Điểm từng học sinh theo cột |
-| attendance_sessions | Buổi học thực tế |
-| attendance_records | Điểm danh học sinh chính thức theo session |
-| student_makeup_records | Học bù theo từng học sinh |
-| backup_logs | Metadata sao lưu/khôi phục, optional sau MVP |
+| score_columns | Planned Phase 6: cột/bài kiểm tra theo lớp và tháng |
+| score_values | Planned Phase 6: điểm từng học sinh theo cột |
+| attendance_sessions | Planned Phase 7: buổi học thực tế |
+| attendance_records | Planned Phase 7: điểm danh học sinh chính thức theo session |
+| student_makeup_records | Planned Phase 7: học bù theo từng học sinh |
+| backup_logs | Chưa triển khai: metadata sao lưu/khôi phục, optional sau MVP |
 
 Entities có thể để sau:
 
@@ -260,6 +260,9 @@ CREATE TABLE classes (
   academic_year_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   grade INTEGER,
+  start_month TEXT NOT NULL,
+  end_month TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
   monthly_fee INTEGER NOT NULL DEFAULT 0,
   room TEXT,
   note TEXT,
@@ -275,6 +278,8 @@ Notes:
 - `grade` được thêm bằng migration `004_class_grade` (ALTER TABLE + backfill từ tên lớp, mặc định 9 nếu không đoán được).
 - MVP chỉ dùng grade 8 và 9; service layer validate khi tạo lớp.
 - Home lọc lớp theo grade bằng tab Khối 8/Khối 9.
+- `start_month`/`end_month` được thêm bằng migration `006_class_month_lifecycle`, định dạng `YYYY-MM`, validate nằm trong năm học của lớp.
+- `status` hiện dùng `active` hoặc `completed`; `complete_class` set `status = 'completed'` và cập nhật `end_month`.
 
 ### class_schedules
 
@@ -328,9 +333,11 @@ CREATE TABLE class_memberships (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   class_id INTEGER NOT NULL,
   student_id INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
   joined_at TEXT,
   left_at TEXT,
+  joined_month TEXT NOT NULL,
+  left_month TEXT,
   note TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -355,6 +362,9 @@ Notes:
 
 - Nếu học sinh đã nghỉ lớp, update membership `status = 'paused'`.
 - Không xóa membership trong normal flow để giữ lịch sử học phí, điểm, điểm danh.
+- `joined_month`/`left_month` được thêm bằng migration `006_class_month_lifecycle`.
+- `left_month` là exclusive boundary: tháng đầu tiên học sinh không còn học lớp đó.
+- Reactivate membership set `status = active`, `left_month = NULL`.
 
 ### payments
 
@@ -365,12 +375,12 @@ CREATE TABLE payments (
   class_id INTEGER NOT NULL,
   student_id INTEGER NOT NULL,
   month TEXT NOT NULL,
-  status TEXT NOT NULL,
-  amount INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('unpaid', 'paid', 'waived')),
+  amount INTEGER NOT NULL DEFAULT 0 CHECK (amount >= 0),
   paid_at TEXT,
   note TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (membership_id) REFERENCES class_memberships(id),
   FOREIGN KEY (class_id) REFERENCES classes(id),
   FOREIGN KEY (student_id) REFERENCES students(id)
@@ -388,6 +398,9 @@ Index/constraint:
 ```sql
 CREATE UNIQUE INDEX idx_payments_membership_month
 ON payments (membership_id, month);
+
+CREATE INDEX idx_payments_class_month
+ON payments (class_id, month);
 ```
 
 Rules:
@@ -398,6 +411,7 @@ Rules:
 - Khi `status = waived`, `amount` có thể từ 0 đến học phí tháng.
 - Khi `status = waived`, `note` nên bắt buộc ở service layer.
 - Khi `status = unpaid`, `amount = 0`, `paid_at = NULL`.
+- Payment actions validate membership thuộc lớp trong tháng theo `joined_month <= month < left_month` hoặc `left_month IS NULL`; không bắt buộc membership còn active để cho phép ghi nhận trả nợ tháng đã học.
 
 ### score_columns
 
@@ -636,23 +650,21 @@ Migration strategy:
 - Migration phải chạy khi app khởi động, trước khi frontend gọi dữ liệu.
 - Migration phải idempotent ở mức ứng dụng: migration đã chạy thì không chạy lại.
 - Schema dev hiện đã áp dụng ID integer theo chiến lược cuối cho các bảng đã triển khai:
-  - `INTEGER PRIMARY KEY AUTOINCREMENT` cho `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`.
+  - `INTEGER PRIMARY KEY AUTOINCREMENT` cho `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`, `payments`.
   - Foreign keys liên quan đã chuyển sang `INTEGER`.
   - Nếu database dev đã chạy migration TEXT ID cũ, nên reset `data.sqlite`, `data.sqlite-wal`, `data.sqlite-shm` rồi chạy lại app để tạo schema mới.
 - Không renumber ID sau migration chỉ để làm đẹp dữ liệu; ID nội bộ có gap là bình thường.
 
 Seed strategy:
 
-- Phase đầu có thể seed dữ liệu tương đương mock hiện tại để app có data demo.
 - Chỉ seed khi database mới hoàn toàn.
-- Seed tối thiểu:
+- Seed hiện tại trong code:
   - Academic years: chỉ seed `Năm học 2026 - 2027` và đặt là current.
   - Classes: chỉ seed lớp Khối 8 và Khối 9 trong năm học 2026-2027 (Văn 9 ôn thi, Văn 8 nâng cao, Văn 8 cơ bản); không seed lớp khóa trước.
   - Future academic years không seed sẵn; sẽ được tạo bởi tính năng thêm năm học sau này.
   - Class schedules theo lịch hiện tại.
-  - Students và memberships.
-  - Payments mẫu theo tháng 05/2026-08/2026.
-  - Scores mẫu theo tháng.
+  - Students và memberships; membership joined theo `classes.start_month`, riêng học sinh seed đang paused có `left_month = 2026-10`.
+  - Không seed payments, score columns/values, attendance sessions/records, backup logs.
 - Không seed lại nếu người dùng đã có dữ liệu thật.
 
 Data migration từ mock sang DB:
@@ -809,7 +821,7 @@ Deliverables:
 - Tạo lớp mới insert DB.
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
-- Lưu ý hiện tại: sau Phase 4 và refactor ID local, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` vẫn tạm trả `0` cho đến Phase 5.
+- Lưu ý hiện tại: sau Phase 5.6, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`, `payments` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` đã đếm thật từ bảng `payments` theo tháng hiện tại và lifecycle.
 - Lưu ý hiện tại: UI đã có kiểm tra trùng lịch theo danh sách lớp đã load, nhưng Rust command/service chưa enforce. Khi quay lại Phase 3 hardening hoặc trước Attendance DB, cần đưa rule chống trùng lịch xuống backend.
 
 ### Phase 4. Students/class memberships
@@ -846,17 +858,17 @@ Mục tiêu:
 - Truyền DB `classId` dạng số trực tiếp xuống StudentListTab, AttendanceTab, ScoresTab và PaymentsTab.
 - Dùng cùng roster SQLite từ `list_students_by_class` cho cả 4 tab qua hook `useClassStudents`.
 - `list_students_by_class` trả roster ổn định theo `students.full_name`, rồi `class_memberships.id`; frontend vẫn sort lại theo tên tiếng Việt bằng helper chung trước khi render.
-- Dùng `class_memberships.id` / `membershipId` làm khóa ổn định cho state local của Attendance/Scores/Payments trong giai đoạn chưa persist.
+- Dùng `class_memberships.id` / `membershipId` làm khóa ổn định cho state local của Attendance/Scores và làm khóa nghiệp vụ chính cho Payments.
 
 Phạm vi:
 
 - Chỉ chuẩn hóa nguồn roster và id.
-- Không tạo bảng payments/scores/attendance.
-- Attendance/Scores/Payments records vẫn mock/local cho đến Phase 5-7.
+- Không tạo bảng scores/attendance trong P0.
+- Attendance/Scores records vẫn mock/local cho đến Phase 6-7; Payments được triển khai riêng ở Phase 5.
 
 Ý nghĩa cho các phase sau:
 
-- Phase 5 Payments nên ghi record theo `membership_id`.
+- Phase 5 Payments đã ghi record theo `membership_id`.
 - Phase 6 Scores nên ghi score value theo `membership_id`.
 - Phase 7 Attendance nên ghi attendance record theo `membership_id`; student-level makeup dùng `student_makeup_records` và không thêm học sinh học bù vào membership của lớp nhận.
 
@@ -875,7 +887,7 @@ Deliverables (đã hoàn thành):
 
 - Migration `005_payments`: bảng `payments` + unique `(membership_id, month)` + CHECK status/amount.
 - Module `src-tauri/src/payments/mod.rs` với commands: `list_payments_by_class_month`, `set_payment_paid`, `set_payment_unpaid`, `set_payment_waived`, `update_payment_note`.
-- List trả dòng cho mọi membership active kể cả khi chưa có payment row (dòng ảo unpaid, lazy upsert khi thao tác).
+- List trả dòng cho mọi membership thuộc lớp trong tháng đang xem theo lifecycle kể cả khi chưa có payment row (dòng ảo unpaid, lazy upsert khi thao tác).
 - PaymentsTab đọc dữ liệu theo month từ DB, refresh sau mỗi thao tác.
 - Confirm paid update DB với amount snapshot học phí và `paid_at = date('now','localtime')`.
 - Waiver dialog lưu amount/note; note bắt buộc ở cả UI và service; amount validate 0..fee.
@@ -929,6 +941,8 @@ Trạng thái hiện tại: đã triển khai.
 
 ### Phase 6. Scores
 
+Trạng thái hiện tại: chưa triển khai DB; ScoresTab vẫn mock/local qua `useMockScores`.
+
 Mục tiêu:
 
 - Lưu cột điểm động theo tháng.
@@ -940,6 +954,16 @@ Deliverables:
 - ScoresTab đọc cột/điểm theo class/month.
 - Thêm/sửa/xóa cột điểm qua transaction.
 - Lưu điểm validate 0-10.
+- Dùng `class_id`, `month`, `membership_id`, `student_id`.
+- Tận dụng `classes.start_month/end_month` và `class_memberships.joined_month/left_month` để xác định tháng/học sinh hợp lệ nếu rule Scores cần lọc theo lifecycle.
+- Frontend tiếp tục render roster đã sort tiếng Việt bằng `sortStudentsByVietnameseName`; STT = `index + 1` sau filter/sort.
+
+Phase 6 readiness:
+
+- Payments đã SQLite-backed và dùng khóa `(membership_id, month)`, nên Scores có thể theo cùng hướng dữ liệu theo membership/tháng.
+- Class/membership lifecycle đã có sẵn để giới hạn tháng và roster.
+- Score values cần validate 0-10 ở cả UI và service.
+- Attendance vẫn để Phase 7 vì có session sinh từ lịch, nghỉ/bù, lock/unlock và liên kết học bù phức tạp hơn.
 
 ### Phase 7. Attendance
 
