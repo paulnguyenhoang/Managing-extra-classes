@@ -155,8 +155,8 @@ Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AU
 - `payments`
 - `score_columns` (implemented Phase 6, migration `007_scores`)
 - `score_values` (implemented Phase 6, migration `007_scores`)
-- `attendance_sessions` (implemented Phase 7A, migration `008_attendance`, phần regular sessions)
-- `attendance_records` (implemented Phase 7A, migration `008_attendance`, phần official present/absent)
+- `attendance_sessions` (implemented Phase 7A-7B, migrations `008_attendance` và `009_attendance_class_makeup`, phần regular/class_makeup, lock/cancel/restore)
+- `attendance_records` (implemented Phase 7A-7C, migration `008_attendance`, phần official present/absent/makeup; empty = không có row)
 - `student_makeup_records` (implemented Phase 7C, migration `010_student_makeup`)
 - `backup_logs` nếu triển khai sau này
 
@@ -191,7 +191,7 @@ Entities chính cho MVP:
 | score_columns | Implemented Phase 6: cột/bài kiểm tra theo lớp và tháng |
 | score_values | Implemented Phase 6: điểm từng membership theo cột |
 | attendance_sessions | Implemented Phase 7B: regular sessions, class_makeup, lock state và cancel/restore |
-| attendance_records | Implemented Phase 7B: điểm danh học sinh chính thức ở regular/class_makeup với present/absent; empty = không có row |
+| attendance_records | Implemented Phase 7C: điểm danh học sinh chính thức ở regular/class_makeup với present/absent/makeup; empty = không có row |
 | student_makeup_records | Implemented Phase 7C: học bù theo từng học sinh, unique (student_id, original_session_id), trạng thái lớp nhận trong receiving_attendance_status |
 | backup_logs | Chưa triển khai: metadata sao lưu/khôi phục, optional sau MVP |
 
@@ -865,13 +865,13 @@ Phạm vi:
 
 - Chỉ chuẩn hóa nguồn roster và id.
 - Không tạo bảng scores/attendance trong P0.
-- Sau Phase 7B, regular/class_makeup sessions, official `present`/`absent`, lock và cancel/restore đã persist SQLite; student-level makeup để Phase 7C. Payments đã triển khai ở Phase 5 và Scores đã triển khai ở Phase 6.
+- Sau Phase 7C, regular/class_makeup sessions, official `present`/`absent`/`makeup`, lock/unlock, cancel/restore, class-level makeup và student-level makeup đã persist SQLite. Payments đã triển khai ở Phase 5 và Scores đã triển khai ở Phase 6.
 
 Ý nghĩa cho các phase sau:
 
 - Phase 5 Payments đã ghi record theo `membership_id`.
 - Phase 6 Scores đã ghi score value theo `membership_id`.
-- Phase 7A Attendance đã ghi attendance record theo `membership_id` cho học sinh chính thức; student-level makeup vẫn dùng `student_makeup_records` ở Phase 7C và không thêm học sinh học bù vào membership của lớp nhận.
+- Phase 7A-7C Attendance đã ghi attendance record theo `membership_id` cho học sinh chính thức; student-level makeup dùng `student_makeup_records` và không thêm học sinh học bù vào membership của lớp nhận.
 
 ### Phase 5. Payments
 
@@ -960,12 +960,12 @@ Deliverables (đã hoàn thành):
 - `save_score_values` batch transaction, validate 0-10 + cột thuộc lớp/tháng + membership hợp lệ trong tháng; upsert theo `(column_id, membership_id)`; điểm trống set NULL nếu row tồn tại, không tạo row thừa.
 - Điểm keyed theo `membership_id` (không dùng student_id đơn lẻ vì học sinh có thể thuộc nhiều lớp).
 - ScoresTab load sheet từ DB theo classId/tháng, draft thưa khi edit, refresh sau mỗi thao tác; `useMockScores` không còn được dùng.
-- Frontend render roster đã sort tiếng Việt bằng `sortStudentsByVietnameseName`; STT = `index + 1` sau filter/sort.
-- Attendance Phase 7A đã triển khai nền regular sessions; Phase 7B đã thêm nghỉ/khôi phục và class-level makeup; liên kết học bù theo học sinh vẫn để Phase 7C.
+- Frontend render roster mặc định sort tiếng Việt bằng `sortStudentsByVietnameseName`; ScoresTab có thể sort hiển thị theo cột điểm trong view mode, nhưng đây là UI-only display behavior, không ghi DB và không đổi backend persistence. STT = `index + 1` sau filter/sort.
+- Attendance Phase 7A đã triển khai nền regular sessions; Phase 7B đã thêm nghỉ/khôi phục và class-level makeup; Phase 7C đã thêm student-level makeup.
 
 ### Phase 7. Attendance
 
-Trạng thái hiện tại: đã triển khai Phase 7A cho regular sessions/official records và Phase 7B cho cancel/restore + class-level makeup; student-level makeup chưa triển khai persistence.
+Trạng thái hiện tại: đã triển khai Phase 7A cho regular sessions/official records, Phase 7B cho cancel/restore + class-level makeup, và Phase 7C cho student-level makeup.
 
 Mục tiêu:
 
@@ -985,8 +985,8 @@ Deliverables Phase 7A (đã hoàn thành):
 - `get_attendance_week` materialize `attendance_sessions` type `regular` từ `class_schedules` khi mở tuần.
 - Session regular mới mặc định `is_locked = 1`.
 - AttendanceTab query week từ DB qua `src/services/attendanceApi.ts`.
-- `set_attendance_status` chỉ persist `present`/`absent`; `null` xóa row, nghĩa là Chưa điểm danh.
-- `makeup` bị từ chối ở regular session trong Phase 7A và cần Phase 7C.
+- `set_attendance_status` persist `present`/`absent`; `null` xóa row, nghĩa là Chưa điểm danh.
+- `makeup` không set trực tiếp qua `set_attendance_status`; Phase 7C xử lý qua dialog chọn buổi nhận và command `create_student_makeup_record`.
 - Cancel/restore session DB và class-level makeup được triển khai tiếp trong Phase 7B.
 
 Deliverables Phase 7B (đã hoàn thành):
@@ -1005,13 +1005,14 @@ Deliverables Phase 7B (đã hoàn thành):
 - `get_attendance_week`, `set_attendance_status`, `toggle_attendance_lock`, `mark_session_present` hoạt động cho class makeup theo rule present/absent/null.
 - `get_attendance_week` trả thêm các class makeup sắp tới của lớp để header chi tiết lớp không phụ thuộc tuần đang xem.
 
-Deliverables Phase 7C (còn lại):
+Deliverables Phase 7C (đã hoàn thành):
 
-- Tạo student-level makeup record.
-- Receiving class hiển thị học sinh học bù.
-- Transaction cho mọi thao tác học bù.
+- Migration `010_student_makeup`: bảng `student_makeup_records`.
+- Commands tạo/gỡ học bù theo học sinh và cập nhật `receiving_attendance_status`.
+- Receiving class hiển thị học sinh học bù bằng dữ liệu từ `get_attendance_week`.
+- Transaction cho mọi thao tác học bù theo học sinh.
 
-### Phase 8. Backup/restore
+### Phase 8. Backup/restore (next planned)
 
 Mục tiêu:
 
@@ -1027,7 +1028,7 @@ Deliverables:
 - Mở thư mục dữ liệu.
 - Gói backup/support có thể chứa `data.sqlite`, metadata backup, app version, schema version và error logs nếu có.
 
-### Phase 9. Excel import/export
+### Phase 9. Excel import/export (planned)
 
 Mục tiêu:
 
@@ -1180,7 +1181,7 @@ Excel import/export:
 - Học sinh paused có còn hiện trong payments/scores/attendance tháng hiện tại không.
 - Student-level makeup có bắt buộc cùng năm học không.
 - Student-level makeup có được override khác `session_index_in_week` không.
-- Khi restore cancelled session, có giữ toàn bộ attendance cũ không. Hiện spec đang nghiêng về giữ.
+- Khi restore cancelled session, Phase 7B hiện giữ toàn bộ attendance records cũ; giáo viên chỉnh lại từng học sinh nếu cần.
 - Đã chốt và áp dụng cho schema dev: domain IDs dùng `INTEGER PRIMARY KEY AUTOINCREMENT`; nếu gặp DB dev cũ còn TEXT IDs thì reset file database trước khi test tiếp Phase 5.
 
 ### Risks

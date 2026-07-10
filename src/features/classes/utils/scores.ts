@@ -1,5 +1,7 @@
 import type { ClassStudentRosterItem, Student } from "@/types/student";
 import { monthsInRange } from "@/lib/months";
+import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
+import type { ScoreSheetRow } from "@/types/score";
 
 export type ScoreRosterStudent = Student | ClassStudentRosterItem;
 
@@ -18,6 +20,13 @@ export type MonthlyScoreSheets = Record<string, MonthlyScoreSheet>;
 export type ScoreMonthLifecycleStudent = {
   joinedMonth: string;
   leftMonth: string | null;
+};
+
+export type ScoreSortDirection = "asc" | "desc";
+
+export type ScoreSortState = {
+  columnId: number | null;
+  direction: ScoreSortDirection | null;
 };
 
 export const scoreMonths = ["2026-05", "2026-06", "2026-07", "2026-08"];
@@ -161,6 +170,43 @@ export function parseScoreText(value: string): number | null {
 /// Hiển thị giá trị điểm từ DB thành text (null -> chuỗi rỗng).
 export function formatScoreValue(value: number | null | undefined) {
   return value === null || value === undefined ? "" : String(value);
+}
+
+export function sortScoreRows(rows: ScoreSheetRow[], sortState: ScoreSortState) {
+  const rowsByName = sortStudentsByVietnameseName(rows);
+
+  if (!sortState.columnId || !sortState.direction) {
+    return rowsByName;
+  }
+
+  const columnKey = String(sortState.columnId);
+
+  return [...rowsByName].sort((first, second) => {
+    const firstScore = first.valuesByColumnId[columnKey];
+    const secondScore = second.valuesByColumnId[columnKey];
+    const firstHasScore = firstScore !== null && firstScore !== undefined;
+    const secondHasScore = secondScore !== null && secondScore !== undefined;
+
+    if (!firstHasScore && !secondHasScore) {
+      return 0;
+    }
+
+    if (!firstHasScore) {
+      return 1;
+    }
+
+    if (!secondHasScore) {
+      return -1;
+    }
+
+    if (firstScore === secondScore) {
+      return 0;
+    }
+
+    return sortState.direction === "asc"
+      ? firstScore - secondScore
+      : secondScore - firstScore;
+  });
 }
 
 export function validateScoreSheet(sheet: MonthlyScoreSheet) {

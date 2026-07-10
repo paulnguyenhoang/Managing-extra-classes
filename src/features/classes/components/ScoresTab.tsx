@@ -42,8 +42,9 @@ import {
   isScoreStudentEligibleForMonth,
   isValidScoreText,
   parseScoreText,
+  sortScoreRows,
+  type ScoreSortDirection,
 } from "@/features/classes/utils/scores";
-import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
 import {
   addScoreColumn,
@@ -85,6 +86,8 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   const [draftLabels, setDraftLabels] = useState<Record<number, string>>({});
   const [draftValues, setDraftValues] = useState<Record<number, Record<number, string>>>({});
   const [pendingDeleteColumn, setPendingDeleteColumn] = useState<ScoreColumnDto | null>(null);
+  const [sortColumnId, setSortColumnId] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<ScoreSortDirection | null>(null);
 
   // Nếu thời gian học của lớp thay đổi làm tháng đang chọn rơi ra ngoài, kéo về tháng hợp lệ.
   useEffect(() => {
@@ -126,13 +129,22 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   }, [refreshSheet]);
 
   const columns = sheet?.columns ?? [];
+  useEffect(() => {
+    if (sortColumnId && !columns.some((column) => column.id === sortColumnId)) {
+      resetScoreSort();
+    }
+  }, [columns, sortColumnId]);
+
   const sortedRows = useMemo(() => {
     const rowsInSelectedMonth = (sheet?.rows ?? []).filter((row) =>
       isScoreStudentEligibleForMonth(row, selectedMonth),
     );
 
-    return sortStudentsByVietnameseName(rowsInSelectedMonth);
-  }, [selectedMonth, sheet]);
+    return sortScoreRows(rowsInSelectedMonth, {
+      columnId: isEditing ? null : sortColumnId,
+      direction: isEditing ? null : sortDirection,
+    });
+  }, [isEditing, selectedMonth, sheet, sortColumnId, sortDirection]);
   const hasColumns = columns.length > 0;
   const selectedMonthIndex = availableMonths.indexOf(selectedMonth);
   const canGoPreviousMonth = selectedMonthIndex > 0;
@@ -141,6 +153,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
 
   function changeMonth(month: string) {
     setSelectedMonth(month);
+    resetScoreSort();
   }
 
   function getColumnLabel(column: ScoreColumnDto) {
@@ -176,6 +189,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     setDraftValues({});
     setIsEditing(true);
     setErrorMessage("");
+    resetScoreSort();
   }
 
   function cancelEditing() {
@@ -188,6 +202,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   async function handleAddColumn() {
     setIsSaving(true);
     setErrorMessage("");
+    resetScoreSort();
 
     try {
       const nextSheet = await addScoreColumn({
@@ -230,6 +245,9 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
           }),
         ),
       );
+      if (sortColumnId === column.id) {
+        resetScoreSort();
+      }
       await refreshSheet();
     } catch (error) {
       console.warn("[scores] delete column failed", error);
@@ -237,6 +255,38 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function resetScoreSort() {
+    setSortColumnId(null);
+    setSortDirection(null);
+  }
+
+  function cycleScoreSort(columnId: number) {
+    if (isEditing) {
+      return;
+    }
+
+    if (sortColumnId !== columnId || sortDirection === null) {
+      setSortColumnId(columnId);
+      setSortDirection("desc");
+      return;
+    }
+
+    if (sortDirection === "desc") {
+      setSortDirection("asc");
+      return;
+    }
+
+    resetScoreSort();
+  }
+
+  function getSortIndicator(columnId: number) {
+    if (isEditing || sortColumnId !== columnId || !sortDirection) {
+      return "";
+    }
+
+    return sortDirection === "asc" ? "↑" : "↓";
   }
 
   async function saveEditing() {
@@ -404,7 +454,19 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
             <TableHeader>
               <TableRow className="bg-slate-50">
                 <TableHead className="w-16">STT</TableHead>
-                <TableHead className="min-w-52">Họ tên</TableHead>
+                <TableHead className="min-w-52">
+                  {!isEditing ? (
+                    <button
+                      type="button"
+                      className="rounded px-1 py-0.5 text-left font-medium text-slate-950 hover:bg-slate-100"
+                      onClick={resetScoreSort}
+                    >
+                      Họ tên
+                    </button>
+                  ) : (
+                    "Họ tên"
+                  )}
+                </TableHead>
                 {columns.map((column) => (
                   <TableHead key={column.id} className="min-w-40">
                     {isEditing ? (
@@ -427,7 +489,19 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
                         </Button>
                       </div>
                     ) : (
-                      column.label
+                      <button
+                        type="button"
+                        className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left font-medium text-slate-950 hover:bg-slate-100"
+                        onClick={() => cycleScoreSort(column.id)}
+                        aria-label={`Sắp xếp theo ${column.label}`}
+                      >
+                        <span className="min-w-0 truncate">{column.label}</span>
+                        {getSortIndicator(column.id) ? (
+                          <span className="shrink-0 text-sm text-slate-700">
+                            {getSortIndicator(column.id)}
+                          </span>
+                        ) : null}
+                      </button>
                     )}
                   </TableHead>
                 ))}

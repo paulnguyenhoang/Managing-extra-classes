@@ -647,6 +647,8 @@ pub fn list_student_makeup_options(
 
         // Cùng tuần với buổi gốc.
         let week_start = week_start_of_date(connection, &original.session_date)?;
+        let original_session_order =
+            session_order_for_date(connection, class_id, &original.session_date)?;
 
         // Các lớp nhận tiềm năng: khác lớp, cùng năm học, cùng khối, đang hoạt động.
         let candidate_classes = {
@@ -701,18 +703,12 @@ pub fn list_student_makeup_options(
                      WHERE class_id = ?1
                        AND session_date BETWEEN ?2 AND ?3
                        AND type = 'regular'
-                       AND status = 'active'
-                       AND session_index_in_week = ?4",
+                       AND status = 'active'",
                 )
                 .map_err(|error| format!("Không chuẩn bị được buổi nhận học bù: {error}"))?;
             let rows = statement
                 .query_map(
-                    params![
-                        receiving_class_id,
-                        week_start,
-                        week_end,
-                        original.session_index_in_week
-                    ],
+                    params![receiving_class_id, week_start, week_end],
                     |row| {
                         let is_locked: i64 = row.get(7)?;
                         Ok(StudentMakeupOptionDto {
@@ -744,7 +740,19 @@ pub fn list_student_makeup_options(
                     continue;
                 }
 
-                options.push(option);
+                let receiving_session_order = session_order_for_date(
+                    connection,
+                    option.receiving_class_id,
+                    &option.receiving_session_date,
+                )?;
+                if receiving_session_order != original_session_order {
+                    continue;
+                }
+
+                options.push(StudentMakeupOptionDto {
+                    session_index_in_week: receiving_session_order,
+                    ..option
+                });
             }
         }
 
@@ -763,7 +771,7 @@ pub fn list_student_makeup_options(
             original_class_name,
             original_session_id,
             original_session_date: original.session_date.clone(),
-            session_index_in_week: original.session_index_in_week,
+            session_index_in_week: original_session_order,
             options,
         })
     })
@@ -803,7 +811,12 @@ pub fn create_student_makeup_record(
         if receiving.class_id == original.class_id {
             return Err("Buổi nhận học bù phải thuộc lớp khác.".to_string());
         }
-        if receiving.session_index_in_week != original.session_index_in_week {
+        let original_session_order =
+            session_order_for_date(&transaction, original.class_id, &original.session_date)?;
+        let receiving_session_order =
+            session_order_for_date(&transaction, receiving.class_id, &receiving.session_date)?;
+
+        if receiving_session_order != original_session_order {
             return Err("Buổi nhận học bù phải cùng thứ tự buổi trong tuần.".to_string());
         }
 
@@ -900,7 +913,7 @@ pub fn create_student_makeup_record(
                     request.original_session_id,
                     receiving.class_id,
                     request.receiving_session_id,
-                    original.session_index_in_week,
+                    original_session_order,
                     preserved_status,
                     normalize_optional_text(request.note.as_deref())
                 ],
@@ -1298,13 +1311,28 @@ fn current_local_date(connection: &Connection) -> Result<String, String> {
         .map_err(|error| format!("Không đọc được ngày hiện tại: {error}"))
 }
 
+fn session_order_for_date(
+    connection: &Connection,
+    class_id: i64,
+    session_date: &str,
+) -> Result<i64, String> {
+    let session_weekday = weekday_from_date(connection, session_date)?;
+    let schedules = list_schedules(connection, class_id)?;
+
+    schedules
+        .iter()
+        .position(|schedule| schedule.weekday == session_weekday)
+        .map(|index| (index as i64) + 1)
+        .ok_or_else(|| "Buổi học không còn khớp với lịch học hiện tại của lớp.".to_string())
+}
+
 fn list_schedules(connection: &Connection, class_id: i64) -> Result<Vec<ScheduleRow>, String> {
     let mut statement = connection
         .prepare(
             "SELECT weekday, start_time, end_time
              FROM class_schedules
              WHERE class_id = ?1
-             ORDER BY sort_order ASC, CASE WHEN weekday = 0 THEN 7 ELSE weekday END ASC, start_time ASC",
+             ORDER BY CASE WHEN weekday = 0 THEN 7 ELSE weekday END ASC, start_time ASC, sort_order ASC",
         )
         .map_err(|error| format!("Không chuẩn bị được lịch học của lớp: {error}"))?;
 
@@ -1820,6 +1848,16 @@ fn weekday_to_week_offset(weekday: i64) -> Result<i64, String> {
         1..=6 => Ok(weekday - 1),
         _ => Err("Thứ trong tuần không hợp lệ.".to_string()),
     }
+}
+
+fn weekday_from_date(connection: &Connection, date: &str) -> Result<i64, String> {
+    connection
+        .query_row(
+            "SELECT CAST(strftime('%w', ?1) AS INTEGER)",
+            params![date],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Không tính được thứ của buổi học: {error}"))
 }
 
 fn month_from_date(date: &str) -> Result<String, String> {

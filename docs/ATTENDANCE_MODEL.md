@@ -12,7 +12,7 @@ Mục tiêu của mô hình điểm danh:
 - Hỗ trợ buổi học bình thường, buổi nghỉ cả lớp, và buổi học bù cả lớp.
 - Hỗ trợ trường hợp một học sinh nghỉ ở lớp gốc rồi học bù ở lớp khác.
 - Giữ trạng thái đủ đơn giản cho MVP, tránh quá nhiều loại vắng mặt.
-- Chuẩn bị cấu trúc rõ ràng để sau này triển khai SQLite/backend.
+- Ghi lại cấu trúc SQLite/backend hiện tại để tiếp tục phát triển các phase sau.
 
 ## 2. Attendance statuses
 
@@ -288,7 +288,7 @@ Ghi chú:
 
 - `student_makeup_records` giúp tách rõ học bù theo học sinh khỏi roster chính thức của lớp nhận.
 - Nếu dùng `receiving_attendance_status`, có thể không cần tạo `attendance_records` riêng cho học sinh guest.
-- Nếu muốn thống nhất mọi điểm danh vào `attendance_records`, bảng này có thể chỉ giữ link, còn trạng thái ở lớp nhận lưu bằng attendance record có flag guest; hiện Backend Plan nghiêng về lưu trạng thái receiving ngay trong `student_makeup_records`.
+- MVP hiện lưu trạng thái lớp nhận ngay trong `student_makeup_records.receiving_attendance_status`; không tạo `attendance_records` hoặc membership guest cho học sinh học bù.
 
 ## 9. Suggested MVP scope
 
