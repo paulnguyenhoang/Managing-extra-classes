@@ -1,6 +1,6 @@
 # Attendance Model - Mô hình điểm danh MVP
 
-Tài liệu này mô tả mô hình điểm danh MVP. SQLite đã triển khai đến Phase 7B cho buổi thường, nghỉ/khôi phục và học bù cả lớp; học bù theo từng học sinh vẫn thuộc Phase 7C.
+Tài liệu này mô tả mô hình điểm danh MVP. SQLite đã triển khai đủ Phase 7A-7C: buổi thường, nghỉ/khôi phục, học bù cả lớp và học bù theo từng học sinh (`student_makeup_records`).
 
 Ứng dụng quản lý lớp học thêm cho giáo viên dạy Văn, nên mô hình điểm danh cần đơn giản, dễ thao tác trong lúc dạy, và đủ rõ để lưu dữ liệu lâu dài.
 
@@ -69,7 +69,7 @@ Các session status đề xuất:
 Quy tắc khi hủy buổi (cancel):
 
 - Phase 7B hủy buổi ghi trạng thái `absent`/Nghỉ cho toàn bộ học sinh chính thức hợp lệ ở buổi đó, giống việc tick Nghỉ từng học sinh.
-- Dòng học sinh học bù đang nhận chưa được xử lý ở Phase 7B vì student-level makeup chưa persist; phần này thuộc Phase 7C.
+- Phase 7C: hủy buổi cũng gỡ liên kết học bù xuất phát từ buổi đó và đánh Nghỉ (`receiving_attendance_status = absent`) cho các dòng học bù đang nhận ở buổi đó.
 - Vì trạng thái Nghỉ đã ghi vào từng học sinh, mở khóa hoặc khôi phục buổi vẫn giữ Nghỉ; giáo viên chỉnh lại từng em nếu cần.
 
 MVP có thể lưu thêm trạng thái khóa chỉnh sửa:
@@ -187,7 +187,7 @@ UI điểm danh hoạt động như sau:
   - Chỉ một trạng thái được chọn tại một thời điểm; nút đang chọn được highlight.
   - Bấm lại nút đang chọn để bỏ trạng thái, quay về Chưa điểm danh.
 - Quy tắc nút theo loại buổi/dòng:
-  - Buổi thường + học sinh chính thức ở Phase 7B: Có học / Nghỉ; Học bù được bật khi Phase 7C persist student-level makeup.
+  - Buổi thường + học sinh chính thức: Học / Nghỉ / Học bù (Phase 7C đã persist student-level makeup).
   - Buổi nghỉ (cancelled): không có nút, mọi ô hiển thị `"Nghỉ"` thống nhất một màu đỏ, giống hệt khi tick Nghỉ từng học sinh.
   - Buổi học bù cả lớp + học sinh chính thức: Có học / Nghỉ.
   - Dòng học sinh học bù ở lớp nhận: Có học / Nghỉ.
@@ -209,14 +209,14 @@ Các nút UI trong MVP:
 - Tuần sau
 - Thêm buổi học bù: bắt buộc chọn buổi gốc, ngày phải sau hôm nay, có giờ bắt đầu/giờ kết thúc ngang hàng trong form, validate không trùng khoảng giờ với lịch lớp đã load, hiển thị hint khung giờ trống/trùng sau khi chọn ngày, buổi gốc tự chuyển nghỉ
 - Hủy buổi bù: trên header buổi học bù cả lớp, có xác nhận, khôi phục buổi gốc
-- Đánh dấu cả lớp đi học: chỉ áp dụng cho buổi hôm nay chưa nghỉ và đã mở khóa; áp dụng cả buổi học bù cả lớp; Phase 7B chỉ cập nhật học sinh chính thức
+- Đánh dấu cả lớp đi học: chỉ áp dụng cho buổi hôm nay chưa nghỉ và đã mở khóa; áp dụng cả buổi học bù cả lớp; đánh dấu luôn cả các dòng học sinh học bù đang nhận ở buổi đó
 - Xuất Excel, UI only trong MVP
 - Khóa/mở khóa buổi học
 - Đánh dấu buổi học nghỉ/hủy nghỉ với xác nhận
 
 ## 8. Proposed database tables
 
-Phase 7A-7B đã triển khai SQLite cho `attendance_sessions` regular/class_makeup, cancel/restore và `attendance_records` official `present`/`absent`. `student_makeup_records` vẫn là scope Phase 7C.
+Phase 7A-7C đã triển khai SQLite đầy đủ: `attendance_sessions` regular/class_makeup, cancel/restore, `attendance_records` official `present`/`absent`/`makeup`, và `student_makeup_records` (buổi gốc status = makeup; dòng lớp nhận riêng chỉ có present/absent/null trong `receiving_attendance_status`; không tạo class_membership ở lớp nhận; không có late/excused).
 
 ### attendance_sessions
 

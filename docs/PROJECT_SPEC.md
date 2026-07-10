@@ -386,7 +386,7 @@ Today/current day:
 Attendance statuses:
 
 - Type UI vẫn là `AttendanceStatus = "present" | "absent" | "makeup"`.
-- Backend Phase 7B vẫn chỉ persist `present` và `absent` trong `attendance_records`; `makeup` theo học sinh chờ Phase 7C.
+- Backend Phase 7C persist đủ `present`/`absent`/`makeup` trong `attendance_records`; `makeup` chỉ được ghi qua `create_student_makeup_record` kèm liên kết `student_makeup_records`.
 - Trạng thái rỗng/undefined hiển thị `"Chưa điểm danh"`; trong DB nghĩa là không có row `attendance_records`.
 - UI labels:
   - empty/undefined: Chưa điểm danh
@@ -398,7 +398,7 @@ Attendance statuses:
 - Không còn legend trạng thái dạng text dài; UI hiện có chú thích màu ngày: Quá khứ, Hôm nay, Tương lai.
 - `"Học bù"` có 2 khái niệm khác nhau trong code:
   - Class-level makeup: một session/cột học bù cả lớp (`session.isMakeup`) và header có badge `"Học bù cả lớp"`, đã persist trong Phase 7B.
-  - Student-level makeup: trạng thái `makeup` của một học sinh ở buổi gốc, có record liên kết sang lớp/buổi nhận học bù; Phase 7A chưa persist `student_makeup_records`.
+  - Student-level makeup: trạng thái `makeup` của một học sinh ở buổi gốc, liên kết sang lớp/buổi nhận qua bảng `student_makeup_records` (Phase 7C, migration `010_student_makeup`).
 
 Cell behavior (nút trạng thái, không dùng click cycle):
 
@@ -412,7 +412,7 @@ Cell behavior (nút trạng thái, không dùng click cycle):
 - Bấm lại nút đang chọn để bỏ trạng thái, quay về `"Chưa điểm danh"`.
 - Bấm `Có học`/`Nghỉ` ở buổi DB: gọi command `set_attendance_status` và refresh lại `get_attendance_week`.
 - Bấm lại nút đang chọn ở buổi DB: gửi status `null`, backend xóa row `attendance_records`, UI quay về `"Chưa điểm danh"`.
-- Bấm `Học bù` ở buổi DB: hiện thông báo Phase 7C, chưa ghi SQLite.
+- Bấm `Học bù` ở buổi thường DB: mở dialog DB-backed (`list_student_makeup_options`); xác nhận gọi `create_student_makeup_record` (transaction: ô gốc = makeup + upsert record); hủy dialog giữ nguyên trạng thái. Bấm lại nút Học bù đang chọn mở xác nhận `"Hủy học bù cho học sinh này?"` rồi gọi `remove_student_makeup_record` (ô gốc về Chưa điểm danh).
 - Bấm `Học bù` ở buổi local/mock: không set ngay mà mở dialog `"Chọn lớp học bù"`.
 - Nếu cancel dialog học bù, giữ nguyên trạng thái cũ.
 - Nếu confirm dialog học bù:
@@ -437,7 +437,7 @@ Student-level makeup dialog:
   - Dựa trên `availableClasses` truyền từ `ClassDetailPage`, hiện là class overview đã load từ SQLite.
 - Dialog chọn lớp học bù đã tách sang `features/classes/components/attendance/StudentMakeupDialog.tsx` và hiển thị option dạng danh sách/card để tránh tràn text dài.
   - Không giới hạn quá khứ/tương lai: cho phép ghi học bù buổi đã qua (khi quên cập nhật), miễn cùng tuần và cùng thứ tự buổi. Giới hạn tương lai chỉ áp dụng cho việc tạo buổi học bù cả lớp.
-- Student-level makeup hiện chỉ còn là UI/local state nếu dùng với session mock; với regular session DB, Phase 7A chưa cho ghi `makeup`.
+- Student-level makeup đã persist SQLite: options từ backend (khác lớp, cùng năm học, cùng khối, lớp active, cùng session_index_in_week, cùng tuần, buổi nhận regular/active, quá khứ hay tương lai đều được, loại trừ lớp mà học sinh đã là thành viên chính thức trong tháng đó).
 
 Receiving makeup students:
 
@@ -493,15 +493,14 @@ State/data source:
 
 - Students lấy từ `useClassStudents(classId)` qua SQLite; roster chính thức được lọc theo `joinedMonth`/`leftMonth` của từng session rồi sort trước khi render.
 - Session thường, session học bù cả lớp, lock, cancel/restore và điểm danh học sinh chính thức lấy/lưu bằng SQLite.
-- `useMockAttendance` chỉ còn phục vụ phần UI/local của student-level makeup chưa triển khai Phase 7C.
+- AttendanceTab không còn dùng `useMockAttendance`; toàn bộ điểm danh (gồm học bù theo học sinh) đọc/ghi SQLite.
 - Không dùng `attendanceSessions` và `attendanceRecords` trong `mockData.ts` cho UI AttendanceTab hiện tại.
 
 Hạn chế:
 
 - Phase 7B lưu buổi thường, buổi học bù cả lớp, lock/unlock, cancel/restore và trạng thái `present`/`absent` cho học sinh chính thức.
 - Không có note theo buổi hoặc theo record trong UI hiện tại.
-- Student-level makeup chưa persist SQLite và vẫn thuộc Phase 7C.
-- Dữ liệu module-level còn lại chỉ liên quan tới flow học bù theo học sinh, không còn là nguồn class-level makeup/cancel chính.
+- Student-level makeup đã persist SQLite (Phase 7C); dòng `"Học sinh học bù"` ở lớp nhận và trạng thái Học/Nghỉ của dòng đó sống sót sau reload/restart.
 
 ## 13. Tab Nhập điểm hiện tại
 
@@ -864,10 +863,10 @@ State/data source:
 | Mark today present | AttendanceTab | Nếu có session DB hôm nay, active, đã mở khóa và có học sinh hợp lệ, gọi `mark_session_present` | `attendance_records` | SQLite | Batch upsert `present` cho học sinh chính thức hợp lệ |
 | Cancel/restored session | AttendanceTab | Xác nhận rồi gọi `cancel_attendance_session`/`restore_attendance_session`; cancel ghi Nghỉ cả lớp và khóa, restore mở khóa nhưng giữ records | `attendance_sessions`, `attendance_records` | SQLite | Không restore trực tiếp khi còn class_makeup liên kết |
 | Lock/unlock session | AttendanceTab | Toggle lock session DB qua `toggle_attendance_lock`; cell chỉ sửa được khi mở khóa | `attendance_sessions.is_locked` | SQLite | Session regular mới mặc định locked |
-| Set official attendance status | AttendanceTab | Nút Có học/Nghỉ ghi DB qua `set_attendance_status`; bấm lại trạng thái đang chọn gửi `null` để xóa row; Học bù ở session DB báo Phase 7C | `attendance_records` | SQLite cho present/absent/null | `makeup` cần `student_makeup_records` Phase 7C |
-| Confirm student-level makeup | AttendanceTab dialog | Chỉ còn là flow local/mock nếu dùng với session local; với regular session DB chưa cho ghi `makeup` | `studentMakeupRecords` local nếu có | local only | Phase 7C dùng `student_makeup_records` |
-| Remove student-level makeup by cycling off | AttendanceTab | Chỉ local/mock; regular session DB không persist makeup nên không có record để remove | `studentMakeupRecords` local nếu có | local only | Phase 7C cần delete/update link |
-| Set receiving makeup student status | AttendanceTab receiving class | Dòng học sinh học bù chỉ còn thuộc local/mock; không persist SQLite trong 7A | `attendance` local nếu có | local only | Phase 7C quyết định lưu trạng thái guest |
+| Set official attendance status | AttendanceTab | Nút Học/Nghỉ ghi DB qua `set_attendance_status` (tự gỡ liên kết học bù cũ); bấm lại trạng thái đang chọn gửi `null` để xóa row | `attendance_records`, `student_makeup_records` | SQLite | Học bù đi qua dialog riêng |
+| Confirm student-level makeup | AttendanceTab dialog | `create_student_makeup_record`: ô gốc = makeup + upsert record, atomic | `attendance_records`, `student_makeup_records` | SQLite | Options từ `list_student_makeup_options` |
+| Remove student-level makeup | AttendanceTab | Bấm lại nút Học bù đang chọn -> dialog xác nhận -> `remove_student_makeup_record` (xóa record + record makeup ở ô gốc) | `attendance_records`, `student_makeup_records` | SQLite | Đổi sang Học/Nghỉ cũng tự gỡ record |
+| Set receiving makeup student status | AttendanceTab receiving class | Nút Học/Nghỉ (bấm lại = Chưa điểm danh) gọi `set_receiving_makeup_attendance_status` | `student_makeup_records.receiving_attendance_status` | SQLite | Không tạo attendance_records/membership cho học sinh khách |
 | Export attendance Excel | AttendanceTab | Chưa có behavior | none | none | Export sheet theo week/class |
 | Change score month | ScoresTab | Load sheet tháng mới từ DB, thoát edit | `selectedMonth`, `sheet` | SQLite | `list_score_sheet(classId, month)` |
 | Add score column/test | ScoresTab | Gọi `add_score_column`, nhận sheet mới, vào edit mode | `score_columns` | SQLite | Validate tháng trong range lớp, sort_order = max + 1 |
@@ -905,9 +904,9 @@ State/data source:
 - Chưa có xử lý hard delete/archive học sinh hiện có.
 - Chưa có lưu lịch sử học phí theo tháng.
 - Attendance MVP không có `"Có phép"` và không có `"Đi muộn"`; nếu muốn dùng lại cần xác nhận model mới.
-- Class-level makeup đã persist bằng SQLite; student-level makeup đã được tách riêng trong UI/code nhưng vẫn local/bị chặn ở session DB cho đến Phase 7C.
-- Student-level makeup hiện có flow local/mock chọn lớp/buổi nhận học bù và hiển thị dòng `"Học sinh học bù"` ở lớp nhận khi dùng session local; với regular session DB, bấm `"Học bù"` chỉ hiển thị thông báo Phase 7C và không ghi SQLite.
-- Danh sách lớp/buổi đủ điều kiện học bù theo học sinh hiện lấy từ `availableClasses` đã load từ SQLite, lọc cùng năm học/cùng khối/cùng thứ tự buổi và loại chính lớp hiện tại. Tuy nhiên record học bù tạo ra vẫn chỉ nằm ở mock/local state.
+- Class-level makeup và student-level makeup đều đã persist bằng SQLite (Phase 7B/7C).
+- Student-level makeup: dòng `"Học sinh học bù"` ở lớp nhận đọc từ `get_attendance_week` (receivingMakeupRows); helper text ô gốc đọc từ makeupDetails.
+- Danh sách buổi nhận học bù do backend tính (`list_student_makeup_options`), không phụ thuộc mockData/availableClasses; lớp tạo trong DB hiển thị đúng.
 - Validation trùng lịch khi tạo/sửa lớp và tạo buổi học bù cả lớp hiện chạy ở frontend dựa trên danh sách lớp đã load; Rust command/database chưa có service rule hay constraint để chặn nếu bị gọi trực tiếp.
 - Dữ liệu attendance mock module-level còn lại có thể giữ qua unmount/remount trong cùng phiên renderer, nhưng reload/restart app vẫn mất phần student-level makeup chưa persist.
 - Attendance Phase 7B đã có transaction backend cho cancel/restore và class-level makeup; student-level makeup chưa có transaction backend.

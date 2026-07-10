@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 và Phase 7A-7B đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, regular attendance, cancel/restore và class-level makeup); student-level makeup, Backup/Restore và Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 và Phase 7A-7C đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, regular attendance, cancel/restore, class-level makeup và student-level makeup); Backup/Restore và Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -42,7 +42,7 @@ Nguyên tắc dữ liệu đã chốt:
   - makeup / Học bù
 - Không lưu nhiều boolean trạng thái; hiển thị suy ra từ một trường status.
 - Không có `late` / Đi muộn và không có `excused` / Có phép trong MVP.
-- Attendance persistence đã hoàn thành Phase 7B cho regular/class_makeup sessions, official `present`/`absent`, lock và cancel/restore; student-level makeup vẫn thuộc Phase 7C.
+- Attendance persistence đã hoàn thành Phase 7A-7C: regular/class_makeup sessions, official `present`/`absent`/`makeup`, lock, cancel/restore và student-level makeup (`student_makeup_records`). Trạng thái ở lớp nhận lưu trong `student_makeup_records.receiving_attendance_status`, KHÔNG tạo `attendance_records` cho học sinh khách.
 - Class-level makeup là session type.
 - Student-level makeup dùng `student_makeup_records`.
 - Vì chỉ có một giáo viên dạy, lịch học cố định của các lớp không được trùng khoảng giờ với nhau, kể cả khác khối.
@@ -157,7 +157,7 @@ Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AU
 - `score_values` (implemented Phase 6, migration `007_scores`)
 - `attendance_sessions` (implemented Phase 7A, migration `008_attendance`, phần regular sessions)
 - `attendance_records` (implemented Phase 7A, migration `008_attendance`, phần official present/absent)
-- `student_makeup_records` (planned Phase 7, chưa có migration)
+- `student_makeup_records` (implemented Phase 7C, migration `010_student_makeup`)
 - `backup_logs` nếu triển khai sau này
 
 ### UI numbering rule
@@ -192,7 +192,7 @@ Entities chính cho MVP:
 | score_values | Implemented Phase 6: điểm từng membership theo cột |
 | attendance_sessions | Implemented Phase 7B: regular sessions, class_makeup, lock state và cancel/restore |
 | attendance_records | Implemented Phase 7B: điểm danh học sinh chính thức ở regular/class_makeup với present/absent; empty = không có row |
-| student_makeup_records | Planned Phase 7: học bù theo từng học sinh |
+| student_makeup_records | Implemented Phase 7C: học bù theo từng học sinh, unique (student_id, original_session_id), trạng thái lớp nhận trong receiving_attendance_status |
 | backup_logs | Chưa triển khai: metadata sao lưu/khôi phục, optional sau MVP |
 
 Entities có thể để sau:
@@ -540,8 +540,7 @@ Rules:
 
 - Học sinh chính thức của lớp dùng `membership_id` của lớp đó.
 - Phase 7A chỉ ghi `present`/`absent`; bỏ điểm danh thì xóa row.
-- Schema có chỗ cho `makeup`, nhưng UI/Rust command hiện từ chối ghi `makeup` cho regular session cho đến Phase 7C.
-- Khi Phase 7C cho status chuyển sang `makeup`, service phải tạo hoặc cập nhật `student_makeup_records`.
+- Phase 7C: `create_student_makeup_record` ghi status `makeup` cho ô gốc kèm upsert `student_makeup_records` trong cùng transaction; `set_attendance_status` trực tiếp vẫn từ chối `makeup` (bắt buộc đi qua dialog chọn buổi nhận) và tự xóa liên kết học bù khi đổi sang present/absent/null.
 - Khi status rời khỏi `makeup`, service phải xử lý xóa/hủy link học bù tương ứng.
 
 ### student_makeup_records
