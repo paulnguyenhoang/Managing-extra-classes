@@ -121,7 +121,8 @@ src/
 - `src/components/ui`: shadcn/ui wrappers.
 - `src/features/home`: trang tổng quan và card lớp.
 - `src/features/classes`: trang chi tiết lớp, 4 tab lõi, hooks/utils cho điểm danh, điểm, học phí, lịch học.
-- `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/backup`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/features/backup`: trang sao lưu/khôi phục SQLite (functional từ Phase 8).
 - `src/services`: wrapper gọi Tauri commands cho dữ liệu đã nối SQLite.
 - `src/data/mockData.ts`: dữ liệu mẫu và selector/helper lấy dữ liệu.
 - `src/types`: type dữ liệu domain.
@@ -161,7 +162,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab tron
 | Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | SQLite Phase 5: bảng `payments`, khóa `(membership_id, month)` |
 | Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Placeholder dashboard học phí toàn app | placeholder | Summary card mock tĩnh |
-| Sao lưu dữ liệu | `BackupPage.tsx` | Placeholder backup/restore | placeholder | Button disabled |
+| Sao lưu dữ liệu | `BackupPage.tsx` | Sao lưu/khôi phục database SQLite | implemented | SQLite Phase 8: backup API, `backup_logs`, safety backup trước restore |
 | Cài đặt | `SettingsPage.tsx` | Placeholder thiết lập | placeholder | Card mô tả tĩnh |
 
 ## 7. Login flow hiện tại
@@ -183,7 +184,7 @@ Sidebar hiện có 5 item:
 | Tổng quan | `home` | `HomePage` | functional |
 | Lịch học | `schedule` | `SchedulePage` | placeholder |
 | Học phí | `tuition-dashboard` | `TuitionDashboardPage` | placeholder |
-| Sao lưu dữ liệu | `backup` | `BackupPage` | placeholder |
+| Sao lưu dữ liệu | `backup` | `BackupPage` | functional |
 | Cài đặt | `settings` | `SettingsPage` | placeholder |
 
 - Item global `"Học sinh"` không còn trong sidebar.
@@ -688,11 +689,14 @@ State/data source:
 
 ### Sao lưu dữ liệu
 
-- File: `src/features/backup/BackupPage.tsx`.
-- UI: title `"Sao lưu dữ liệu"`, description về sao lưu định kỳ.
-- Buttons disabled: `"Sao lưu dữ liệu"`, `"Khôi phục dữ liệu"`, `"Mở thư mục dữ liệu"`.
-- Không có behavior.
-- Trạng thái: placeholder.
+- File: `src/features/backup/BackupPage.tsx`, API `src/services/backupApi.ts`, backend `src-tauri/src/backup/mod.rs`.
+- Card thông tin database: đường dẫn `data.sqlite`, dung lượng, phiên bản schema (migration mới nhất), lần sao lưu/khôi phục gần nhất, nút `"Mở thư mục dữ liệu"`.
+- Card sao lưu: `"Sao lưu ngay"` tạo file `quan-ly-lop-hoc-them-backup-YYYYMMDD-HHMMSS.sqlite` trong `<app_data_dir>/backups/` bằng SQLite backup API (an toàn với WAL, file mở được độc lập bằng DB Browser); `"Mở thư mục sao lưu"`; hiển thị kết quả sao lưu gần nhất (tên file, dung lượng, thời gian).
+- Card khôi phục: `"Chọn file khôi phục"` mở native file picker (.sqlite), file được validate trước (SQLite hợp lệ, `PRAGMA integrity_check`, đủ bảng bắt buộc, schema không mới hơn app); `"Khôi phục dữ liệu"` chỉ enable khi file hợp lệ và luôn có confirm dialog.
+- Restore: tạo safety backup `pre-restore-YYYYMMDD-HHMMSS.sqlite` trước, rồi copy backup VÀO live connection bằng SQLite backup API (không thay file, không cần restart), chạy lại migrations nếu backup từ schema cũ hơn.
+- Sau restore thành công: dialog `"Khôi phục thành công"`, App reset state, tải lại năm học/lớp từ DB và quay về trang chủ (không cần khởi động lại ứng dụng).
+- Mọi lần backup/restore đều ghi `backup_logs` (success/failed kèm message); card lịch sử hiển thị các log mới nhất.
+- Trạng thái: implemented (Phase 8).
 
 ### Cài đặt
 
@@ -879,18 +883,20 @@ State/data source:
 | Change status to waived | PaymentsTab | Mở waiver dialog (note bắt buộc), gọi `set_payment_waived` | `payments` | SQLite | Validate amount 0..fee ở UI và service |
 | Edit payment note | PaymentsTab | Input inline, lưu khi blur/Enter qua `update_payment_note` | `payments` | SQLite | Tạo row unpaid kèm note nếu chưa có row |
 | Export payment Excel | PaymentsTab | Chưa có behavior | none | none | Export payment sheet |
-| Backup buttons | BackupPage | Disabled | none | none | Implement backup/restore later |
+| Sao lưu ngay | BackupPage | Gọi `create_backup`, tạo file backup trong thư mục backups | `backup_logs` | SQLite | Verify file sau khi tạo |
+| Chọn file khôi phục | BackupPage | Native picker + `validate_backup_file` | none | SQLite (read-only) | Restore disable nếu file không hợp lệ |
+| Khôi phục dữ liệu | BackupPage | Confirm dialog + `restore_backup` (safety backup + copy vào live connection + migrations) | tất cả bảng + `backup_logs` | SQLite | App reload dữ liệu, về Home |
+| Mở thư mục dữ liệu/sao lưu | BackupPage | `open_app_data_folder` / `open_backup_folder` qua opener plugin | none | none | none |
 | Settings cards | SettingsPage | Static only | none | none | Implement settings later |
 
 ## 19. Current limitations / chưa có
 
-- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle và attendance Phase 7C; Backup và Excel chưa nối DB.
+- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, attendance Phase 7C và backup/restore Phase 8; Excel chưa nối DB.
 - Điểm danh buổi thường và buổi học bù cả lớp đã lưu SQLite cho `present`/`absent`/`makeup`; `"Chưa điểm danh"` không tạo row. Lock/unlock, cancel/restore, class-level makeup và student-level makeup đã persist.
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite. AttendanceTab nhận roster chính thức từ `get_attendance_week`, lọc theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Chưa có Excel export thật dù nhiều nút export đã hiện.
-- Chưa có backup/restore thật.
 - Trang Lịch học global chỉ là placeholder.
 - Trang Tổng hợp học phí global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
@@ -908,7 +914,7 @@ State/data source:
 
 ## 20. Database status / future candidates based on current code
 
-Phần lõi đã implemented ở SQLite đến Phase 7C; Backup/Restore và Excel vẫn là candidate cho phase sau:
+Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore); Excel vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -925,7 +931,7 @@ Phần lõi đã implemented ở SQLite đến Phase 7C; Backup/Restore và Exce
 | `score_columns` | Implemented Phase 6: bài kiểm tra theo class/month, label sửa được, sort_order |
 | `score_values` | Implemented Phase 6: điểm từng membership từng cột, NULL hoặc 0-10, unique `(column_id, membership_id)` |
 | `payments` | Implemented Phase 5: học phí theo membership/month, status unpaid/paid/waived, amount snapshot, paid_at, note |
-| `backup_logs` hoặc metadata backup | Nếu muốn hiển thị lịch sử sao lưu sau này |
+| `backup_logs` | Implemented Phase 8: log backup/restore (action, file_path, status, message, created_at), hiển thị ở BackupPage |
 
 ## 21. Suggested backend integration order
 

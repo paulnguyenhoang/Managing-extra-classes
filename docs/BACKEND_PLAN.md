@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 và Phase 7A-7C đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, regular attendance, cancel/restore, class-level makeup và student-level makeup); Backup/Restore và Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C và Phase 8 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, và backup/restore SQLite); Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -26,7 +26,7 @@ Mục tiêu backend cho MVP:
   - Điểm danh
   - Học bù cả lớp
   - Học bù theo học sinh
-- Hỗ trợ sao lưu/khôi phục file database sau khi schema ổn định.
+- Hỗ trợ sao lưu/khôi phục file database (đã triển khai Phase 8: SQLite backup API + `backup_logs`).
 - Chuẩn bị nền tảng để export Excel từ dữ liệu thật.
 - Chuẩn bị import Excel theo template cố định, ưu tiên danh sách học sinh.
 
@@ -158,7 +158,7 @@ Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AU
 - `attendance_sessions` (implemented Phase 7A-7B, migrations `008_attendance` và `009_attendance_class_makeup`, phần regular/class_makeup, lock/cancel/restore)
 - `attendance_records` (implemented Phase 7A-7C, migration `008_attendance`, phần official present/absent/makeup; empty = không có row)
 - `student_makeup_records` (implemented Phase 7C, migration `010_student_makeup`)
-- `backup_logs` nếu triển khai sau này
+- `backup_logs` (implemented Phase 8, migration `011_backup_logs`)
 
 ### UI numbering rule
 
@@ -193,7 +193,7 @@ Entities chính cho MVP:
 | attendance_sessions | Implemented Phase 7B: regular sessions, class_makeup, lock state và cancel/restore |
 | attendance_records | Implemented Phase 7C: điểm danh học sinh chính thức ở regular/class_makeup với present/absent/makeup; empty = không có row |
 | student_makeup_records | Implemented Phase 7C: học bù theo từng học sinh, unique (student_id, original_session_id), trạng thái lớp nhận trong receiving_attendance_status |
-| backup_logs | Chưa triển khai: metadata sao lưu/khôi phục, optional sau MVP |
+| backup_logs | Implemented Phase 8: lịch sử sao lưu/khôi phục (action, file_path, status, message, created_at) |
 
 Entities có thể để sau:
 
@@ -590,12 +590,14 @@ Rules:
 
 ### backup_logs
 
+Implemented Phase 8 (migration `011_backup_logs`):
+
 ```sql
 CREATE TABLE backup_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  action TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('backup', 'restore')),
   file_path TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
   message TEXT,
   created_at TEXT NOT NULL
 );
@@ -610,6 +612,11 @@ Allowed `status`:
 
 - `success`
 - `failed`
+
+Rules:
+
+- `backup_logs` chỉ phục vụ lịch sử hiển thị và troubleshooting; app không phụ thuộc bảng này để khởi động.
+- Backup/restore thất bại vẫn cố gắng ghi log `failed` kèm message.
 
 ## 6. Relationships
 
@@ -1012,23 +1019,34 @@ Deliverables Phase 7C (đã hoàn thành):
 - Receiving class hiển thị học sinh học bù bằng dữ liệu từ `get_attendance_week`.
 - Transaction cho mọi thao tác học bù theo học sinh.
 
-### Phase 8. Backup/restore (next planned)
+### Phase 8. Backup/restore
+
+Trạng thái hiện tại: đã triển khai.
 
 Mục tiêu:
 
 - Sao lưu database file.
 - Khôi phục database file an toàn.
 - Ghi log backup/restore.
-- Tạo gói support để developer có thể inspect/fix database local rồi gửi lại cho giáo viên restore.
+- Giáo viên có thể gửi file backup cho developer để inspect/fix bằng DB Browser for SQLite rồi gửi lại restore.
 
-Deliverables:
+Deliverables (đã hoàn thành):
 
-- Button sao lưu hoạt động.
-- Button khôi phục có confirm và kiểm tra file hợp lệ.
-- Mở thư mục dữ liệu.
-- Gói backup/support có thể chứa `data.sqlite`, metadata backup, app version, schema version và error logs nếu có.
+- Migration `011_backup_logs`: bảng `backup_logs`.
+- Module `src-tauri/src/backup/mod.rs` với commands: `get_database_info`, `create_backup`, `validate_backup_file`, `restore_backup`, `list_backup_logs`, `open_app_data_folder`, `open_backup_folder`, `pick_backup_file`.
+- Backup dùng SQLite backup API của rusqlite (feature `backup`) từ live connection ra file `quan-ly-lop-hoc-them-backup-YYYYMMDD-HHMMSS.sqlite` trong `<app_data_dir>/backups/` — an toàn với WAL, không copy file thô, file backup mở được độc lập; sau khi tạo có verify (integrity_check + bảng bắt buộc).
+- Validate file khôi phục: mở read-only, `PRAGMA integrity_check`, kiểm tra đủ bảng bắt buộc (12 bảng domain), đọc `schema_migrations`; từ chối file có schema mới hơn app; trả về summary số lớp/học sinh.
+- Restore: tạo safety backup `pre-restore-YYYYMMDD-HHMMSS.sqlite` trước, rồi copy backup VÀO live connection bằng backup API (destination tự rollback nếu lỗi giữa chừng), re-apply pragmas (WAL/foreign_keys) và chạy lại migrations nếu backup từ schema cũ hơn. Không thay thế file `data.sqlite` trực tiếp nên không có vấn đề WAL/SHM cũ và không cần restart app.
+- Frontend `src/services/backupApi.ts` + `BackupPage.tsx`: card thông tin database, sao lưu (loading state, kết quả file gần nhất), khôi phục (native file picker qua `tauri-plugin-dialog` phía Rust, validation hiển thị trước, confirm dialog bắt buộc, nút restore disable khi file không hợp lệ), lịch sử `backup_logs`, note hỗ trợ.
+- Sau restore thành công: App.tsx reset state (năm học, lớp, khối, lớp đang chọn), tải lại dữ liệu từ DB và quay về Home — không cần khởi động lại ứng dụng.
 
-### Phase 9. Excel import/export (planned)
+Chiến lược backup:
+
+- Local SQLite backup file, không cloud sync.
+- Developer có thể nhận file backup, inspect/fix và gửi lại cho giáo viên restore.
+- Gói backup MVP là một file `.sqlite` duy nhất; metadata (app version, error logs) có thể thêm sau nếu cần.
+
+### Phase 9. Excel import/export (next planned)
 
 Mục tiêu:
 
