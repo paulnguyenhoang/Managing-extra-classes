@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores); Attendance/Backup/Excel vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6 và Phase 7A đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, regular attendance sessions và official attendance records); class-level makeup, student-level makeup, Backup/Restore và Excel vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -42,7 +42,7 @@ Nguyên tắc dữ liệu đã chốt:
   - makeup / Học bù
 - Không lưu nhiều boolean trạng thái; hiển thị suy ra từ một trường status.
 - Không có `late` / Đi muộn và không có `excused` / Có phép trong MVP.
-- Attendance persistence vẫn thuộc Phase 7, chưa triển khai trong Phase 4.5/P0.
+- Attendance persistence đã bắt đầu ở Phase 7A cho regular sessions và official `present`/`absent`; class-level makeup và student-level makeup vẫn thuộc Phase 7B/7C.
 - Class-level makeup là session type.
 - Student-level makeup dùng `student_makeup_records`.
 - Vì chỉ có một giáo viên dạy, lịch học cố định của các lớp không được trùng khoảng giờ với nhau, kể cả khác khối.
@@ -155,8 +155,8 @@ Domain tables đã triển khai hoặc dự kiến dùng `INTEGER PRIMARY KEY AU
 - `payments`
 - `score_columns` (implemented Phase 6, migration `007_scores`)
 - `score_values` (implemented Phase 6, migration `007_scores`)
-- `attendance_sessions` (planned Phase 7, chưa có migration)
-- `attendance_records` (planned Phase 7, chưa có migration)
+- `attendance_sessions` (implemented Phase 7A, migration `008_attendance`, phần regular sessions)
+- `attendance_records` (implemented Phase 7A, migration `008_attendance`, phần official present/absent)
 - `student_makeup_records` (planned Phase 7, chưa có migration)
 - `backup_logs` nếu triển khai sau này
 
@@ -190,8 +190,8 @@ Entities chính cho MVP:
 | payments | Học phí theo tháng |
 | score_columns | Implemented Phase 6: cột/bài kiểm tra theo lớp và tháng |
 | score_values | Implemented Phase 6: điểm từng membership theo cột |
-| attendance_sessions | Planned Phase 7: buổi học thực tế |
-| attendance_records | Planned Phase 7: điểm danh học sinh chính thức theo session |
+| attendance_sessions | Implemented Phase 7A: regular sessions, lock state; class_makeup/cancel flow còn planned |
+| attendance_records | Implemented Phase 7A: điểm danh học sinh chính thức theo session với present/absent; empty = không có row |
 | student_makeup_records | Planned Phase 7: học bù theo từng học sinh |
 | backup_logs | Chưa triển khai: metadata sao lưu/khôi phục, optional sau MVP |
 
@@ -512,7 +512,7 @@ CREATE TABLE attendance_records (
   session_id INTEGER NOT NULL,
   membership_id INTEGER NOT NULL,
   student_id INTEGER NOT NULL,
-  status TEXT,
+  status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'makeup')),
   note TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -524,7 +524,7 @@ CREATE TABLE attendance_records (
 
 Allowed `status`:
 
-- `NULL` hoặc không có row: Chưa điểm danh
+- Không có row: Chưa điểm danh
 - `present`
 - `absent`
 - `makeup`
@@ -539,7 +539,9 @@ ON attendance_records (session_id, membership_id);
 Rules:
 
 - Học sinh chính thức của lớp dùng `membership_id` của lớp đó.
-- Khi status chuyển sang `makeup`, service phải tạo hoặc cập nhật `student_makeup_records`.
+- Phase 7A chỉ ghi `present`/`absent`; bỏ điểm danh thì xóa row.
+- Schema có chỗ cho `makeup`, nhưng UI/Rust command hiện từ chối ghi `makeup` cho regular session cho đến Phase 7C.
+- Khi Phase 7C cho status chuyển sang `makeup`, service phải tạo hoặc cập nhật `student_makeup_records`.
 - Khi status rời khỏi `makeup`, service phải xử lý xóa/hủy link học bù tương ứng.
 
 ### student_makeup_records
@@ -864,13 +866,13 @@ Phạm vi:
 
 - Chỉ chuẩn hóa nguồn roster và id.
 - Không tạo bảng scores/attendance trong P0.
-- Attendance records vẫn mock/local cho đến Phase 7; Payments đã triển khai ở Phase 5 và Scores đã triển khai ở Phase 6.
+- Sau Phase 7A, attendance regular records đã persist SQLite cho `present`/`absent`; phần makeup/cancel vẫn để Phase 7B/7C. Payments đã triển khai ở Phase 5 và Scores đã triển khai ở Phase 6.
 
 Ý nghĩa cho các phase sau:
 
 - Phase 5 Payments đã ghi record theo `membership_id`.
 - Phase 6 Scores đã ghi score value theo `membership_id`.
-- Phase 7 Attendance nên ghi attendance record theo `membership_id`; student-level makeup dùng `student_makeup_records` và không thêm học sinh học bù vào membership của lớp nhận.
+- Phase 7A Attendance đã ghi attendance record theo `membership_id` cho học sinh chính thức; student-level makeup vẫn dùng `student_makeup_records` ở Phase 7C và không thêm học sinh học bù vào membership của lớp nhận.
 
 ### Phase 5. Payments
 
@@ -934,7 +936,7 @@ Trạng thái hiện tại: đã triển khai.
 - StudentListTab default `joinedMonth = clamp(currentMonth, class.startMonth, class.endMonth)` và dropdown chỉ hiện tháng trong khoảng lớp.
 - Pause dialog chỉ cho chọn `leftMonth` từ `joinedMonth` đến `class.endMonth`; cảnh báo nợ dùng dải joinedMonth đến tháng trước leftMonth.
 - PaymentsTab vẫn SQLite-backed và có nút tháng trước/tháng sau quanh select tháng; danh sách tháng vẫn sinh từ khoảng lớp.
-- Attendance persistence vẫn thuộc Phase 7, nhưng roster chính thức trong AttendanceTab hiện đã lọc theo membership lifecycle cho từng session date.
+- Attendance Phase 7A đã persist regular sessions và official `present`/`absent`; roster chính thức trong AttendanceTab được backend lọc theo membership lifecycle cho từng session date.
 - ScoresTab đã SQLite-backed; tháng sinh từ `class.startMonth..class.endMonth`, roster lọc theo lifecycle membership, và vẫn hiển thị danh sách học sinh khi tháng chưa có cột bài kiểm tra.
 - Home class card hiển thị thời gian học `startMonth - endMonth`; khi sửa/kết thúc lớp ở ClassDetail, card Home đồng bộ từ class overview.
 - Dialog thêm buổi học bù hiển thị ngày học bù riêng một dòng, giờ bắt đầu/kết thúc ngang hàng, và có hint khung giờ trống/trùng lớp sau khi chọn ngày.
@@ -960,9 +962,11 @@ Deliverables (đã hoàn thành):
 - Điểm keyed theo `membership_id` (không dùng student_id đơn lẻ vì học sinh có thể thuộc nhiều lớp).
 - ScoresTab load sheet từ DB theo classId/tháng, draft thưa khi edit, refresh sau mỗi thao tác; `useMockScores` không còn được dùng.
 - Frontend render roster đã sort tiếng Việt bằng `sortStudentsByVietnameseName`; STT = `index + 1` sau filter/sort.
-- Attendance vẫn để Phase 7 (kế tiếp) vì có session sinh từ lịch, nghỉ/bù, lock/unlock và liên kết học bù phức tạp hơn.
+- Attendance Phase 7A đã triển khai phần nền regular sessions; nghỉ/bù và liên kết học bù vẫn để Phase 7B/7C vì phức tạp hơn.
 
 ### Phase 7. Attendance
+
+Trạng thái hiện tại: đã triển khai Phase 7A cho regular sessions và official attendance records; các phần cancel/class-level makeup/student-level makeup vẫn chưa triển khai persistence.
 
 Mục tiêu:
 
@@ -970,11 +974,24 @@ Mục tiêu:
 - Hỗ trợ lock/unlock, cancel/restore session.
 - Hỗ trợ extra makeup rows ở lớp nhận.
 
-Deliverables:
+Deliverables Phase 7A (đã hoàn thành):
 
-- AttendanceTab query week từ DB.
-- Sinh hoặc materialize sessions theo lịch.
-- Set status official student.
+- Migration `008_attendance`: tạo `attendance_sessions` và `attendance_records`.
+- Module `src-tauri/src/attendance/mod.rs`.
+- Commands:
+  - `get_attendance_week`
+  - `set_attendance_status`
+  - `toggle_attendance_lock`
+  - `mark_session_present`
+- `get_attendance_week` materialize `attendance_sessions` type `regular` từ `class_schedules` khi mở tuần.
+- Session regular mới mặc định `is_locked = 1`.
+- AttendanceTab query week từ DB qua `src/services/attendanceApi.ts`.
+- `set_attendance_status` chỉ persist `present`/`absent`; `null` xóa row, nghĩa là Chưa điểm danh.
+- `makeup` bị từ chối ở regular session trong Phase 7A và cần Phase 7C.
+- Cancel/restore session DB và class-level makeup persistence chưa triển khai trong 7A.
+
+Deliverables Phase 7B/7C (còn lại):
+
 - Tạo class-level makeup session.
 - Tạo class-level makeup cần nhập ngày, giờ bắt đầu, giờ kết thúc, buổi gốc; service kiểm tra không trùng giờ với lịch/session khác.
 - Tạo student-level makeup record.
@@ -1132,6 +1149,7 @@ Excel import/export:
 - Không có late/excused trong MVP.
 - Regular attendance sessions có thể được materialize khi mở tuần hoặc khi có thao tác đầu tiên.
 - Sửa lịch học không rewrite các attendance sessions trong quá khứ.
+- Khi sửa lịch học, service chỉ dọn/sync regular attendance sessions từ ngày hiện tại trở đi và chỉ với session chưa có `attendance_records`; session quá khứ giữ nguyên để không làm sai lịch sử điểm danh.
 - Class-level makeup là `attendance_sessions.type = class_makeup`.
 - Class-level makeup phải có `start_time` và `end_time`.
 - Backend service phải chặn lịch học/lịch học bù trùng khoảng giờ giữa các lớp active, vì app chỉ phục vụ một giáo viên dạy trực tiếp.

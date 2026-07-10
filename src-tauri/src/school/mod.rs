@@ -570,6 +570,7 @@ pub fn update_class_schedule(
             )
             .map_err(|error| format!("Không xóa được lịch học cũ: {error}"))?;
         insert_schedule_items(&transaction, request.class_id, &request.schedule_items)?;
+        prune_future_regular_attendance_sessions(&transaction, request.class_id)?;
         transaction
             .execute(
                 "UPDATE classes SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
@@ -679,7 +680,8 @@ fn get_class_overview(connection: &Connection, class_id: i64) -> Result<ClassOve
     let schedule_items = schedule_items_for_class(connection, class_row.0)?;
     let schedule = format_schedule_text(&schedule_items);
     let student_count = crate::students::count_active_students_by_class(connection, class_row.0)?;
-    let unpaid_count = crate::payments::count_unpaid_by_class_current_month(connection, class_row.0)?;
+    let unpaid_count =
+        crate::payments::count_unpaid_by_class_current_month(connection, class_row.0)?;
 
     Ok(ClassOverviewDto {
         id: class_row.0,
@@ -749,6 +751,28 @@ fn insert_schedule_items(
             )
             .map_err(|error| format!("Không lưu được lịch học: {error}"))?;
     }
+
+    Ok(())
+}
+
+fn prune_future_regular_attendance_sessions(
+    transaction: &rusqlite::Transaction<'_>,
+    class_id: i64,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "DELETE FROM attendance_sessions
+             WHERE class_id = ?1
+               AND type = 'regular'
+               AND session_date >= date('now', 'localtime')
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM attendance_records ar
+                 WHERE ar.session_id = attendance_sessions.id
+               )",
+            params![class_id],
+        )
+        .map_err(|error| format!("Không đồng bộ được buổi điểm danh tương lai: {error}"))?;
 
     Ok(())
 }
@@ -873,7 +897,10 @@ fn academic_year_month_bounds(
         .map_err(|error| format!("Không đọc được năm học: {error}"))?
         .ok_or_else(|| "Không tìm thấy năm học.".to_string())?;
 
-    Ok((format!("{}-01", &starts_at[..4]), format!("{}-12", &ends_at[..4])))
+    Ok((
+        format!("{}-01", &starts_at[..4]),
+        format!("{}-12", &ends_at[..4]),
+    ))
 }
 
 fn validate_class_grade(grade: i64) -> Result<(), String> {

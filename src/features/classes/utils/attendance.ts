@@ -6,6 +6,11 @@ export type WeeklySession = {
   date: Date;
   startTime: string;
   endTime: string;
+  dbId?: number;
+  sessionIndexInWeek?: number;
+  type?: "regular" | "class_makeup";
+  status?: "active" | "cancelled";
+  isLocked?: boolean;
   isMakeup?: boolean;
   makeupForSessionId?: string;
 };

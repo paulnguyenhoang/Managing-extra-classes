@@ -215,7 +215,7 @@ Các nút UI trong MVP:
 
 ## 8. Proposed database tables
 
-Đây là đề xuất schema cho Phase 7, chưa được triển khai trong SQLite hiện tại.
+Phase 7A hiện đã triển khai nền SQLite cho `attendance_sessions` regular và `attendance_records` official `present`/`absent`. Các phần `class_makeup`, cancel/restore session và `student_makeup_records` vẫn là scope đề xuất cho Phase 7B/7C.
 
 ### attendance_sessions
 
@@ -251,7 +251,7 @@ Fields đề xuất:
 | session_id | integer | Buổi học |
 | membership_id | integer | Membership chính thức của học sinh trong lớp sở hữu session |
 | student_id | integer | Học sinh, lưu kèm để query/report thuận tiện |
-| status | text/null | `present`, `absent`, `makeup`, hoặc null/không có record cho Chưa điểm danh |
+| status | text | `present`, `absent`, `makeup`; Chưa điểm danh không tạo row |
 | note | text/null | Ghi chú riêng |
 | created_at | text/datetime | Metadata |
 | updated_at | text/datetime | Metadata |

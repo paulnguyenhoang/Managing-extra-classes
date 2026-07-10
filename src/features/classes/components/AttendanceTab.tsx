@@ -33,7 +33,6 @@ import {
   StudentMakeupDialog,
   type PendingStudentMakeup,
 } from "@/features/classes/components/attendance/StudentMakeupDialog";
-import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { useMockAttendance } from "@/features/classes/hooks/useMockAttendance";
 import {
   addDays,
@@ -46,7 +45,9 @@ import {
   getWeekStart,
   isPastDate,
   isSameDay,
+  parseLocalDate,
   startOfDay,
+  toDateKey,
   weekdayLabel,
   type MakeupSessionInput,
   type StudentMakeupRecord,
@@ -56,7 +57,13 @@ import {
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { attendanceStatusLabel } from "@/lib/format";
 import { currentMonthKey, isValidMonthKey } from "@/lib/months";
-import type { AttendanceStatus } from "@/types/attendance";
+import {
+  getAttendanceWeek,
+  markSessionPresent,
+  setAttendanceStatus as saveAttendanceStatus,
+  toggleAttendanceLock,
+} from "@/services/attendanceApi";
+import type { AttendanceStatus, AttendanceWeekDto } from "@/types/attendance";
 import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 import type { ClassStudentRosterItem } from "@/types/student";
 
@@ -381,15 +388,13 @@ export function AttendanceTab({
     null,
   );
   const [selectedStudentMakeupSessionId, setSelectedStudentMakeupSessionId] = useState("");
-  const {
-    students,
-    isLoading: isLoadingStudents,
-    errorMessage: studentsErrorMessage,
-  } = useClassStudents(classId);
+  const [attendanceWeek, setAttendanceWeek] = useState<AttendanceWeekDto | null>(null);
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
+  const [attendanceErrorMessage, setAttendanceErrorMessage] = useState<string | null>(null);
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
   const classIdKey = String(classId);
   const currentClassName = className;
   const {
-    sessions,
     allMakeupSessions,
     cancelledSessionIds,
     unlockedSessionIds,
@@ -406,17 +411,52 @@ export function AttendanceTab({
     removeMakeupSession,
     addStudentMakeupRecord,
     removeStudentMakeupRecordForOriginal,
-  } = useMockAttendance(weekStart, scheduleItems, classIdKey);
+  } = useMockAttendance(weekStart, [], classIdKey);
+  const scheduleKey = useMemo(
+    () =>
+      scheduleItems
+        .map((item) => `${item.weekday}:${item.startTime}-${item.endTime}`)
+        .join("|"),
+    [scheduleItems],
+  );
+  const dbSessions = useMemo(
+    () => (attendanceWeek?.sessions ?? []).map(mapAttendanceSessionDtoToWeeklySession),
+    [attendanceWeek],
+  );
+  const localMakeupSessions = useMemo(
+    () =>
+      allMakeupSessions.filter(
+        (session) =>
+          session.classId === classIdKey &&
+          session.isMakeup &&
+          isSameDay(getWeekStart(session.date), weekStart),
+      ),
+    [allMakeupSessions, classIdKey, weekStart],
+  );
+  const sessions = useMemo(
+    () =>
+      [...dbSessions, ...localMakeupSessions].sort((first, second) => {
+        const dateDiff = first.date.getTime() - second.date.getTime();
+        return dateDiff || first.startTime.localeCompare(second.startTime);
+      }),
+    [dbSessions, localMakeupSessions],
+  );
+  const students = useMemo(
+    () => attendanceWeek?.officialRows.map(mapAttendanceRowToRosterItem) ?? [],
+    [attendanceWeek],
+  );
   const todaySession = sessions.find((session) => isSameDay(session.date, today));
   const isSelectedWeekCurrent = isSameDay(weekStart, getWeekStart(today));
-  const isTodaySessionCancelled = todaySession
-    ? cancelledSessionIds.includes(todaySession.id)
-    : false;
+  const isTodaySessionCancelled = todaySession ? isSessionCancelled(todaySession) : false;
+  const isTodaySessionUnlocked = todaySession ? isSessionUnlocked(todaySession, unlockedSessionIds) : false;
   const hasEligibleStudentToday = todaySession
     ? students.some((student) => isStudentEligibleForSession(student, todaySession))
     : false;
   const canMarkTodayPresent =
-    Boolean(todaySession) && !isTodaySessionCancelled && hasEligibleStudentToday;
+    Boolean(todaySession) &&
+    !isTodaySessionCancelled &&
+    isTodaySessionUnlocked &&
+    hasEligibleStudentToday;
   const visibleStudents = useMemo(
     () =>
       sortStudentsByVietnameseName(
@@ -460,6 +500,39 @@ export function AttendanceTab({
   }, [onUpcomingMakeupSessionsChange, upcomingMakeupSessions]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadAttendanceWeek() {
+      setIsLoadingAttendance(true);
+      setAttendanceErrorMessage(null);
+
+      try {
+        const week = await getAttendanceWeek(classId, toDateKey(weekStart));
+        if (!cancelled) {
+          setAttendanceWeek(week);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAttendanceErrorMessage(
+            error instanceof Error ? error.message : "Không tải được dữ liệu điểm danh.",
+          );
+          setAttendanceWeek(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAttendance(false);
+        }
+      }
+    }
+
+    void loadAttendanceWeek();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [classId, scheduleKey, weekStart]);
+
+  useEffect(() => {
     if (!hasValidClassRange) {
       return;
     }
@@ -476,6 +549,11 @@ export function AttendanceTab({
     !hasValidClassRange || addDays(weekStart, -7).getTime() >= firstAllowedWeekStart.getTime();
   const canGoNextWeek =
     !hasValidClassRange || addDays(weekStart, 7).getTime() <= lastAllowedWeekStart.getTime();
+
+  async function refreshAttendanceWeek() {
+    const week = await getAttendanceWeek(classId, toDateKey(weekStart));
+    setAttendanceWeek(week);
+  }
 
   function goToPreviousWeek() {
     setWeekStart((current) => {
@@ -557,19 +635,21 @@ export function AttendanceTab({
     setPendingRemoveMakeupSession(null);
   }
 
-  function markTodayPresent() {
-    if (!todaySession || isTodaySessionCancelled) {
+  async function markTodayPresent() {
+    if (!todaySession || isTodaySessionCancelled || !todaySession.dbId) {
       return;
     }
 
-    markSessionForStudents(
-      todaySession.id,
-      students
-        .filter((student) => isStudentEligibleForSession(student, todaySession))
-        .map(getRosterStudentKey),
-      "present",
-      getMakeupRecordIdsForSession(todaySession.id),
-    );
+    setActionErrorMessage(null);
+
+    try {
+      await markSessionPresent(todaySession.dbId);
+      await refreshAttendanceWeek();
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Không đánh dấu được cả lớp đi học.",
+      );
+    }
   }
 
   function openWeekPicker() {
@@ -588,32 +668,23 @@ export function AttendanceTab({
   }
 
   function tryAddMakeupSession(input: MakeupSessionInput): string | null {
-    const error = getMakeupSessionInputError({
-      date: input.date,
-      startTime: input.startTime,
-      endTime: input.endTime,
-      makeupForSessionId: input.makeupForSessionId,
-      existingMakeupSessions: allMakeupSessions,
-      classId: classIdKey,
-      today,
-    });
-
-    if (error) {
-      return error;
-    }
-
-    // Buổi gốc chuyển sang nghỉ: đánh dấu Nghỉ cho toàn bộ học sinh như tick từng người.
-    markWholeSessionAbsent(input.makeupForSessionId);
-    addMakeupSession(input);
-    return null;
+    void input;
+    return "Học bù cả lớp sẽ được lưu vào SQLite ở Phase 7B. Phase 7A chỉ lưu buổi học thường.";
   }
 
-  function handleOfficialStatusSelect(
+  async function handleOfficialStatusSelect(
     student: ClassStudentRosterItem,
     session: WeeklySession,
     nextStatus: AttendanceCellStatus,
   ) {
     const studentKey = getRosterStudentKey(student);
+
+    if (session.dbId && nextStatus === "makeup") {
+      setActionErrorMessage(
+        "Học bù theo học sinh sẽ được lưu ở Phase 7C. Hiện tại chỉ lưu Có học/Nghỉ.",
+      );
+      return;
+    }
 
     if (nextStatus === "makeup") {
       const options = getEligibleDbStudentMakeupSessions({
@@ -629,7 +700,7 @@ export function AttendanceTab({
       return;
     }
 
-    const currentStatus = getStatus(session.id, studentKey);
+    const currentStatus = getAttendanceCellStatus(student, session, getStatus);
 
     if (currentStatus === "makeup") {
       removeStudentMakeupRecordForOriginal({
@@ -637,6 +708,25 @@ export function AttendanceTab({
         originalClassId: classIdKey,
         originalSessionId: session.id,
       });
+    }
+
+    if (session.dbId) {
+      setActionErrorMessage(null);
+
+      try {
+        await saveAttendanceStatus({
+          sessionId: session.dbId,
+          membershipId: student.membershipId,
+          studentId: student.studentId,
+          status: nextStatus === "present" || nextStatus === "absent" ? nextStatus : null,
+        });
+        await refreshAttendanceWeek();
+      } catch (error) {
+        setActionErrorMessage(
+          error instanceof Error ? error.message : "Không lưu được điểm danh.",
+        );
+      }
+      return;
     }
 
     setAttendanceStatus(session.id, studentKey, nextStatus);
@@ -689,6 +779,24 @@ export function AttendanceTab({
         record.originalClassId === classIdKey &&
         record.originalSessionId === sessionId,
     );
+  }
+
+  async function handleToggleSessionLock(session: WeeklySession) {
+    setActionErrorMessage(null);
+
+    if (!session.dbId) {
+      toggleSessionLock(session.id);
+      return;
+    }
+
+    try {
+      await toggleAttendanceLock(session.dbId, !session.isLocked);
+      await refreshAttendanceWeek();
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Không cập nhật được khóa điểm danh.",
+      );
+    }
   }
 
   return (
@@ -781,22 +889,27 @@ export function AttendanceTab({
         </div>
       </section>
 
-      {isLoadingStudents ? (
+      {actionErrorMessage ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {actionErrorMessage}
+        </p>
+      ) : null}
+      {isLoadingAttendance ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
-          Đang tải danh sách học sinh...
+          Đang tải dữ liệu điểm danh...
         </p>
       ) : null}
-      {studentsErrorMessage ? (
+      {attendanceErrorMessage ? (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {studentsErrorMessage}
+          {attendanceErrorMessage}
         </p>
       ) : null}
-      {!isLoadingStudents && !studentsErrorMessage && students.length === 0 ? (
+      {!isLoadingAttendance && !attendanceErrorMessage && students.length === 0 ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
           Lớp này chưa có học sinh trong database.
         </p>
       ) : null}
-      {!isLoadingStudents && !studentsErrorMessage && students.length > 0 && visibleStudents.length === 0 ? (
+      {!isLoadingAttendance && !attendanceErrorMessage && students.length > 0 && visibleStudents.length === 0 ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
           Không có học sinh trong thời gian này.
         </p>
@@ -813,11 +926,19 @@ export function AttendanceTab({
                   <SessionHeader
                     session={session}
                     today={today}
-                    isCancelled={cancelledSessionIds.includes(session.id)}
-                    isUnlocked={unlockedSessionIds.includes(session.id)}
-                    onRequestCancelToggle={() => setPendingCancelSession(session)}
+                    isCancelled={isSessionCancelled(session)}
+                    isUnlocked={isSessionUnlocked(session, unlockedSessionIds)}
+                    onRequestCancelToggle={() => {
+                      if (session.dbId) {
+                        setActionErrorMessage(
+                          "Nghỉ buổi học sẽ được lưu vào SQLite ở Phase 7B.",
+                        );
+                        return;
+                      }
+                      setPendingCancelSession(session);
+                    }}
                     onRequestRemoveMakeup={() => setPendingRemoveMakeupSession(session)}
-                    onToggleLock={() => toggleSessionLock(session.id)}
+                    onToggleLock={() => void handleToggleSessionLock(session)}
                   />
                 </TableHead>
               ))}
@@ -833,9 +954,9 @@ export function AttendanceTab({
                   <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
                   {sessions.map((session) => {
                   const isEligible = isStudentEligibleForSession(student, session);
-                  const isCancelled = cancelledSessionIds.includes(session.id);
-                  const isUnlocked = unlockedSessionIds.includes(session.id);
-                  const status = getStatus(session.id, studentKey);
+                  const isCancelled = isSessionCancelled(session);
+                  const isUnlocked = isSessionUnlocked(session, unlockedSessionIds);
+                  const status = getAttendanceCellStatus(student, session, getStatus);
                   const makeupRecord =
                     status === "makeup"
                       ? getStudentMakeupRecord(studentKey, session.id)
@@ -856,7 +977,7 @@ export function AttendanceTab({
                         <div className="flex flex-col items-center gap-1">
                           <AttendanceStatusButtons
                             status={status}
-                            allowMakeup={!session.isMakeup}
+                            allowMakeup={!session.isMakeup && !session.dbId}
                             onSelect={(nextStatus) =>
                               handleOfficialStatusSelect(student, session, nextStatus)
                             }
@@ -908,8 +1029,8 @@ export function AttendanceTab({
                       </TableCell>
                       {sessions.map((session) => {
                         const isTargetSession = session.id === record.receivingSessionId;
-                        const isCancelled = cancelledSessionIds.includes(session.id);
-                        const isUnlocked = unlockedSessionIds.includes(session.id);
+                        const isCancelled = isSessionCancelled(session);
+                        const isUnlocked = isSessionUnlocked(session, unlockedSessionIds);
                         const status = getMakeupStudentStatus(session.id, record.id);
 
                         return (
@@ -1047,6 +1168,75 @@ function DateToneLegendItem({ className, label }: { className: string; label: st
 
 function getRosterStudentKey(student: ClassStudentRosterItem) {
   return String(student.membershipId);
+}
+
+function mapAttendanceSessionDtoToWeeklySession(
+  session: AttendanceWeekDto["sessions"][number],
+): WeeklySession {
+  return {
+    id: String(session.id),
+    dbId: session.id,
+    classId: String(session.classId),
+    date: parseLocalDate(session.sessionDate),
+    startTime: session.startTime,
+    endTime: session.endTime,
+    sessionIndexInWeek: session.sessionIndexInWeek,
+    type: session.type,
+    status: session.status,
+    isLocked: session.isLocked,
+    isMakeup: session.type === "class_makeup",
+    makeupForSessionId: session.makeupForSessionId ? String(session.makeupForSessionId) : undefined,
+  };
+}
+
+function mapAttendanceRowToRosterItem(
+  row: AttendanceWeekDto["officialRows"][number],
+): ClassStudentRosterItem {
+  return {
+    id: row.id,
+    membershipId: row.membershipId,
+    studentId: row.studentId,
+    classId: row.classId,
+    fullName: row.fullName,
+    schoolClass: row.schoolClass,
+    school: row.school,
+    parentPhone: row.parentPhone,
+    status: row.status,
+    joinedMonth: row.joinedMonth,
+    leftMonth: row.leftMonth,
+    note: row.note,
+    attendanceBySessionId: row.attendanceBySessionId,
+  } as ClassStudentRosterItem & {
+    attendanceBySessionId: AttendanceWeekDto["officialRows"][number]["attendanceBySessionId"];
+  };
+}
+
+function getAttendanceCellStatus(
+  student: ClassStudentRosterItem,
+  session: WeeklySession,
+  getLocalStatus: (sessionId: string, studentId: string) => AttendanceCellStatus,
+): AttendanceCellStatus {
+  const row = student as ClassStudentRosterItem & {
+    attendanceBySessionId?: AttendanceWeekDto["officialRows"][number]["attendanceBySessionId"];
+  };
+
+  if (session.dbId) {
+    return row.attendanceBySessionId?.[String(session.dbId)] ?? undefined;
+  }
+
+  return getLocalStatus(session.id, getRosterStudentKey(student));
+}
+
+function isSessionCancelled(session: WeeklySession) {
+  return session.status === "cancelled";
+}
+
+function isSessionUnlocked(session: WeeklySession, unlockedSessionIds: string[]) {
+  if (session.dbId) {
+    return !session.isLocked;
+  }
+
+  return unlockedSessionIds.includes(session.id);
 }
 
 function isStudentEligibleForSession(student: ClassStudentRosterItem, session: WeeklySession) {
