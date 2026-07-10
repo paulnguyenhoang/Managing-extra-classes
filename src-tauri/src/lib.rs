@@ -1,4 +1,5 @@
 mod attendance;
+mod backup;
 mod db;
 mod months;
 mod payments;
@@ -19,6 +20,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let database = db::AppDatabase::initialize(app.handle())
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
@@ -87,7 +89,15 @@ pub fn run() {
             attendance::list_student_makeup_options,
             attendance::create_student_makeup_record,
             attendance::remove_student_makeup_record,
-            attendance::set_receiving_makeup_attendance_status
+            attendance::set_receiving_makeup_attendance_status,
+            backup::get_database_info,
+            backup::create_backup,
+            backup::validate_backup_file,
+            backup::restore_backup,
+            backup::list_backup_logs,
+            backup::open_app_data_folder,
+            backup::open_backup_folder,
+            backup::pick_backup_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

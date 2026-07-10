@@ -67,7 +67,20 @@ const MIGRATIONS: &[Migration] = &[
         name: "010_student_makeup",
         sql: include_str!("../../migrations/010_student_makeup.sql"),
     },
+    Migration {
+        version: 11,
+        name: "011_backup_logs",
+        sql: include_str!("../../migrations/011_backup_logs.sql"),
+    },
 ];
+
+pub fn latest_defined_migration() -> (i64, &'static str) {
+    let migration = MIGRATIONS
+        .last()
+        .expect("MIGRATIONS không được để trống");
+
+    (migration.version, migration.name)
+}
 
 pub struct AppDatabase {
     path: PathBuf,
@@ -102,6 +115,10 @@ impl AppDatabase {
             path: database_path,
             connection: Mutex::new(connection),
         })
+    }
+
+    pub fn database_path(&self) -> &Path {
+        &self.path
     }
 
     pub fn status(&self) -> Result<DatabaseStatus, String> {
@@ -188,7 +205,7 @@ impl AppDatabase {
     }
 }
 
-fn configure_connection(connection: &Connection) -> Result<(), String> {
+pub fn configure_connection(connection: &Connection) -> Result<(), String> {
     connection
         .pragma_update(None, "foreign_keys", "ON")
         .map_err(|error| format!("Không bật được SQLite foreign keys: {error}"))?;
@@ -200,7 +217,7 @@ fn configure_connection(connection: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn run_migrations(connection: &mut Connection) -> Result<(), String> {
+pub fn run_migrations(connection: &mut Connection) -> Result<(), String> {
     ensure_migration_table(connection)?;
 
     for migration in MIGRATIONS {

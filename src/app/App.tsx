@@ -176,6 +176,17 @@ function App() {
     setClassOverviews((current) => [...current, createdClass]);
   }
 
+  function handleDataRestored() {
+    setSelectedClassId(null);
+    setSelectedGrade(null);
+    setAcademicYears([]);
+    setSelectedYearId(null);
+    setClassOverviews([]);
+    setSchoolDataError("");
+    setHasLoadedSchoolData(false);
+    setScreen("home");
+  }
+
   function handleUpdateClass(classId: number, updates: Partial<ClassOverview>) {
     setClassOverviews((current) =>
       current.map((classItem) =>
@@ -207,7 +218,7 @@ function App() {
     }
 
     if (screen === "backup") {
-      return <BackupPage />;
+      return <BackupPage onRestored={handleDataRestored} />;
     }
 
     if (screen === "settings") {
