@@ -102,7 +102,7 @@ export function StudentMakeupDialog({
               </div>
             ) : (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Tuần này chưa có lớp cùng khối, cùng thứ tự buổi để chọn học bù.
+                Không có buổi học bù phù hợp.
               </p>
             )}
           </div>

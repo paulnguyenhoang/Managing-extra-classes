@@ -83,7 +83,11 @@ pub fn run() {
             attendance::cancel_attendance_session,
             attendance::restore_attendance_session,
             attendance::create_class_makeup_session,
-            attendance::remove_class_makeup_session
+            attendance::remove_class_makeup_session,
+            attendance::list_student_makeup_options,
+            attendance::create_student_makeup_record,
+            attendance::remove_student_makeup_record,
+            attendance::set_receiving_makeup_attendance_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

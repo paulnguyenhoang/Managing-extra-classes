@@ -13,6 +13,97 @@ pub struct AttendanceWeekDto {
     sessions: Vec<AttendanceSessionDto>,
     upcoming_makeup_sessions: Vec<AttendanceSessionDto>,
     official_rows: Vec<AttendanceOfficialRowDto>,
+    receiving_makeup_rows: Vec<AttendanceReceivingMakeupRowDto>,
+    makeup_details: Vec<AttendanceMakeupDetailDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendanceReceivingMakeupRowDto {
+    makeup_record_id: i64,
+    student_id: i64,
+    original_membership_id: i64,
+    original_class_id: i64,
+    original_class_name: String,
+    original_session_id: i64,
+    original_session_date: String,
+    receiving_class_id: i64,
+    receiving_session_id: i64,
+    session_index_in_week: i64,
+    full_name: String,
+    school_class: String,
+    school: String,
+    parent_phone: String,
+    receiving_attendance_status: Option<String>,
+    note: Option<String>,
+}
+
+/// Thông tin học bù của học sinh chính thức (lớp gốc) để hiển thị helper text.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendanceMakeupDetailDto {
+    makeup_record_id: i64,
+    original_membership_id: i64,
+    original_session_id: i64,
+    receiving_class_id: i64,
+    receiving_class_name: String,
+    receiving_session_id: i64,
+    receiving_session_date: String,
+    receiving_start_time: String,
+    receiving_end_time: String,
+    receiving_attendance_status: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentMakeupOptionDto {
+    receiving_class_id: i64,
+    receiving_class_name: String,
+    receiving_session_id: i64,
+    receiving_session_date: String,
+    start_time: String,
+    end_time: String,
+    session_index_in_week: i64,
+    r#type: String,
+    status: String,
+    is_locked: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentMakeupOptionsDto {
+    student_id: i64,
+    membership_id: i64,
+    original_class_id: i64,
+    original_class_name: String,
+    original_session_id: i64,
+    original_session_date: String,
+    session_index_in_week: i64,
+    options: Vec<StudentMakeupOptionDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateStudentMakeupRecordRequest {
+    student_id: i64,
+    original_membership_id: i64,
+    original_session_id: i64,
+    receiving_session_id: i64,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveStudentMakeupRecordRequest {
+    original_session_id: i64,
+    original_membership_id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetReceivingMakeupStatusRequest {
+    makeup_record_id: i64,
+    status: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -96,11 +187,15 @@ pub fn get_attendance_week(
 
     database.with_connection_mut(|connection| {
         let class_range = load_class_range(connection, class_id)?;
-        materialize_regular_sessions(connection, class_id, &week_start, &class_range)?;
+        materialize_regular_sessions(connection, class_id, &week_start, &class_range, false)?;
         let week_end = sqlite_date(connection, &week_start, 6)?;
         let sessions = list_sessions_for_week(connection, class_id, &week_start, &week_end)?;
         let upcoming_makeup_sessions = list_upcoming_makeup_sessions(connection, class_id)?;
         let official_rows = list_attendance_rows(connection, class_id, &sessions)?;
+        let session_ids: Vec<i64> = sessions.iter().map(|session| session.id).collect();
+        let receiving_makeup_rows =
+            list_receiving_makeup_rows(connection, class_id, &session_ids)?;
+        let makeup_details = list_makeup_details(connection, class_id, &session_ids)?;
 
         Ok(AttendanceWeekDto {
             class_id,
@@ -108,6 +203,8 @@ pub fn get_attendance_week(
             sessions,
             upcoming_makeup_sessions,
             official_rows,
+            receiving_makeup_rows,
+            makeup_details,
         })
     })
 }
@@ -147,6 +244,16 @@ pub fn set_attendance_status(
             session.class_id,
             &session.session_date,
         )?;
+
+        // Đổi trạng thái trực tiếp (Học/Nghỉ/Chưa điểm danh) luôn gỡ liên kết học bù cũ —
+        // dòng học bù ở lớp nhận sẽ biến mất sau khi refresh.
+        transaction
+            .execute(
+                "DELETE FROM student_makeup_records
+                 WHERE original_session_id = ?1 AND original_membership_id = ?2",
+                params![request.session_id, request.membership_id],
+            )
+            .map_err(|error| format!("Không gỡ được liên kết học bù cũ: {error}"))?;
 
         match request.status {
             Some(status) => {
@@ -232,6 +339,7 @@ pub fn cancel_attendance_session(
             )
             .map_err(|error| format!("Không chuyển được buổi học sang nghỉ: {error}"))?;
         upsert_official_attendance(&transaction, &session, "absent")?;
+        clear_makeup_links_for_cancelled_session(&transaction, session_id)?;
         transaction
             .commit()
             .map_err(|error| format!("Không commit được buổi nghỉ: {error}"))?;
@@ -348,6 +456,7 @@ pub fn create_class_makeup_session(
             )
             .map_err(|error| format!("Không chuyển được buổi gốc sang nghỉ: {error}"))?;
         upsert_official_attendance(&transaction, &original, "absent")?;
+        clear_makeup_links_for_cancelled_session(&transaction, request.original_session_id)?;
         transaction
             .commit()
             .map_err(|error| format!("Không commit được buổi học bù: {error}"))?;
@@ -380,6 +489,28 @@ pub fn remove_class_makeup_session(
                 params![makeup_session_id],
             )
             .map_err(|error| format!("Không xóa được điểm danh của buổi học bù: {error}"))?;
+        // Buổi nhận không còn tồn tại: xóa các liên kết học bù trỏ về nó và trả ô gốc
+        // của học sinh liên quan về Chưa điểm danh.
+        transaction
+            .execute(
+                "DELETE FROM attendance_records
+                 WHERE status = 'makeup'
+                   AND (session_id, membership_id) IN (
+                     SELECT original_session_id, original_membership_id
+                     FROM student_makeup_records
+                     WHERE receiving_session_id = ?1
+                   )",
+                params![makeup_session_id],
+            )
+            .map_err(|error| {
+                format!("Không dọn được trạng thái học bù của buổi gốc liên quan: {error}")
+            })?;
+        transaction
+            .execute(
+                "DELETE FROM student_makeup_records WHERE receiving_session_id = ?1",
+                params![makeup_session_id],
+            )
+            .map_err(|error| format!("Không xóa được liên kết học bù trỏ tới buổi này: {error}"))?;
         transaction
             .execute(
                 "DELETE FROM attendance_sessions WHERE id = ?1",
@@ -466,10 +597,631 @@ pub fn mark_session_present(
                 .map_err(|error| format!("Không đánh dấu cả lớp đi học: {error}"))?;
         }
 
+        // Đánh dấu luôn các học sinh học bù đang nhận ở buổi này (quy tắc Phase 4.5).
+        transaction
+            .execute(
+                "UPDATE student_makeup_records
+                 SET receiving_attendance_status = 'present', updated_at = CURRENT_TIMESTAMP
+                 WHERE receiving_session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|error| format!("Không đánh dấu được học sinh học bù đi học: {error}"))?;
+
         transaction
             .commit()
             .map_err(|error| format!("Không commit được thao tác điểm danh cả lớp: {error}"))
     })
+}
+
+#[tauri::command]
+pub fn list_student_makeup_options(
+    database: tauri::State<'_, AppDatabase>,
+    class_id: i64,
+    original_session_id: i64,
+    membership_id: i64,
+    student_id: i64,
+) -> Result<StudentMakeupOptionsDto, String> {
+    database.with_connection_mut(|connection| {
+        let original = load_session_dto(connection, original_session_id)?;
+
+        if original.class_id != class_id {
+            return Err("Buổi gốc không thuộc lớp đang chọn.".to_string());
+        }
+        if original.r#type != "regular" {
+            return Err("Chỉ buổi học thường mới chọn được học bù theo học sinh.".to_string());
+        }
+        if original.status != "active" {
+            return Err("Buổi gốc đang nghỉ, không thể chọn học bù.".to_string());
+        }
+
+        validate_membership_for_session(
+            connection,
+            membership_id,
+            student_id,
+            class_id,
+            &original.session_date,
+        )?;
+
+        let (original_class_name, original_year_id, original_grade) =
+            load_class_meta(connection, class_id)?;
+
+        // Cùng tuần với buổi gốc.
+        let week_start = week_start_of_date(connection, &original.session_date)?;
+
+        // Các lớp nhận tiềm năng: khác lớp, cùng năm học, cùng khối, đang hoạt động.
+        let candidate_classes = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, name, start_month, end_month
+                     FROM classes
+                     WHERE id != ?1
+                       AND academic_year_id = ?2
+                       AND COALESCE(grade, 9) = ?3
+                       AND is_archived = 0
+                       AND status = 'active'",
+                )
+                .map_err(|error| format!("Không chuẩn bị được danh sách lớp nhận học bù: {error}"))?;
+            let rows = statement
+                .query_map(params![class_id, original_year_id, original_grade], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(|error| format!("Không đọc được danh sách lớp nhận học bù: {error}"))?;
+            collect_rows(rows, "Không parse được lớp nhận học bù")?
+        };
+
+        let mut options = Vec::new();
+
+        for (receiving_class_id, receiving_class_name, start_month, end_month) in candidate_classes
+        {
+            // Materialize buổi thường của tuần này cho lớp nhận (gồm cả buổi đã qua,
+            // vì học bù có thể ghi nhận cho quá khứ).
+            let class_range = ClassRange {
+                start_month,
+                end_month,
+            };
+            materialize_regular_sessions(
+                connection,
+                receiving_class_id,
+                &week_start,
+                &class_range,
+                true,
+            )?;
+
+            let week_end = sqlite_date(connection, &week_start, 6)?;
+            let mut statement = connection
+                .prepare(
+                    "SELECT id, session_date, start_time, end_time, session_index_in_week,
+                            type, status, is_locked
+                     FROM attendance_sessions
+                     WHERE class_id = ?1
+                       AND session_date BETWEEN ?2 AND ?3
+                       AND type = 'regular'
+                       AND status = 'active'
+                       AND session_index_in_week = ?4",
+                )
+                .map_err(|error| format!("Không chuẩn bị được buổi nhận học bù: {error}"))?;
+            let rows = statement
+                .query_map(
+                    params![
+                        receiving_class_id,
+                        week_start,
+                        week_end,
+                        original.session_index_in_week
+                    ],
+                    |row| {
+                        let is_locked: i64 = row.get(7)?;
+                        Ok(StudentMakeupOptionDto {
+                            receiving_class_id,
+                            receiving_class_name: receiving_class_name.clone(),
+                            receiving_session_id: row.get(0)?,
+                            receiving_session_date: row.get(1)?,
+                            start_time: row.get(2)?,
+                            end_time: row.get(3)?,
+                            session_index_in_week: row.get(4)?,
+                            r#type: row.get(5)?,
+                            status: row.get(6)?,
+                            is_locked: is_locked != 0,
+                        })
+                    },
+                )
+                .map_err(|error| format!("Không đọc được buổi nhận học bù: {error}"))?;
+            let class_options = collect_rows(rows, "Không parse được buổi nhận học bù")?;
+
+            for option in class_options {
+                // Bỏ qua nếu học sinh đã là thành viên chính thức của lớp nhận trong tháng đó.
+                let option_month = month_from_date(&option.receiving_session_date)?;
+                if is_official_member_in_month(
+                    connection,
+                    option.receiving_class_id,
+                    student_id,
+                    &option_month,
+                )? {
+                    continue;
+                }
+
+                options.push(option);
+            }
+        }
+
+        options.sort_by(|first, second| {
+            first
+                .receiving_session_date
+                .cmp(&second.receiving_session_date)
+                .then(first.start_time.cmp(&second.start_time))
+                .then(first.receiving_class_name.cmp(&second.receiving_class_name))
+        });
+
+        Ok(StudentMakeupOptionsDto {
+            student_id,
+            membership_id,
+            original_class_id: class_id,
+            original_class_name,
+            original_session_id,
+            original_session_date: original.session_date.clone(),
+            session_index_in_week: original.session_index_in_week,
+            options,
+        })
+    })
+}
+
+#[tauri::command]
+pub fn create_student_makeup_record(
+    database: tauri::State<'_, AppDatabase>,
+    request: CreateStudentMakeupRecordRequest,
+) -> Result<(), String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction học bù: {error}"))?;
+
+        let original = load_session_dto(&transaction, request.original_session_id)?;
+        let receiving = load_session_dto(&transaction, request.receiving_session_id)?;
+
+        if original.r#type != "regular" {
+            return Err("Chỉ buổi học thường mới chọn được học bù theo học sinh.".to_string());
+        }
+        if original.status != "active" {
+            return Err("Buổi gốc đang nghỉ, không thể chọn học bù.".to_string());
+        }
+        if original.is_locked {
+            return Err("Buổi gốc đang khóa. Vui lòng mở khóa trước khi chọn học bù.".to_string());
+        }
+        if receiving.status != "active" {
+            return Err("Buổi nhận học bù đang nghỉ.".to_string());
+        }
+        if receiving.r#type != "regular" {
+            return Err("Buổi nhận học bù phải là buổi học thường.".to_string());
+        }
+        if receiving.id == original.id {
+            return Err("Buổi nhận học bù phải khác buổi gốc.".to_string());
+        }
+        if receiving.class_id == original.class_id {
+            return Err("Buổi nhận học bù phải thuộc lớp khác.".to_string());
+        }
+        if receiving.session_index_in_week != original.session_index_in_week {
+            return Err("Buổi nhận học bù phải cùng thứ tự buổi trong tuần.".to_string());
+        }
+
+        validate_membership_for_session(
+            &transaction,
+            request.original_membership_id,
+            request.student_id,
+            original.class_id,
+            &original.session_date,
+        )?;
+
+        let (_, original_year_id, original_grade) =
+            load_class_meta(&transaction, original.class_id)?;
+        let (_, receiving_year_id, receiving_grade) =
+            load_class_meta(&transaction, receiving.class_id)?;
+
+        if original_year_id != receiving_year_id {
+            return Err("Lớp nhận học bù phải cùng năm học với lớp gốc.".to_string());
+        }
+        if original_grade != receiving_grade {
+            return Err("Lớp nhận học bù phải cùng khối với lớp gốc.".to_string());
+        }
+        ensure_class_active(&transaction, receiving.class_id)?;
+
+        let receiving_month = month_from_date(&receiving.session_date)?;
+        if is_official_member_in_month(
+            &transaction,
+            receiving.class_id,
+            request.student_id,
+            &receiving_month,
+        )? {
+            return Err(
+                "Học sinh đã là thành viên chính thức của lớp nhận trong tháng này.".to_string(),
+            );
+        }
+
+        // Giữ trạng thái ở lớp nhận nếu đổi lại đúng buổi nhận cũ; đổi buổi khác thì reset.
+        let previous: Option<(i64, Option<String>)> = transaction
+            .query_row(
+                "SELECT receiving_session_id, receiving_attendance_status
+                 FROM student_makeup_records
+                 WHERE student_id = ?1 AND original_session_id = ?2",
+                params![request.student_id, request.original_session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được liên kết học bù cũ: {error}"))?;
+        let preserved_status = match &previous {
+            Some((previous_receiving_id, status))
+                if *previous_receiving_id == request.receiving_session_id =>
+            {
+                status.clone()
+            }
+            _ => None,
+        };
+
+        transaction
+            .execute(
+                "INSERT INTO attendance_records
+                 (session_id, membership_id, student_id, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 'makeup', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 ON CONFLICT(session_id, membership_id) DO UPDATE SET
+                   student_id = excluded.student_id,
+                   status = 'makeup',
+                   updated_at = CURRENT_TIMESTAMP",
+                params![
+                    request.original_session_id,
+                    request.original_membership_id,
+                    request.student_id
+                ],
+            )
+            .map_err(|error| format!("Không lưu được trạng thái học bù ở buổi gốc: {error}"))?;
+
+        transaction
+            .execute(
+                "INSERT INTO student_makeup_records
+                 (student_id, original_membership_id, original_class_id, original_session_id,
+                  receiving_class_id, receiving_session_id, session_index_in_week,
+                  receiving_attendance_status, note, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 ON CONFLICT(student_id, original_session_id) DO UPDATE SET
+                   original_membership_id = excluded.original_membership_id,
+                   original_class_id = excluded.original_class_id,
+                   receiving_class_id = excluded.receiving_class_id,
+                   receiving_session_id = excluded.receiving_session_id,
+                   session_index_in_week = excluded.session_index_in_week,
+                   receiving_attendance_status = excluded.receiving_attendance_status,
+                   note = excluded.note,
+                   updated_at = CURRENT_TIMESTAMP",
+                params![
+                    request.student_id,
+                    request.original_membership_id,
+                    original.class_id,
+                    request.original_session_id,
+                    receiving.class_id,
+                    request.receiving_session_id,
+                    original.session_index_in_week,
+                    preserved_status,
+                    normalize_optional_text(request.note.as_deref())
+                ],
+            )
+            .map_err(|error| format!("Không lưu được liên kết học bù: {error}"))?;
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được học bù theo học sinh: {error}"))
+    })
+}
+
+#[tauri::command]
+pub fn remove_student_makeup_record(
+    database: tauri::State<'_, AppDatabase>,
+    request: RemoveStudentMakeupRecordRequest,
+) -> Result<(), String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction hủy học bù: {error}"))?;
+
+        let deleted = transaction
+            .execute(
+                "DELETE FROM student_makeup_records
+                 WHERE original_session_id = ?1 AND original_membership_id = ?2",
+                params![request.original_session_id, request.original_membership_id],
+            )
+            .map_err(|error| format!("Không xóa được liên kết học bù: {error}"))?;
+
+        if deleted == 0 {
+            return Err("Không tìm thấy liên kết học bù của học sinh này.".to_string());
+        }
+
+        // Ô gốc trở về Chưa điểm danh.
+        transaction
+            .execute(
+                "DELETE FROM attendance_records
+                 WHERE session_id = ?1 AND membership_id = ?2 AND status = 'makeup'",
+                params![request.original_session_id, request.original_membership_id],
+            )
+            .map_err(|error| format!("Không dọn được trạng thái học bù ở buổi gốc: {error}"))?;
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được hủy học bù: {error}"))
+    })
+}
+
+#[tauri::command]
+pub fn set_receiving_makeup_attendance_status(
+    database: tauri::State<'_, AppDatabase>,
+    request: SetReceivingMakeupStatusRequest,
+) -> Result<(), String> {
+    if let Some(status) = request.status.as_deref() {
+        if status != "present" && status != "absent" {
+            return Err("Trạng thái của học sinh học bù chỉ có thể là Học hoặc Nghỉ.".to_string());
+        }
+    }
+
+    database.with_connection_mut(|connection| {
+        let receiving_session_id: i64 = connection
+            .query_row(
+                "SELECT receiving_session_id FROM student_makeup_records WHERE id = ?1",
+                params![request.makeup_record_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được liên kết học bù: {error}"))?
+            .ok_or_else(|| "Không tìm thấy liên kết học bù.".to_string())?;
+
+        let receiving = load_session_dto(connection, receiving_session_id)?;
+
+        if receiving.status != "active" {
+            return Err("Buổi nhận học bù đang nghỉ, không thể điểm danh.".to_string());
+        }
+        if receiving.is_locked {
+            return Err("Buổi nhận học bù đang khóa. Vui lòng mở khóa trước.".to_string());
+        }
+
+        connection
+            .execute(
+                "UPDATE student_makeup_records
+                 SET receiving_attendance_status = ?1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?2",
+                params![request.status, request.makeup_record_id],
+            )
+            .map_err(|error| format!("Không lưu được điểm danh học sinh học bù: {error}"))?;
+
+        Ok(())
+    })
+}
+
+/// Buổi bị hủy: gỡ học bù xuất phát từ buổi này (ô gốc đã bị ghi đè thành Nghỉ)
+/// và đánh Nghỉ cho các học sinh học bù đang nhận ở buổi này.
+fn clear_makeup_links_for_cancelled_session(
+    connection: &Connection,
+    session_id: i64,
+) -> Result<(), String> {
+    connection
+        .execute(
+            "DELETE FROM student_makeup_records WHERE original_session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| format!("Không gỡ được liên kết học bù của buổi nghỉ: {error}"))?;
+
+    connection
+        .execute(
+            "UPDATE student_makeup_records
+             SET receiving_attendance_status = 'absent', updated_at = CURRENT_TIMESTAMP
+             WHERE receiving_session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| format!("Không đánh dấu Nghỉ được học sinh học bù của buổi nghỉ: {error}"))?;
+
+    Ok(())
+}
+
+fn list_receiving_makeup_rows(
+    connection: &Connection,
+    class_id: i64,
+    session_ids: &[i64],
+) -> Result<Vec<AttendanceReceivingMakeupRowDto>, String> {
+    if session_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let placeholders = session_ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT
+           smr.id,
+           smr.student_id,
+           smr.original_membership_id,
+           smr.original_class_id,
+           oc.name,
+           smr.original_session_id,
+           os.session_date,
+           smr.receiving_class_id,
+           smr.receiving_session_id,
+           smr.session_index_in_week,
+           s.full_name,
+           s.school_class,
+           s.school,
+           s.parent_phone,
+           smr.receiving_attendance_status,
+           smr.note
+         FROM student_makeup_records smr
+         JOIN students s ON s.id = smr.student_id
+         JOIN classes oc ON oc.id = smr.original_class_id
+         JOIN attendance_sessions os ON os.id = smr.original_session_id
+         WHERE smr.receiving_class_id = ?1
+           AND smr.receiving_session_id IN ({placeholders})
+         ORDER BY s.full_name COLLATE NOCASE ASC, smr.id ASC"
+    );
+
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("Không chuẩn bị được danh sách học sinh học bù: {error}"))?;
+    let rows = statement
+        .query_map(params![class_id], |row| {
+            Ok(AttendanceReceivingMakeupRowDto {
+                makeup_record_id: row.get(0)?,
+                student_id: row.get(1)?,
+                original_membership_id: row.get(2)?,
+                original_class_id: row.get(3)?,
+                original_class_name: row.get(4)?,
+                original_session_id: row.get(5)?,
+                original_session_date: row.get(6)?,
+                receiving_class_id: row.get(7)?,
+                receiving_session_id: row.get(8)?,
+                session_index_in_week: row.get(9)?,
+                full_name: row.get(10)?,
+                school_class: row.get(11)?,
+                school: row.get(12)?,
+                parent_phone: row.get(13)?,
+                receiving_attendance_status: row.get(14)?,
+                note: row.get(15)?,
+            })
+        })
+        .map_err(|error| format!("Không đọc được danh sách học sinh học bù: {error}"))?;
+
+    collect_rows(rows, "Không parse được học sinh học bù")
+}
+
+fn list_makeup_details(
+    connection: &Connection,
+    class_id: i64,
+    session_ids: &[i64],
+) -> Result<Vec<AttendanceMakeupDetailDto>, String> {
+    if session_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let placeholders = session_ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT
+           smr.id,
+           smr.original_membership_id,
+           smr.original_session_id,
+           smr.receiving_class_id,
+           rc.name,
+           smr.receiving_session_id,
+           rs.session_date,
+           rs.start_time,
+           rs.end_time,
+           smr.receiving_attendance_status
+         FROM student_makeup_records smr
+         JOIN classes rc ON rc.id = smr.receiving_class_id
+         JOIN attendance_sessions rs ON rs.id = smr.receiving_session_id
+         WHERE smr.original_class_id = ?1
+           AND smr.original_session_id IN ({placeholders})"
+    );
+
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("Không chuẩn bị được chi tiết học bù: {error}"))?;
+    let rows = statement
+        .query_map(params![class_id], |row| {
+            Ok(AttendanceMakeupDetailDto {
+                makeup_record_id: row.get(0)?,
+                original_membership_id: row.get(1)?,
+                original_session_id: row.get(2)?,
+                receiving_class_id: row.get(3)?,
+                receiving_class_name: row.get(4)?,
+                receiving_session_id: row.get(5)?,
+                receiving_session_date: row.get(6)?,
+                receiving_start_time: row.get(7)?,
+                receiving_end_time: row.get(8)?,
+                receiving_attendance_status: row.get(9)?,
+            })
+        })
+        .map_err(|error| format!("Không đọc được chi tiết học bù: {error}"))?;
+
+    collect_rows(rows, "Không parse được chi tiết học bù")
+}
+
+fn load_class_meta(
+    connection: &Connection,
+    class_id: i64,
+) -> Result<(String, i64, i64), String> {
+    connection
+        .query_row(
+            "SELECT name, academic_year_id, COALESCE(grade, 9)
+             FROM classes
+             WHERE id = ?1 AND is_archived = 0",
+            params![class_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được thông tin lớp: {error}"))?
+        .ok_or_else(|| "Không tìm thấy lớp học.".to_string())
+}
+
+fn ensure_class_active(connection: &Connection, class_id: i64) -> Result<(), String> {
+    let status: Option<String> = connection
+        .query_row(
+            "SELECT status FROM classes WHERE id = ?1 AND is_archived = 0",
+            params![class_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được trạng thái lớp: {error}"))?;
+
+    match status.as_deref() {
+        Some("active") => Ok(()),
+        Some(_) => Err("Lớp nhận học bù đã kết thúc.".to_string()),
+        None => Err("Không tìm thấy lớp nhận học bù.".to_string()),
+    }
+}
+
+fn is_official_member_in_month(
+    connection: &Connection,
+    class_id: i64,
+    student_id: i64,
+    month: &str,
+) -> Result<bool, String> {
+    let exists = connection
+        .query_row(
+            "SELECT cm.id
+             FROM class_memberships cm
+             JOIN students s ON s.id = cm.student_id
+             WHERE cm.class_id = ?1
+               AND cm.student_id = ?2
+               AND s.is_archived = 0
+               AND cm.joined_month <= ?3
+               AND (cm.left_month IS NULL OR ?3 < cm.left_month)
+             LIMIT 1",
+            params![class_id, student_id, month],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được thành viên lớp nhận: {error}"))?;
+
+    Ok(exists.is_some())
+}
+
+/// Thứ 2 của tuần chứa ngày đã cho.
+fn week_start_of_date(connection: &Connection, date: &str) -> Result<String, String> {
+    let weekday: i64 = connection
+        .query_row(
+            "SELECT CAST(strftime('%w', ?1) AS INTEGER)",
+            params![date],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Không tính được tuần của buổi học: {error}"))?;
+    // %w: 0 = Chủ nhật ... 6 = Thứ 7; lùi về Thứ 2 đầu tuần.
+    let offset = if weekday == 0 { -6 } else { 1 - weekday };
+    let modifier = format!("{offset} days");
+    connection
+        .query_row("SELECT date(?1, ?2)", params![date, modifier], |row| {
+            row.get(0)
+        })
+        .map_err(|error| format!("Không tính được ngày đầu tuần: {error}"))
 }
 
 fn materialize_regular_sessions(
@@ -477,6 +1229,7 @@ fn materialize_regular_sessions(
     class_id: i64,
     week_start: &str,
     class_range: &ClassRange,
+    include_past: bool,
 ) -> Result<(), String> {
     let schedules = list_schedules(connection, class_id)?;
     let today = current_local_date(connection)?;
@@ -486,7 +1239,7 @@ fn materialize_regular_sessions(
         let session_date = sqlite_date(connection, week_start, offset)?;
         let session_month = month_from_date(&session_date)?;
 
-        if session_date.as_str() < today.as_str() {
+        if !include_past && session_date.as_str() < today.as_str() {
             continue;
         }
 
@@ -1097,7 +1850,7 @@ fn validate_attendance_status(status: &str) -> Result<(), String> {
     match status {
         "present" | "absent" => Ok(()),
         "makeup" => Err(
-            "Học bù theo học sinh sẽ được lưu ở Phase 7C; Phase 7A chỉ lưu Có học/Nghỉ."
+            "Trạng thái Học bù cần chọn buổi nhận học bù. Vui lòng dùng chức năng chọn lớp học bù."
                 .to_string(),
         ),
         _ => Err("Trạng thái điểm danh không hợp lệ.".to_string()),

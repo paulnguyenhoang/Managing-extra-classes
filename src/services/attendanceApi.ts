@@ -4,7 +4,12 @@ import type {
   AttendanceSessionDto,
   AttendanceWeekDto,
   CreateClassMakeupSessionInput,
+  CreateStudentMakeupRecordInput,
+  ListStudentMakeupOptionsInput,
+  RemoveStudentMakeupRecordInput,
   SetAttendanceStatusInput,
+  SetReceivingMakeupStatusInput,
+  StudentMakeupOptionsDto,
 } from "@/types/attendance";
 
 export function getAttendanceWeek(classId: number, weekStart: string) {
@@ -39,4 +44,20 @@ export function createClassMakeupSession(input: CreateClassMakeupSessionInput) {
 
 export function removeClassMakeupSession(makeupSessionId: number) {
   return invoke<AttendanceSessionDto>("remove_class_makeup_session", { makeupSessionId });
+}
+
+export function listStudentMakeupOptions(input: ListStudentMakeupOptionsInput) {
+  return invoke<StudentMakeupOptionsDto>("list_student_makeup_options", { ...input });
+}
+
+export function createStudentMakeupRecord(input: CreateStudentMakeupRecordInput) {
+  return invoke<void>("create_student_makeup_record", { request: input });
+}
+
+export function removeStudentMakeupRecord(input: RemoveStudentMakeupRecordInput) {
+  return invoke<void>("remove_student_makeup_record", { request: input });
+}
+
+export function setReceivingMakeupAttendanceStatus(input: SetReceivingMakeupStatusInput) {
+  return invoke<void>("set_receiving_makeup_attendance_status", { request: input });
 }
