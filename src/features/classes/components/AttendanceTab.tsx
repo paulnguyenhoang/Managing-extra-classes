@@ -38,7 +38,6 @@ import {
   addDays,
   formatDateRange,
   formatDayMonth,
-  getMakeupSessionInputError,
   getRegularSessionsForWeek,
   getSessionOrderInWeek,
   getWeekEnd,
@@ -58,8 +57,12 @@ import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRo
 import { attendanceStatusLabel } from "@/lib/format";
 import { currentMonthKey, isValidMonthKey } from "@/lib/months";
 import {
+  cancelAttendanceSession,
+  createClassMakeupSession,
   getAttendanceWeek,
   markSessionPresent,
+  removeClassMakeupSession,
+  restoreAttendanceSession,
   setAttendanceStatus as saveAttendanceStatus,
   toggleAttendanceLock,
 } from "@/services/attendanceApi";
@@ -205,16 +208,18 @@ function SessionHeader({
         {formatDayMonth(session.date)}
       </div>
       <div className="flex flex-wrap justify-center gap-1">
-        <Button
-          type="button"
-          size="xs"
-          variant={isUnlocked ? "default" : "ghost"}
-          className="h-6 gap-1 px-2 text-xs"
-          onClick={onToggleLock}
-        >
-          {isUnlocked ? <Lock className="size-3" /> : <Unlock className="size-3" />}
-          {isUnlocked ? "Khóa" : "Mở khóa"}
-        </Button>
+        {!isCancelled ? (
+          <Button
+            type="button"
+            size="xs"
+            variant={isUnlocked ? "default" : "ghost"}
+            className="h-6 gap-1 px-2 text-xs"
+            onClick={onToggleLock}
+          >
+            {isUnlocked ? <Lock className="size-3" /> : <Unlock className="size-3" />}
+            {isUnlocked ? "Khóa" : "Mở khóa"}
+          </Button>
+        ) : null}
         {session.isMakeup ? (
           <Button
             type="button"
@@ -395,20 +400,11 @@ export function AttendanceTab({
   const classIdKey = String(classId);
   const currentClassName = className;
   const {
-    allMakeupSessions,
-    cancelledSessionIds,
-    unlockedSessionIds,
     studentMakeupRecords,
     getStatus,
     setAttendanceStatus,
     getMakeupStudentStatus,
     setMakeupStudentStatus,
-    markSessionForStudents,
-    cancelSession,
-    restoreCancelledSession,
-    toggleSessionLock,
-    addMakeupSession,
-    removeMakeupSession,
     addStudentMakeupRecord,
     removeStudentMakeupRecordForOriginal,
   } = useMockAttendance(weekStart, [], classIdKey);
@@ -423,32 +419,28 @@ export function AttendanceTab({
     () => (attendanceWeek?.sessions ?? []).map(mapAttendanceSessionDtoToWeeklySession),
     [attendanceWeek],
   );
-  const localMakeupSessions = useMemo(
-    () =>
-      allMakeupSessions.filter(
-        (session) =>
-          session.classId === classIdKey &&
-          session.isMakeup &&
-          isSameDay(getWeekStart(session.date), weekStart),
-      ),
-    [allMakeupSessions, classIdKey, weekStart],
-  );
   const sessions = useMemo(
     () =>
-      [...dbSessions, ...localMakeupSessions].sort((first, second) => {
+      [...dbSessions].sort((first, second) => {
         const dateDiff = first.date.getTime() - second.date.getTime();
         return dateDiff || first.startTime.localeCompare(second.startTime);
       }),
-    [dbSessions, localMakeupSessions],
+    [dbSessions],
   );
   const students = useMemo(
     () => attendanceWeek?.officialRows.map(mapAttendanceRowToRosterItem) ?? [],
     [attendanceWeek],
   );
-  const todaySession = sessions.find((session) => isSameDay(session.date, today));
+  const todaySessions = sessions.filter((session) => isSameDay(session.date, today));
+  const todaySession =
+    todaySessions.find(
+      (session) => !isSessionCancelled(session) && isSessionUnlocked(session),
+    ) ??
+    todaySessions.find((session) => !isSessionCancelled(session)) ??
+    todaySessions[0];
   const isSelectedWeekCurrent = isSameDay(weekStart, getWeekStart(today));
   const isTodaySessionCancelled = todaySession ? isSessionCancelled(todaySession) : false;
-  const isTodaySessionUnlocked = todaySession ? isSessionUnlocked(todaySession, unlockedSessionIds) : false;
+  const isTodaySessionUnlocked = todaySession ? isSessionUnlocked(todaySession) : false;
   const hasEligibleStudentToday = todaySession
     ? students.some((student) => isStudentEligibleForSession(student, todaySession))
     : false;
@@ -484,15 +476,11 @@ export function AttendanceTab({
   );
   const upcomingMakeupSessions = useMemo(
     () =>
-      allMakeupSessions
-        .filter(
-          (session) =>
-            session.classId === classIdKey &&
-            session.isMakeup &&
-            getSessionEndDateTime(session).getTime() >= Date.now(),
-        )
+      (attendanceWeek?.upcomingMakeupSessions ?? [])
+        .map(mapAttendanceSessionDtoToWeeklySession)
+        .filter((session) => getSessionEndDateTime(session).getTime() >= Date.now())
         .sort((first, second) => first.date.getTime() - second.date.getTime()),
-    [allMakeupSessions, classIdKey],
+    [attendanceWeek],
   );
 
   useEffect(() => {
@@ -514,7 +502,7 @@ export function AttendanceTab({
       } catch (error) {
         if (!cancelled) {
           setAttendanceErrorMessage(
-            error instanceof Error ? error.message : "Không tải được dữ liệu điểm danh.",
+            getErrorMessage(error, "Không tải được dữ liệu điểm danh."),
           );
           setAttendanceWeek(null);
         }
@@ -575,64 +563,42 @@ export function AttendanceTab({
     setWeekPickerOpen(false);
   }
 
-  function getMakeupRecordIdsForSession(sessionId: string) {
-    return studentMakeupRecords
-      .filter(
-        (record) =>
-          record.receivingClassId === classIdKey && record.receivingSessionId === sessionId,
-      )
-      .map((record) => record.id);
-  }
+  async function confirmCancelToggle() {
+    if (!pendingCancelSession?.dbId) {
+      return;
+    }
 
-  function markWholeSessionAbsent(sessionId: string) {
-    // Học sinh đang "Học bù" ở buổi này phải gỡ liên kết học bù trước khi ghi đè thành Nghỉ.
-    const eligibleStudents = students.filter((student) =>
-      isStudentEligibleForSessionId(student, sessionId, sessions),
-    );
-
-    eligibleStudents.forEach((student) => {
-      const studentKey = getRosterStudentKey(student);
-
-      if (getStatus(sessionId, studentKey) === "makeup") {
-        removeStudentMakeupRecordForOriginal({
-          studentId: studentKey,
-          originalClassId: classIdKey,
-          originalSessionId: sessionId,
-        });
+    setActionErrorMessage(null);
+    try {
+      if (isSessionCancelled(pendingCancelSession)) {
+        await restoreAttendanceSession(pendingCancelSession.dbId);
+      } else {
+        await cancelAttendanceSession(pendingCancelSession.dbId);
       }
-    });
-
-    markSessionForStudents(
-      sessionId,
-      eligibleStudents.map(getRosterStudentKey),
-      "absent",
-      getMakeupRecordIdsForSession(sessionId),
-    );
+      await refreshAttendanceWeek();
+      setPendingCancelSession(null);
+    } catch (error) {
+      setActionErrorMessage(
+        getErrorMessage(error, "Không cập nhật được trạng thái buổi học."),
+      );
+    }
   }
 
-  function confirmCancelToggle() {
-    if (!pendingCancelSession) {
+  async function confirmRemoveMakeupSession() {
+    if (!pendingRemoveMakeupSession?.dbId) {
       return;
     }
 
-    const isCancelled = cancelledSessionIds.includes(pendingCancelSession.id);
-    if (isCancelled) {
-      restoreCancelledSession(pendingCancelSession.id);
-    } else {
-      markWholeSessionAbsent(pendingCancelSession.id);
-      cancelSession(pendingCancelSession.id);
+    setActionErrorMessage(null);
+    try {
+      await removeClassMakeupSession(pendingRemoveMakeupSession.dbId);
+      await refreshAttendanceWeek();
+      setPendingRemoveMakeupSession(null);
+    } catch (error) {
+      setActionErrorMessage(
+        getErrorMessage(error, "Không hủy được buổi học bù."),
+      );
     }
-
-    setPendingCancelSession(null);
-  }
-
-  function confirmRemoveMakeupSession() {
-    if (!pendingRemoveMakeupSession) {
-      return;
-    }
-
-    removeMakeupSession(pendingRemoveMakeupSession.id);
-    setPendingRemoveMakeupSession(null);
   }
 
   async function markTodayPresent() {
@@ -647,7 +613,7 @@ export function AttendanceTab({
       await refreshAttendanceWeek();
     } catch (error) {
       setActionErrorMessage(
-        error instanceof Error ? error.message : "Không đánh dấu được cả lớp đi học.",
+        getErrorMessage(error, "Không đánh dấu được cả lớp đi học."),
       );
     }
   }
@@ -667,9 +633,28 @@ export function AttendanceTab({
     setWeekPickerOpen(false);
   }
 
-  function tryAddMakeupSession(input: MakeupSessionInput): string | null {
-    void input;
-    return "Học bù cả lớp sẽ được lưu vào SQLite ở Phase 7B. Phase 7A chỉ lưu buổi học thường.";
+  async function tryAddMakeupSession(input: MakeupSessionInput): Promise<string | null> {
+    const originalSession = sessions.find(
+      (session) => session.id === input.makeupForSessionId,
+    );
+    if (!originalSession?.dbId) {
+      return "Không tìm thấy buổi học gốc trong database.";
+    }
+
+    setActionErrorMessage(null);
+    try {
+      await createClassMakeupSession({
+        classId,
+        originalSessionId: originalSession.dbId,
+        makeupDate: input.date,
+        startTime: input.startTime,
+        endTime: input.endTime,
+      });
+      await refreshAttendanceWeek();
+      return null;
+    } catch (error) {
+      return getErrorMessage(error, "Không tạo được buổi học bù.");
+    }
   }
 
   async function handleOfficialStatusSelect(
@@ -723,7 +708,7 @@ export function AttendanceTab({
         await refreshAttendanceWeek();
       } catch (error) {
         setActionErrorMessage(
-          error instanceof Error ? error.message : "Không lưu được điểm danh.",
+          getErrorMessage(error, "Không lưu được điểm danh."),
         );
       }
       return;
@@ -785,7 +770,7 @@ export function AttendanceTab({
     setActionErrorMessage(null);
 
     if (!session.dbId) {
-      toggleSessionLock(session.id);
+      setActionErrorMessage("Không tìm thấy buổi học trong database.");
       return;
     }
 
@@ -794,7 +779,7 @@ export function AttendanceTab({
       await refreshAttendanceWeek();
     } catch (error) {
       setActionErrorMessage(
-        error instanceof Error ? error.message : "Không cập nhật được khóa điểm danh.",
+        getErrorMessage(error, "Không cập nhật được khóa điểm danh."),
       );
     }
   }
@@ -927,16 +912,8 @@ export function AttendanceTab({
                     session={session}
                     today={today}
                     isCancelled={isSessionCancelled(session)}
-                    isUnlocked={isSessionUnlocked(session, unlockedSessionIds)}
-                    onRequestCancelToggle={() => {
-                      if (session.dbId) {
-                        setActionErrorMessage(
-                          "Nghỉ buổi học sẽ được lưu vào SQLite ở Phase 7B.",
-                        );
-                        return;
-                      }
-                      setPendingCancelSession(session);
-                    }}
+                    isUnlocked={isSessionUnlocked(session)}
+                    onRequestCancelToggle={() => setPendingCancelSession(session)}
                     onRequestRemoveMakeup={() => setPendingRemoveMakeupSession(session)}
                     onToggleLock={() => void handleToggleSessionLock(session)}
                   />
@@ -955,7 +932,7 @@ export function AttendanceTab({
                   {sessions.map((session) => {
                   const isEligible = isStudentEligibleForSession(student, session);
                   const isCancelled = isSessionCancelled(session);
-                  const isUnlocked = isSessionUnlocked(session, unlockedSessionIds);
+                  const isUnlocked = isSessionUnlocked(session);
                   const status = getAttendanceCellStatus(student, session, getStatus);
                   const makeupRecord =
                     status === "makeup"
@@ -1030,7 +1007,7 @@ export function AttendanceTab({
                       {sessions.map((session) => {
                         const isTargetSession = session.id === record.receivingSessionId;
                         const isCancelled = isSessionCancelled(session);
-                        const isUnlocked = isSessionUnlocked(session, unlockedSessionIds);
+                        const isUnlocked = isSessionUnlocked(session);
                         const status = getMakeupStudentStatus(session.id, record.id);
 
                         return (
@@ -1079,13 +1056,13 @@ export function AttendanceTab({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {pendingCancelSession && cancelledSessionIds.includes(pendingCancelSession.id)
+              {pendingCancelSession && isSessionCancelled(pendingCancelSession)
                 ? "Hủy trạng thái nghỉ?"
                 : "Xác nhận lớp nghỉ?"}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {pendingCancelSession && cancelledSessionIds.includes(pendingCancelSession.id)
+            {pendingCancelSession && isSessionCancelled(pendingCancelSession)
               ? `Hủy nghỉ buổi ${weekdayLabel(pendingCancelSession.date)} ${formatDayMonth(
                   pendingCancelSession.date,
                 )}? Buổi học sẽ trở lại bình thường và được mở khóa; trạng thái Nghỉ của học sinh được giữ nguyên để thầy chỉnh lại từng em.`
@@ -1101,7 +1078,7 @@ export function AttendanceTab({
                 Hủy
               </Button>
             </DialogClose>
-            <Button type="button" onClick={confirmCancelToggle}>
+            <Button type="button" onClick={() => void confirmCancelToggle()}>
               Xác nhận
             </Button>
           </DialogFooter>
@@ -1124,7 +1101,7 @@ export function AttendanceTab({
             {pendingRemoveMakeupSession
               ? `Hủy buổi học bù ${weekdayLabel(pendingRemoveMakeupSession.date)} ${formatDayMonth(
                   pendingRemoveMakeupSession.date,
-                )}? Buổi gốc sẽ được mở lại như buổi học bình thường.`
+                )}? Buổi gốc sẽ được mở lại như buổi học bình thường. Điểm danh Nghỉ đã ghi ở buổi gốc vẫn được giữ để thầy kiểm tra và chỉnh lại.`
               : ""}
           </p>
           <DialogFooter>
@@ -1133,7 +1110,7 @@ export function AttendanceTab({
                 Không
               </Button>
             </DialogClose>
-            <Button type="button" onClick={confirmRemoveMakeupSession}>
+            <Button type="button" onClick={() => void confirmRemoveMakeupSession()}>
               Xác nhận hủy
             </Button>
           </DialogFooter>
@@ -1168,6 +1145,14 @@ function DateToneLegendItem({ className, label }: { className: string; label: st
 
 function getRosterStudentKey(student: ClassStudentRosterItem) {
   return String(student.membershipId);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return error instanceof Error ? error.message : fallback;
 }
 
 function mapAttendanceSessionDtoToWeeklySession(
@@ -1231,12 +1216,8 @@ function isSessionCancelled(session: WeeklySession) {
   return session.status === "cancelled";
 }
 
-function isSessionUnlocked(session: WeeklySession, unlockedSessionIds: string[]) {
-  if (session.dbId) {
-    return !session.isLocked;
-  }
-
-  return unlockedSessionIds.includes(session.id);
+function isSessionUnlocked(session: WeeklySession) {
+  return Boolean(session.dbId) && !session.isLocked;
 }
 
 function isStudentEligibleForSession(student: ClassStudentRosterItem, session: WeeklySession) {
@@ -1246,15 +1227,6 @@ function isStudentEligibleForSession(student: ClassStudentRosterItem, session: W
     student.joinedMonth <= sessionMonth &&
     (student.leftMonth === null || sessionMonth < student.leftMonth)
   );
-}
-
-function isStudentEligibleForSessionId(
-  student: ClassStudentRosterItem,
-  sessionId: string,
-  sessions: WeeklySession[],
-) {
-  const session = sessions.find((item) => item.id === sessionId);
-  return session ? isStudentEligibleForSession(student, session) : false;
 }
 
 function parseMonthStart(month: string) {

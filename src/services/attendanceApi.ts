@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AttendanceSessionDto,
   AttendanceWeekDto,
+  CreateClassMakeupSessionInput,
   SetAttendanceStatusInput,
 } from "@/types/attendance";
 
@@ -22,4 +23,20 @@ export function toggleAttendanceLock(sessionId: number, isLocked: boolean) {
 
 export function markSessionPresent(sessionId: number) {
   return invoke<void>("mark_session_present", { sessionId });
+}
+
+export function cancelAttendanceSession(sessionId: number) {
+  return invoke<AttendanceSessionDto>("cancel_attendance_session", { sessionId });
+}
+
+export function restoreAttendanceSession(sessionId: number) {
+  return invoke<AttendanceSessionDto>("restore_attendance_session", { sessionId });
+}
+
+export function createClassMakeupSession(input: CreateClassMakeupSessionInput) {
+  return invoke<AttendanceSessionDto>("create_class_makeup_session", { request: input });
+}
+
+export function removeClassMakeupSession(makeupSessionId: number) {
+  return invoke<AttendanceSessionDto>("remove_class_makeup_session", { makeupSessionId });
 }

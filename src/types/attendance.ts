@@ -55,6 +55,7 @@ export type AttendanceWeekDto = {
   classId: number;
   weekStart: string;
   sessions: AttendanceSessionDto[];
+  upcomingMakeupSessions: AttendanceSessionDto[];
   officialRows: AttendanceOfficialRowDto[];
 };
 
@@ -63,4 +64,13 @@ export type SetAttendanceStatusInput = {
   membershipId: number;
   studentId: number;
   status: PersistedAttendanceStatus | null;
+};
+
+export type CreateClassMakeupSessionInput = {
+  classId: number;
+  originalSessionId: number;
+  makeupDate: string;
+  startTime: string;
+  endTime: string;
+  note?: string;
 };

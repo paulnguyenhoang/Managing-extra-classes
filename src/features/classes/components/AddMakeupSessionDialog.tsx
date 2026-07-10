@@ -33,7 +33,7 @@ type AddMakeupSessionDialogProps = {
   classId: number;
   sessions: WeeklySession[];
   existingClasses: ClassOverview[];
-  onAdd: (session: MakeupSessionInput) => string | null;
+  onAdd: (session: MakeupSessionInput) => Promise<string | null>;
 };
 
 const initialForm = {
@@ -52,8 +52,9 @@ export function AddMakeupSessionDialog({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const regularSessions = useMemo(
-    () => sessions.filter((session) => !session.isMakeup),
+    () => sessions.filter((session) => !session.isMakeup && session.status !== "cancelled"),
     [sessions],
   );
   const timeConflict = useMemo(() => {
@@ -81,10 +82,11 @@ export function AddMakeupSessionDialog({
     if (nextOpen) {
       setForm(initialForm);
       setErrorMessage("");
+      setIsSubmitting(false);
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!isValidTimeRange(form.startTime, form.endTime)) {
@@ -106,13 +108,15 @@ export function AddMakeupSessionDialog({
       }
     }
 
-    const error = onAdd({
+    setIsSubmitting(true);
+    const error = await onAdd({
       classId: String(classId),
       date: form.date,
       startTime: form.startTime || "18:00",
       endTime: form.endTime || "20:00",
       makeupForSessionId: form.makeupForSessionId,
     });
+    setIsSubmitting(false);
 
     if (error) {
       setErrorMessage(error);
@@ -143,6 +147,7 @@ export function AddMakeupSessionDialog({
                 id="makeup-date"
                 type="date"
                 min={toDateKey(addDays(new Date(), 1))}
+                required
                 value={form.date}
                 onChange={(event) => updateField("date", event.target.value)}
               />
@@ -152,6 +157,7 @@ export function AddMakeupSessionDialog({
               <Input
                 id="makeup-start-time"
                 type="time"
+                required
                 value={form.startTime}
                 onChange={(event) => updateField("startTime", event.target.value)}
               />
@@ -161,6 +167,7 @@ export function AddMakeupSessionDialog({
               <Input
                 id="makeup-end-time"
                 type="time"
+                required
                 value={form.endTime}
                 onChange={(event) => updateField("endTime", event.target.value)}
               />
@@ -226,7 +233,12 @@ export function AddMakeupSessionDialog({
                 Hủy
               </Button>
             </DialogClose>
-            <Button type="submit">Lưu buổi bù</Button>
+            <Button
+              type="submit"
+              disabled={isSubmitting || !form.makeupForSessionId}
+            >
+              {isSubmitting ? "Đang lưu..." : "Lưu buổi bù"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

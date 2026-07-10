@@ -11,6 +11,7 @@ pub struct AttendanceWeekDto {
     class_id: i64,
     week_start: String,
     sessions: Vec<AttendanceSessionDto>,
+    upcoming_makeup_sessions: Vec<AttendanceSessionDto>,
     official_rows: Vec<AttendanceOfficialRowDto>,
 }
 
@@ -63,6 +64,17 @@ pub struct ToggleAttendanceLockRequest {
     is_locked: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateClassMakeupSessionRequest {
+    class_id: i64,
+    original_session_id: i64,
+    makeup_date: String,
+    start_time: String,
+    end_time: String,
+    note: Option<String>,
+}
+
 struct ClassRange {
     start_month: String,
     end_month: String,
@@ -87,12 +99,14 @@ pub fn get_attendance_week(
         materialize_regular_sessions(connection, class_id, &week_start, &class_range)?;
         let week_end = sqlite_date(connection, &week_start, 6)?;
         let sessions = list_sessions_for_week(connection, class_id, &week_start, &week_end)?;
+        let upcoming_makeup_sessions = list_upcoming_makeup_sessions(connection, class_id)?;
         let official_rows = list_attendance_rows(connection, class_id, &sessions)?;
 
         Ok(AttendanceWeekDto {
             class_id,
             week_start,
             sessions,
+            upcoming_makeup_sessions,
             official_rows,
         })
     })
@@ -181,16 +195,210 @@ pub fn toggle_attendance_lock(
             .execute(
                 "UPDATE attendance_sessions
                  SET is_locked = ?1, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = ?2",
+                 WHERE id = ?2 AND status = 'active'",
                 params![if request.is_locked { 1 } else { 0 }, request.session_id],
             )
             .map_err(|error| format!("Không cập nhật được khóa điểm danh: {error}"))?;
 
         if updated == 0 {
-            return Err("Không tìm thấy buổi học.".to_string());
+            return Err("Không tìm thấy buổi học đang hoạt động để đổi khóa.".to_string());
         }
 
         load_session_dto(connection, request.session_id)
+    })
+}
+
+#[tauri::command]
+pub fn cancel_attendance_session(
+    database: tauri::State<'_, AppDatabase>,
+    session_id: i64,
+) -> Result<AttendanceSessionDto, String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction nghỉ buổi học: {error}"))?;
+        let session = load_session_for_write(&transaction, session_id)?;
+
+        if session.r#type != "regular" {
+            return Err("Chỉ buổi học thường mới có thể chuyển sang nghỉ.".to_string());
+        }
+
+        transaction
+            .execute(
+                "UPDATE attendance_sessions
+                 SET status = 'cancelled', is_locked = 1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![session_id],
+            )
+            .map_err(|error| format!("Không chuyển được buổi học sang nghỉ: {error}"))?;
+        upsert_official_attendance(&transaction, &session, "absent")?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được buổi nghỉ: {error}"))?;
+
+        load_session_dto(connection, session_id)
+    })
+}
+
+#[tauri::command]
+pub fn restore_attendance_session(
+    database: tauri::State<'_, AppDatabase>,
+    session_id: i64,
+) -> Result<AttendanceSessionDto, String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection.transaction().map_err(|error| {
+            format!("Không bắt đầu được transaction khôi phục buổi học: {error}")
+        })?;
+        let session = load_session_for_write(&transaction, session_id)?;
+
+        if session.r#type != "regular" {
+            return Err("Chỉ buổi học thường mới có thể khôi phục theo cách này.".to_string());
+        }
+
+        let has_makeup = transaction
+            .query_row(
+                "SELECT id FROM attendance_sessions
+                 WHERE makeup_for_session_id = ?1 AND type = 'class_makeup' LIMIT 1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|error| format!("Không kiểm tra được buổi học bù liên quan: {error}"))?
+            .is_some();
+
+        if has_makeup {
+            return Err(
+                "Buổi này đang có buổi học bù. Vui lòng hủy buổi học bù để mở lại buổi gốc."
+                    .to_string(),
+            );
+        }
+
+        transaction
+            .execute(
+                "UPDATE attendance_sessions
+                 SET status = 'active', is_locked = 0, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![session_id],
+            )
+            .map_err(|error| format!("Không khôi phục được buổi học: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được khôi phục buổi học: {error}"))?;
+
+        load_session_dto(connection, session_id)
+    })
+}
+
+#[tauri::command]
+pub fn create_class_makeup_session(
+    database: tauri::State<'_, AppDatabase>,
+    request: CreateClassMakeupSessionRequest,
+) -> Result<AttendanceSessionDto, String> {
+    validate_date_key(&request.makeup_date)?;
+    validate_time_range(&request.start_time, &request.end_time)?;
+
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction tạo buổi học bù: {error}"))?;
+        let original = load_session_for_write(&transaction, request.original_session_id)?;
+
+        if original.class_id != request.class_id {
+            return Err("Buổi gốc không thuộc lớp đang chọn.".to_string());
+        }
+        if original.r#type != "regular" {
+            return Err("Buổi gốc phải là một buổi học thường.".to_string());
+        }
+
+        validate_makeup_date(&transaction, request.class_id, &request.makeup_date)?;
+        validate_no_existing_class_makeup(&transaction, request.original_session_id)?;
+        validate_makeup_time_conflict(
+            &transaction,
+            &request.makeup_date,
+            &request.start_time,
+            &request.end_time,
+        )?;
+
+        transaction
+            .execute(
+                "INSERT INTO attendance_sessions
+                 (class_id, session_date, start_time, end_time, session_index_in_week,
+                  type, status, is_locked, makeup_for_session_id, note, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'class_makeup', 'active', 0, ?6, ?7,
+                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                params![
+                    request.class_id,
+                    request.makeup_date,
+                    request.start_time,
+                    request.end_time,
+                    original.session_index_in_week,
+                    request.original_session_id,
+                    normalize_optional_text(request.note.as_deref())
+                ],
+            )
+            .map_err(|error| format!("Không tạo được buổi học bù: {error}"))?;
+        let makeup_session_id = transaction.last_insert_rowid();
+
+        transaction
+            .execute(
+                "UPDATE attendance_sessions
+                 SET status = 'cancelled', is_locked = 1, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![request.original_session_id],
+            )
+            .map_err(|error| format!("Không chuyển được buổi gốc sang nghỉ: {error}"))?;
+        upsert_official_attendance(&transaction, &original, "absent")?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được buổi học bù: {error}"))?;
+
+        load_session_dto(connection, makeup_session_id)
+    })
+}
+
+#[tauri::command]
+pub fn remove_class_makeup_session(
+    database: tauri::State<'_, AppDatabase>,
+    makeup_session_id: i64,
+) -> Result<AttendanceSessionDto, String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction hủy buổi học bù: {error}"))?;
+        let makeup_session = load_session_for_write(&transaction, makeup_session_id)?;
+
+        if makeup_session.r#type != "class_makeup" {
+            return Err("Buổi được chọn không phải buổi học bù cả lớp.".to_string());
+        }
+        let original_session_id = makeup_session
+            .makeup_for_session_id
+            .ok_or_else(|| "Buổi học bù không có liên kết tới buổi gốc.".to_string())?;
+
+        transaction
+            .execute(
+                "DELETE FROM attendance_records WHERE session_id = ?1",
+                params![makeup_session_id],
+            )
+            .map_err(|error| format!("Không xóa được điểm danh của buổi học bù: {error}"))?;
+        transaction
+            .execute(
+                "DELETE FROM attendance_sessions WHERE id = ?1",
+                params![makeup_session_id],
+            )
+            .map_err(|error| format!("Không xóa được buổi học bù: {error}"))?;
+        transaction
+            .execute(
+                "UPDATE attendance_sessions
+                 SET status = 'active', is_locked = 0, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![original_session_id],
+            )
+            .map_err(|error| format!("Không mở lại được buổi học gốc: {error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được thao tác hủy buổi học bù: {error}"))?;
+
+        load_session_dto(connection, original_session_id)
     })
 }
 
@@ -373,7 +581,7 @@ fn list_sessions_for_week(
              FROM attendance_sessions
              WHERE class_id = ?1
                AND session_date BETWEEN ?2 AND ?3
-               AND type = 'regular'
+               AND type IN ('regular', 'class_makeup')
              ORDER BY session_date ASC, start_time ASC, id ASC",
         )
         .map_err(|error| format!("Không chuẩn bị được buổi điểm danh trong tuần: {error}"))?;
@@ -383,6 +591,29 @@ fn list_sessions_for_week(
         .map_err(|error| format!("Không đọc được buổi điểm danh trong tuần: {error}"))?;
 
     collect_rows(rows, "Không parse được buổi điểm danh")
+}
+
+fn list_upcoming_makeup_sessions(
+    connection: &Connection,
+    class_id: i64,
+) -> Result<Vec<AttendanceSessionDto>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, class_id, session_date, start_time, end_time, session_index_in_week,
+                    type, status, is_locked, makeup_for_session_id
+             FROM attendance_sessions
+             WHERE class_id = ?1
+               AND type = 'class_makeup'
+               AND status = 'active'
+               AND datetime(session_date || ' ' || end_time) >= datetime('now', 'localtime')
+             ORDER BY session_date ASC, start_time ASC, id ASC",
+        )
+        .map_err(|error| format!("Không chuẩn bị được danh sách buổi học bù sắp tới: {error}"))?;
+    let rows = statement
+        .query_map(params![class_id], map_session_dto)
+        .map_err(|error| format!("Không đọc được danh sách buổi học bù sắp tới: {error}"))?;
+
+    collect_rows(rows, "Không parse được buổi học bù sắp tới")
 }
 
 fn list_attendance_rows(
@@ -581,6 +812,221 @@ fn validate_membership_for_session(
     exists
         .map(|_| ())
         .ok_or_else(|| "Học sinh không thuộc lớp trong thời điểm của buổi học.".to_string())
+}
+
+fn upsert_official_attendance(
+    connection: &Connection,
+    session: &AttendanceSessionDto,
+    status: &str,
+) -> Result<(), String> {
+    let session_month = month_from_date(&session.session_date)?;
+    let memberships = list_eligible_memberships(connection, session.class_id, &session_month)?;
+
+    for (membership_id, student_id) in memberships {
+        connection
+            .execute(
+                "INSERT INTO attendance_records
+                 (session_id, membership_id, student_id, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 ON CONFLICT(session_id, membership_id) DO UPDATE SET
+                   student_id = excluded.student_id,
+                   status = excluded.status,
+                   updated_at = CURRENT_TIMESTAMP",
+                params![session.id, membership_id, student_id, status],
+            )
+            .map_err(|error| format!("Không cập nhật được điểm danh cả lớp: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn list_eligible_memberships(
+    connection: &Connection,
+    class_id: i64,
+    session_month: &str,
+) -> Result<Vec<(i64, i64)>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT cm.id, cm.student_id
+             FROM class_memberships cm
+             JOIN students s ON s.id = cm.student_id
+             WHERE cm.class_id = ?1
+               AND s.is_archived = 0
+               AND cm.joined_month <= ?2
+               AND (cm.left_month IS NULL OR ?2 < cm.left_month)",
+        )
+        .map_err(|error| format!("Không chuẩn bị được danh sách học sinh của buổi học: {error}"))?;
+    let rows = statement
+        .query_map(params![class_id, session_month], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|error| format!("Không đọc được danh sách học sinh của buổi học: {error}"))?;
+
+    collect_rows(rows, "Không parse được học sinh của buổi học")
+}
+
+fn validate_makeup_date(
+    connection: &Connection,
+    class_id: i64,
+    makeup_date: &str,
+) -> Result<(), String> {
+    let normalized_date = connection
+        .query_row("SELECT date(?1)", params![makeup_date], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .map_err(|error| format!("Không kiểm tra được ngày học bù: {error}"))?;
+    if normalized_date.as_deref() != Some(makeup_date) {
+        return Err("Ngày học bù không hợp lệ.".to_string());
+    }
+
+    let today = current_local_date(connection)?;
+    if makeup_date <= today.as_str() {
+        return Err("Ngày học bù phải sau ngày hôm nay.".to_string());
+    }
+
+    let class_range = connection
+        .query_row(
+            "SELECT start_month, end_month
+             FROM classes
+             WHERE id = ?1 AND is_archived = 0 AND status = 'active'",
+            params![class_id],
+            |row| {
+                Ok(ClassRange {
+                    start_month: row.get(0)?,
+                    end_month: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được thời gian của lớp học bù: {error}"))?
+        .ok_or_else(|| "Chỉ lớp đang hoạt động mới có thể tạo buổi học bù.".to_string())?;
+    let makeup_month = month_from_date(makeup_date)?;
+    if makeup_month < class_range.start_month || makeup_month > class_range.end_month {
+        return Err("Ngày học bù phải nằm trong thời gian học của lớp.".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_no_existing_class_makeup(
+    connection: &Connection,
+    original_session_id: i64,
+) -> Result<(), String> {
+    let exists = connection
+        .query_row(
+            "SELECT id FROM attendance_sessions
+             WHERE makeup_for_session_id = ?1 AND type = 'class_makeup' LIMIT 1",
+            params![original_session_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được buổi học bù đã có: {error}"))?;
+
+    if exists.is_some() {
+        Err("Buổi học này đã có một buổi học bù cả lớp.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_makeup_time_conflict(
+    connection: &Connection,
+    makeup_date: &str,
+    start_time: &str,
+    end_time: &str,
+) -> Result<(), String> {
+    let schedule_conflict = connection
+        .query_row(
+            "SELECT c.name, cs.start_time, cs.end_time
+             FROM class_schedules cs
+             JOIN classes c ON c.id = cs.class_id
+             WHERE c.is_archived = 0
+               AND c.status = 'active'
+               AND cs.weekday = CAST(strftime('%w', ?1) AS INTEGER)
+               AND c.start_month <= substr(?1, 1, 7)
+               AND substr(?1, 1, 7) <= c.end_month
+               AND cs.start_time < ?3
+               AND ?2 < cs.end_time
+             ORDER BY cs.start_time ASC
+             LIMIT 1",
+            params![makeup_date, start_time, end_time],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được lịch học cố định: {error}"))?;
+
+    if let Some((class_name, conflict_start, conflict_end)) = schedule_conflict {
+        return Err(format!(
+            "Trùng lịch với {class_name}: {conflict_start} - {conflict_end}."
+        ));
+    }
+
+    let session_conflict = connection
+        .query_row(
+            "SELECT c.name, ats.start_time, ats.end_time
+             FROM attendance_sessions ats
+             JOIN classes c ON c.id = ats.class_id
+             WHERE c.is_archived = 0
+               AND c.status = 'active'
+               AND ats.session_date = ?1
+               AND ats.status = 'active'
+               AND ats.start_time < ?3
+               AND ?2 < ats.end_time
+             ORDER BY ats.start_time ASC
+             LIMIT 1",
+            params![makeup_date, start_time, end_time],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được các buổi học đã tạo: {error}"))?;
+
+    if let Some((class_name, conflict_start, conflict_end)) = session_conflict {
+        return Err(format!(
+            "Trùng buổi học của {class_name}: {conflict_start} - {conflict_end}."
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_time_range(start_time: &str, end_time: &str) -> Result<(), String> {
+    if !is_valid_time(start_time) || !is_valid_time(end_time) {
+        return Err("Giờ học bù không hợp lệ, cần định dạng HH:MM.".to_string());
+    }
+    if end_time <= start_time {
+        return Err("Giờ kết thúc phải sau giờ bắt đầu.".to_string());
+    }
+
+    Ok(())
+}
+
+fn is_valid_time(value: &str) -> bool {
+    if value.len() != 5 || value.as_bytes().get(2) != Some(&b':') {
+        return false;
+    }
+
+    let hour = value[..2].parse::<u8>();
+    let minute = value[3..].parse::<u8>();
+    matches!((hour, minute), (Ok(hour), Ok(minute)) if hour < 24 && minute < 60)
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn map_session_dto(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttendanceSessionDto> {

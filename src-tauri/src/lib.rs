@@ -79,7 +79,11 @@ pub fn run() {
             attendance::get_attendance_week,
             attendance::set_attendance_status,
             attendance::toggle_attendance_lock,
-            attendance::mark_session_present
+            attendance::mark_session_present,
+            attendance::cancel_attendance_session,
+            attendance::restore_attendance_session,
+            attendance::create_class_makeup_session,
+            attendance::remove_class_makeup_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

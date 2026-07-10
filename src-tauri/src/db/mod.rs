@@ -57,6 +57,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "008_attendance",
         sql: include_str!("../../migrations/008_attendance.sql"),
     },
+    Migration {
+        version: 9,
+        name: "009_attendance_class_makeup",
+        sql: include_str!("../../migrations/009_attendance_class_makeup.sql"),
+    },
 ];
 
 pub struct AppDatabase {
