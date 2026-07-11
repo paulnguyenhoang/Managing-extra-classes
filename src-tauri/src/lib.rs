@@ -75,6 +75,7 @@ pub fn run() {
             payments::set_payment_waived,
             payments::update_payment_note,
             payments::get_unpaid_months_for_membership,
+            payments::list_tuition_dashboard,
             scores::list_score_sheet,
             scores::add_score_column,
             scores::rename_score_column,

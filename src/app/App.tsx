@@ -214,7 +214,14 @@ function App() {
     }
 
     if (screen === "tuition-dashboard") {
-      return <TuitionDashboardPage />;
+      return (
+        <TuitionDashboardPage
+          academicYears={academicYears}
+          selectedYearId={selectedYearId}
+          onYearChange={handleYearChange}
+          onOpenClass={handleOpenClass}
+        />
+      );
     }
 
     if (screen === "backup") {

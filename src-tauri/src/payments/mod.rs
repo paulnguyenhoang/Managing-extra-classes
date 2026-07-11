@@ -471,3 +471,170 @@ fn normalize_optional_text(value: Option<&str>) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TuitionDashboardRowDto {
+    class_id: i64,
+    class_name: String,
+    grade: i64,
+    membership_id: i64,
+    student_id: i64,
+    full_name: String,
+    school_class: String,
+    school: String,
+    parent_phone: String,
+    status: String,
+    amount: i64,
+    paid_at: Option<String>,
+    note: Option<String>,
+    monthly_fee: i64,
+    payment_id: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TuitionDashboardSummaryDto {
+    total_students: i64,
+    paid_count: i64,
+    unpaid_count: i64,
+    waived_count: i64,
+    total_collected: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TuitionDashboardDto {
+    academic_year_id: i64,
+    month: String,
+    rows: Vec<TuitionDashboardRowDto>,
+    summary: TuitionDashboardSummaryDto,
+}
+
+/// Dashboard học phí toàn app: chỉ đọc, KHÔNG tạo payment row nào khi xem.
+#[tauri::command]
+pub fn list_tuition_dashboard(
+    database: tauri::State<'_, AppDatabase>,
+    academic_year_id: i64,
+    month: String,
+) -> Result<TuitionDashboardDto, String> {
+    validate_month(&month)?;
+
+    database.with_connection(|connection| {
+        let year_range: Option<(String, String)> = connection
+            .query_row(
+                "SELECT starts_at, ends_at FROM academic_years WHERE id = ?1",
+                params![academic_year_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được năm học: {error}"))?;
+
+        let Some((starts_at, ends_at)) = year_range else {
+            return Err("Không tìm thấy năm học.".to_string());
+        };
+
+        // Tháng ngoài năm học: trả kết quả rỗng thay vì lỗi (frontend chỉ chọn tháng trong năm).
+        let year_start_month = starts_at.chars().take(7).collect::<String>();
+        let year_end_month = ends_at.chars().take(7).collect::<String>();
+        if month < year_start_month || month > year_end_month {
+            return Ok(TuitionDashboardDto {
+                academic_year_id,
+                month,
+                rows: Vec::new(),
+                summary: TuitionDashboardSummaryDto {
+                    total_students: 0,
+                    paid_count: 0,
+                    unpaid_count: 0,
+                    waived_count: 0,
+                    total_collected: 0,
+                },
+            });
+        }
+
+        let mut statement = connection
+            .prepare(
+                "SELECT
+                   c.id,
+                   c.name,
+                   COALESCE(c.grade, 9),
+                   c.monthly_fee,
+                   cm.id,
+                   s.id,
+                   s.full_name,
+                   s.school_class,
+                   s.school,
+                   s.parent_phone,
+                   p.id,
+                   p.status,
+                   p.amount,
+                   p.paid_at,
+                   p.note
+                 FROM classes c
+                 JOIN class_memberships cm ON cm.class_id = c.id
+                 JOIN students s ON s.id = cm.student_id
+                 LEFT JOIN payments p
+                   ON p.membership_id = cm.id AND p.month = ?2
+                 WHERE c.academic_year_id = ?1
+                   AND c.is_archived = 0
+                   AND c.start_month <= ?2
+                   AND ?2 <= c.end_month
+                   AND s.is_archived = 0
+                   AND cm.joined_month <= ?2
+                   AND (cm.left_month IS NULL OR ?2 < cm.left_month)
+                 ORDER BY COALESCE(c.grade, 9) ASC, c.name COLLATE NOCASE ASC,
+                          s.full_name COLLATE NOCASE ASC, cm.id ASC",
+            )
+            .map_err(|error| format!("Không chuẩn bị được truy vấn tổng hợp học phí: {error}"))?;
+
+        let mapped = statement
+            .query_map(params![academic_year_id, month], |row| {
+                Ok(TuitionDashboardRowDto {
+                    class_id: row.get(0)?,
+                    class_name: row.get(1)?,
+                    grade: row.get(2)?,
+                    monthly_fee: row.get(3)?,
+                    membership_id: row.get(4)?,
+                    student_id: row.get(5)?,
+                    full_name: row.get(6)?,
+                    school_class: row.get(7)?,
+                    school: row.get(8)?,
+                    parent_phone: row.get(9)?,
+                    payment_id: row.get(10)?,
+                    status: row
+                        .get::<_, Option<String>>(11)?
+                        .unwrap_or_else(|| "unpaid".to_string()),
+                    amount: row.get::<_, Option<i64>>(12)?.unwrap_or(0),
+                    paid_at: row.get(13)?,
+                    note: row.get(14)?,
+                })
+            })
+            .map_err(|error| format!("Không đọc được dữ liệu tổng hợp học phí: {error}"))?;
+
+        let mut rows = Vec::new();
+        for row in mapped {
+            rows.push(
+                row.map_err(|error| format!("Không parse được dữ liệu tổng hợp học phí: {error}"))?,
+            );
+        }
+
+        let summary = TuitionDashboardSummaryDto {
+            total_students: rows.len() as i64,
+            paid_count: rows.iter().filter(|row| row.status == "paid").count() as i64,
+            unpaid_count: rows.iter().filter(|row| row.status == "unpaid").count() as i64,
+            waived_count: rows.iter().filter(|row| row.status == "waived").count() as i64,
+            total_collected: rows
+                .iter()
+                .filter(|row| row.status == "paid" || row.status == "waived")
+                .map(|row| row.amount)
+                .sum(),
+        };
+
+        Ok(TuitionDashboardDto {
+            academic_year_id,
+            month,
+            rows,
+            summary,
+        })
+    })
+}
