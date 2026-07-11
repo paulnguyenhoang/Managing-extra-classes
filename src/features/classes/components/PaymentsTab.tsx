@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
 import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
+import { exportPaymentsToExcel } from "@/features/classes/utils/paymentExport";
 import {
   filterPaymentRows,
   formatPaymentMonth,
@@ -53,6 +54,7 @@ import type { PaymentRow, PaymentStatus } from "@/types/payment";
 
 type PaymentsTabProps = {
   classId: number;
+  className: string;
   classStartMonth: string;
   classEndMonth: string;
   monthlyFeeOverride?: number;
@@ -61,6 +63,7 @@ type PaymentsTabProps = {
 
 export function PaymentsTab({
   classId,
+  className,
   classStartMonth,
   classEndMonth,
   monthlyFeeOverride,
@@ -94,7 +97,9 @@ export function PaymentsTab({
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [pendingPaidRow, setPendingPaidRow] = useState<PaymentRow | null>(null);
   const [pendingWaivedRow, setPendingWaivedRow] = useState<PaymentRow | null>(null);
   const [pendingUnlockRow, setPendingUnlockRow] = useState<PaymentRow | null>(null);
@@ -154,6 +159,7 @@ export function PaymentsTab({
   async function runPaymentAction(action: () => Promise<void>, failureMessage: string) {
     setIsSaving(true);
     setErrorMessage("");
+    setSuccessMessage("");
 
     try {
       await action();
@@ -229,6 +235,44 @@ export function PaymentsTab({
         }),
       "Không lưu được trạng thái chưa đóng.",
     );
+  }
+
+  async function exportVisiblePayments() {
+    if (visibleRows.length === 0) {
+      setSuccessMessage("");
+      setErrorMessage("Không có dữ liệu học phí để xuất Excel.");
+      return;
+    }
+
+    setIsExporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const filterLabel =
+        paymentFilterOptions.find((option) => option.value === filter)?.label ?? "Tất cả";
+      const rowsToExport = visibleRows.map((row) => ({
+        ...row,
+        note: noteDrafts[row.membershipId] ?? row.note,
+      }));
+      const result = await exportPaymentsToExcel({
+        rows: rowsToExport,
+        className,
+        selectedMonth,
+        monthlyFee,
+        filterLabel,
+        searchQuery,
+      });
+
+      if (result) {
+        setSuccessMessage("Đã xuất file Excel.");
+      }
+    } catch (error) {
+      console.warn("[payments] export failed", error);
+      setErrorMessage("Không thể xuất file Excel. Vui lòng thử lại.");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   function confirmPaid() {
@@ -362,9 +406,17 @@ export function PaymentsTab({
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" className="gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={isLoading || isSaving || isExporting || visibleRows.length === 0}
+            onClick={exportVisiblePayments}
+          >
             <Download className="size-4" />
-            <span className="hidden sm:inline">Xuất Excel</span>
+            <span className="hidden sm:inline">
+              {isExporting ? "Đang xuất..." : "Xuất Excel"}
+            </span>
           </Button>
         </div>
       </div>
@@ -379,6 +431,11 @@ export function PaymentsTab({
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
+        </div>
+      ) : null}
+      {successMessage && !errorMessage ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {successMessage}
         </div>
       ) : null}
 

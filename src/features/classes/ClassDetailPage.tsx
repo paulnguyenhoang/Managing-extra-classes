@@ -450,6 +450,7 @@ export function ClassDetailPage({
         <TabsPrimitive.Content value="payments" className="outline-none">
           <PaymentsTab
             classId={classId}
+            className={className}
             classStartMonth={startMonth}
             classEndMonth={endMonth}
             monthlyFeeOverride={monthlyFee}

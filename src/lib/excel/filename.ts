@@ -24,3 +24,12 @@ export function buildStudentListFileName(className: string, date = new Date()) {
   const safeClassName = safeFileNameSegment(className) || "lop-hoc";
   return `danh-sach-hoc-sinh-${safeClassName}-${compactDateTimeForFileName(date)}.xlsx`;
 }
+
+export function buildPaymentFileName(
+  className: string,
+  month: string,
+  date = new Date(),
+) {
+  const safeClassName = safeFileNameSegment(className) || "lop-hoc";
+  return `hoc-phi-${safeClassName}-${month}-${compactDateTimeForFileName(date)}.xlsx`;
+}
