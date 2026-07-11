@@ -286,7 +286,7 @@ function planImportRow(
     messages.push("Số điện thoại có thể chưa đúng định dạng (thường gồm 10 số).");
   }
 
-  const matches = findRosterMatches(raw, context.roster);
+  const { matches, matchedByNameOnly } = findRosterMatches(raw, context.roster);
   if (matches.length > 1) {
     return {
       excelRowNumber: raw.excelRowNumber,
@@ -301,13 +301,6 @@ function planImportRow(
   const note = raw.note || null;
 
   if (!matched) {
-    const sameNameExists = context.roster.some(
-      (student) => normalizeMatchText(student.fullName) === normalizeMatchText(raw.fullName),
-    );
-    if (sameNameExists) {
-      messages.push("Trong lớp đã có học sinh trùng tên nhưng khác thông tin; sẽ tạo học sinh mới.");
-    }
-
     return {
       excelRowNumber: raw.excelRowNumber,
       fullName: raw.fullName,
@@ -327,6 +320,10 @@ function planImportRow(
         action: "create",
       },
     };
+  }
+
+  if (matchedByNameOnly) {
+    messages.push("Khớp theo họ tên duy nhất trong lớp để cập nhật thông tin.");
   }
 
   // Update an toàn: ô Excel để trống thì giữ nguyên giá trị đang có, không xóa dữ liệu.
@@ -383,21 +380,30 @@ function planImportRow(
 function findRosterMatches(raw: RawImportRow, roster: StudentListItem[]) {
   const name = normalizeMatchText(raw.fullName);
   const phoneDigits = raw.parentPhone.replace(/\D/g, "");
+  const sameNameStudents = roster.filter((student) => normalizeMatchText(student.fullName) === name);
 
   if (phoneDigits) {
-    return roster.filter(
-      (student) =>
-        normalizeMatchText(student.fullName) === name &&
-        student.parentPhone.replace(/\D/g, "") === phoneDigits,
+    const phoneMatches = sameNameStudents.filter(
+      (student) => student.parentPhone.replace(/\D/g, "") === phoneDigits,
     );
+    if (phoneMatches.length > 0) {
+      return { matches: phoneMatches, matchedByNameOnly: false };
+    }
   }
 
-  return roster.filter(
+  const schoolMatches = sameNameStudents.filter(
     (student) =>
-      normalizeMatchText(student.fullName) === name &&
       normalizeMatchText(student.schoolClass) === normalizeMatchText(raw.schoolClass) &&
       normalizeMatchText(student.school) === normalizeMatchText(raw.school),
   );
+  if (schoolMatches.length > 0) {
+    return { matches: schoolMatches, matchedByNameOnly: false };
+  }
+
+  return {
+    matches: sameNameStudents,
+    matchedByNameOnly: sameNameStudents.length === 1,
+  };
 }
 
 function duplicateKey(raw: RawImportRow) {

@@ -650,6 +650,7 @@ export function StudentListTab({
       <StudentImportPreviewDialog
         plan={importPlan}
         className={className}
+        currentStudentCount={dbStudents.length}
         isImporting={isImporting}
         onOpenChange={(open) => {
           if (!open) {

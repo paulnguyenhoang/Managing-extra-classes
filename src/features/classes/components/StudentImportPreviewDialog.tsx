@@ -24,6 +24,7 @@ const actionConfig: Record<StudentImportAction, { label: string; className: stri
 type StudentImportPreviewDialogProps = {
   plan: StudentImportPlan | null;
   className: string;
+  currentStudentCount: number;
   isImporting: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
@@ -32,6 +33,7 @@ type StudentImportPreviewDialogProps = {
 export function StudentImportPreviewDialog({
   plan,
   className,
+  currentStudentCount,
   isImporting,
   onOpenChange,
   onConfirm,
@@ -62,9 +64,11 @@ export function StudentImportPreviewDialog({
             <div className="grid gap-1.5 rounded-lg bg-slate-50 p-4 text-sm">
               <SummaryRow label="File" value={plan.fileName} />
               <SummaryRow label="Lớp" value={className} />
+              <SummaryRow label="Học sinh hiện có" value={String(currentStudentCount)} />
+              <SummaryRow label="Dòng trong file" value={String(plan.rows.length)} />
               <SummaryRow label="Thêm mới" value={String(plan.createCount)} />
               <SummaryRow label="Cập nhật" value={String(plan.updateCount)} />
-              <SummaryRow label="Bỏ qua" value={String(plan.skipCount)} />
+              <SummaryRow label="Bỏ qua trong file" value={String(plan.skipCount)} />
               <SummaryRow label="Lỗi" value={String(plan.errorCount)} />
               <SummaryRow label="Cảnh báo" value={String(plan.warningCount)} />
             </div>
