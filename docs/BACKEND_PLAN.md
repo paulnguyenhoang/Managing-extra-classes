@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9C đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh, export học phí và export bảng điểm). Excel export cho điểm danh và Excel import vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9D đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm và import danh sách học sinh). Import học phí/điểm và export điểm danh vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -28,7 +28,7 @@ Mục tiêu backend cho MVP:
   - Học bù theo học sinh
 - Hỗ trợ sao lưu/khôi phục file database (đã triển khai Phase 8: SQLite backup API + `backup_logs`).
 - Nền tảng export Excel từ dữ liệu thật đã có ở Phase 9A cho danh sách học sinh, Phase 9B cho học phí và Phase 9C cho bảng điểm.
-- Chuẩn bị import Excel theo template cố định, ưu tiên danh sách học sinh.
+- Import Excel danh sách học sinh theo định dạng export đã triển khai ở Phase 9D; import học phí/điểm là phase sau.
 
 Nguyên tắc dữ liệu đã chốt:
 
@@ -134,7 +134,7 @@ Vị trí database gợi ý:
   - báo cáo học phí (đã triển khai Phase 9B ở cấp lớp/tháng)
   - bảng điểm (đã triển khai Phase 9C ở cấp lớp/tháng)
   - bảng điểm danh
-- Excel import nên cân nhắc sau, bắt đầu từ import danh sách học sinh theo template cố định.
+- Excel import đã bắt đầu từ danh sách học sinh (Phase 9D), nhận đúng định dạng file export của StudentListTab; import học phí/điểm cân nhắc phase sau.
 - Excel không phải database chính. SQLite vẫn là nguồn sự thật; Excel chỉ là kênh nhập/xuất dữ liệu.
 
 ### ID strategy
@@ -1075,17 +1075,27 @@ Phase 9C đã triển khai:
 - Tháng chưa có bài kiểm tra vẫn export STT + Họ tên kèm ghi chú.
 - Ở edit mode export bị chặn (nút không hiển thị; handler báo `"Vui lòng lưu hoặc hủy cập nhật trước khi xuất Excel."`); export không ghi database, không lưu draft.
 
+Phase 9D đã triển khai (import danh sách học sinh):
+
+- Frontend đọc file `.xlsx` bằng ExcelJS: command Rust `pick_excel_import_file` mở native picker và trả tên file + bytes; parse/validate/match ở `src/features/classes/utils/studentListImport.ts`.
+- Nhận định dạng file export của StudentListTab: sheet `"Danh sách học sinh"` (hoặc sheet đầu tiên) với dòng tiêu đề chứa `"Họ tên"`; STT bị bỏ qua; tháng nhận `MM/YYYY` hoặc `YYYY-MM`.
+- Validate toàn bộ trước khi ghi: họ tên bắt buộc; joined_month trong `start_month..end_month` (trống → clamp tháng hiện tại); paused bắt buộc left_month trong `joined_month..end_month`; active bỏ qua tháng nghỉ kèm cảnh báo; trùng lặp trong file (tên+SĐT, hoặc tên+lớp+trường khi không có SĐT) là lỗi; dòng trống bỏ qua.
+- Matching không dùng database id: tên chuẩn hóa + SĐT chỉ-chữ-số, fallback tên + lớp ở trường + trường; 1 khớp → update, nhiều khớp → bỏ qua (ambiguous), 0 khớp → create; update giống hệt DB → bỏ qua.
+- Preview dialog bắt buộc trước khi ghi; có lỗi thì disable xác nhận và không ghi gì.
+- Command `import_students_for_class`: re-validate từng dòng ở backend (không tin frontend), một transaction cho cả đợt; create insert `students` + `class_memberships`; update chỉ update field của student + joined_month/status/left_month của membership sau khi kiểm tra membership thuộc đúng lớp/học sinh; trả `createdCount`/`updatedCount`.
+- Safety rules: không xóa học sinh/membership vắng mặt trong file (no delete by omission); không đụng payments/scores/attendance — nếu đổi joined/left_month làm record cũ rơi ra ngoài khoảng, record vẫn được giữ nguyên; ô Excel trống khi update giữ giá trị hiện có.
+
 Phần next planned:
 
 Mục tiêu:
 
-- Tiếp tục export từ dữ liệu DB thật cho các tab còn lại.
-- Import Excel theo template cố định sau khi export ổn định.
+- Tiếp tục export từ dữ liệu DB thật cho các tab còn lại và mở rộng import.
 
 Deliverables:
 
-- Phase 9D: Export điểm danh theo tuần/tháng.
-- Phase 9E: Import danh sách học sinh từ template cố định là ứng viên đầu tiên.
+- Phase 9E: Import học phí.
+- Phase 9F: Import điểm.
+- Export điểm danh theo tuần/tháng (chưa xếp phase).
 - Không coi Excel là database chính; import chỉ ghi dữ liệu đã validate vào SQLite.
 
 ## 10. Testing checklist

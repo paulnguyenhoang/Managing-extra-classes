@@ -12,7 +12,7 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
 - Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 8: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup, student-level makeup và backup/restore.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm. Excel import và export điểm danh vẫn chưa triển khai.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm; Phase 9D đã có import danh sách học sinh từ Excel. Import học phí/điểm và export điểm danh vẫn chưa triển khai.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -355,6 +355,19 @@ Export:
 - Frontend tạo workbook `.xlsx` bằng ExcelJS, gọi command Rust `save_excel_file` để mở native save dialog và ghi file.
 - File export hiện gồm các cột: STT, Họ tên, Lớp ở trường, Trường, SĐT phụ huynh, Bắt đầu học, Trạng thái, Tháng nghỉ, Ghi chú.
 - SĐT được format dạng dễ đọc trong Excel nhưng vẫn giữ dạng text để không mất số 0 đầu.
+
+Import:
+
+- Nút `"Nhập Excel"` đã có behavior thật từ Phase 9D (`src/features/classes/utils/studentListImport.ts`, dialog `StudentImportPreviewDialog`).
+- Nhận file `.xlsx` theo đúng định dạng export của tab (sheet `"Danh sách học sinh"` hoặc sheet đầu tiên, dòng tiêu đề phải có cột `"Họ tên"`); chọn file qua native picker (`pick_excel_import_file`), hủy picker thì không có gì xảy ra.
+- Cột hỗ trợ: STT (bị bỏ qua), Họ tên (bắt buộc), Lớp ở trường, Trường, SĐT phụ huynh, Bắt đầu học, Trạng thái (`Đang học`/`Đã nghỉ`/`active`/`paused`, trống = active), Tháng nghỉ (bắt buộc khi Đã nghỉ), Ghi chú. Tháng nhận `MM/YYYY` hoặc `YYYY-MM`.
+- Validate toàn bộ trước khi ghi: tháng bắt đầu trong khoảng lớp (trống thì mặc định clamp tháng hiện tại), tháng nghỉ từ tháng vào đến hết lớp, trùng lặp trong file là lỗi, dòng trống bị bỏ qua; có lỗi thì nút xác nhận bị disable và chưa ghi gì.
+- Matching KHÔNG dùng STT hay database id: khớp theo họ tên chuẩn hóa + SĐT (chỉ còn chữ số); nếu không có SĐT thì theo họ tên + lớp ở trường + trường. Khớp đúng 1 → Cập nhật; nhiều → Bỏ qua (ambiguous); không khớp → Thêm mới. Dòng update giống hệt DB → Bỏ qua "Không có thay đổi".
+- Preview dialog hiển thị file, lớp, số dòng thêm mới/cập nhật/bỏ qua/lỗi/cảnh báo và từng dòng (số dòng Excel, họ tên, hành động, thông báo); xác nhận bằng `"Xác nhận nhập"`, hủy bằng `"Hủy"`.
+- Khi cập nhật, ô Excel để trống giữ nguyên giá trị đang có (không xóa SĐT/trường/ghi chú); trạng thái Đang học kèm tháng nghỉ trong file → cảnh báo và bỏ qua tháng nghỉ.
+- Import chỉ thêm/cập nhật học sinh và membership của lớp đang mở qua command `import_students_for_class` (transaction, re-validate backend); KHÔNG xóa học sinh vắng mặt trong file, KHÔNG đụng payments/scores/attendance.
+- Đang có dòng học sinh chưa lưu → chặn với `"Vui lòng lưu hoặc hủy cập nhật trước khi nhập Excel."`; thành công hiện `"Đã nhập danh sách học sinh."` và refresh roster + studentCount.
+- Import học phí và import điểm vẫn là phase sau.
 
 State/data source:
 
@@ -882,6 +895,7 @@ State/data source:
 | Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
 | Edit student | StudentListTab | Sửa fields và status trong edit mode, bấm lưu gọi DB | `students`, `class_memberships.status` | SQLite | Update student/class membership/status |
 | Export student Excel | StudentListTab | Tạo workbook `.xlsx` từ danh sách học sinh đang hiển thị, mở native save dialog qua Rust command `save_excel_file` | UI rows đã load từ `students` + `class_memberships` | Không ghi DB | Phase 9A; STT tính từ row hiển thị, cancel dialog không đổi UI |
+| Import student Excel | StudentListTab | Native picker + parse ExcelJS + preview dialog, xác nhận gọi `import_students_for_class` (transaction) | `students` + `class_memberships` của lớp đang mở | SQLite | Phase 9D; STT bị bỏ qua, match theo họ tên/SĐT/trường, không xóa học sinh thiếu trong file |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar; gọi `get_attendance_week`, backend materialize buổi thường nếu thiếu | `weekStart`, `attendance_sessions`, `attendance_records` | SQLite read/write session lazily | Week mở lần đầu có thể tạo session regular |
 | Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Gọi `create_class_makeup_session`; transaction tạo `class_makeup`, hủy/khóa buổi gốc và ghi Nghỉ cho roster hợp lệ | `attendance_sessions`, `attendance_records` | SQLite | Backend chặn trùng lịch/session toàn bộ lớp active và trùng makeup của cùng buổi gốc |
 | Remove class-level makeup session | AttendanceTab | Xác nhận rồi gọi `remove_class_makeup_session`; xóa records/session bù và mở lại buổi gốc | `attendance_sessions`, `attendance_records` | SQLite | Record Nghỉ của buổi gốc được giữ lại |
@@ -940,7 +954,7 @@ State/data source:
 
 ## 20. Database status / future candidates based on current code
 
-Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm. Export điểm danh và Excel import vẫn là candidate cho phase sau:
+Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A-9C đã có export danh sách học sinh, học phí và bảng điểm; Phase 9D đã có import danh sách học sinh. Import học phí/điểm và export điểm danh vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -977,7 +991,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 14. Phase 9A Excel export foundation + Student List export: đã triển khai.
 15. Phase 9B Payment export: đã triển khai.
 16. Phase 9C Score sheet export: đã triển khai.
-17. Phase 9D+ Excel export điểm danh và import: next planned.
+17. Phase 9D Student list import: đã triển khai.
+18. Phase 9E+ import học phí/điểm, export điểm danh: next planned.
 
 ## 22. Questions to confirm before backend
 
