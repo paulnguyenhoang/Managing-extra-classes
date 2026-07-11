@@ -1078,7 +1078,7 @@ Phase 9C đã triển khai:
 Phase 9D đã triển khai (import danh sách học sinh):
 
 - Frontend đọc file `.xlsx` bằng ExcelJS: command Rust `pick_excel_import_file` mở native picker và trả tên file + bytes; parse/validate/match ở `src/features/classes/utils/studentListImport.ts`.
-- Nhận định dạng file export của StudentListTab: sheet `"Danh sách học sinh"` (hoặc sheet đầu tiên) với dòng tiêu đề chứa `"Họ tên"`; STT bị bỏ qua; tháng nhận `MM/YYYY` hoặc `YYYY-MM`.
+- Nhận định dạng file export của StudentListTab: sheet `"Danh sách học sinh"` (hoặc sheet đầu tiên) với dòng tiêu đề chứa `"Họ tên"`; STT bị bỏ qua; hai cột tháng `Bắt đầu học` và `Tháng nghỉ` nhận các dạng Excel hay gặp như `MM/YYYY`, `YYYY-MM`, `YYYY-MM-DD`, date cell, Excel serial hoặc `Sep-26`.
 - Validate toàn bộ trước khi ghi: họ tên bắt buộc; joined_month trong `start_month..end_month` (trống → clamp tháng hiện tại); paused bắt buộc left_month trong `joined_month..end_month`; active bỏ qua tháng nghỉ kèm cảnh báo; trùng lặp trong file (tên+SĐT, hoặc tên+lớp+trường khi không có SĐT) là lỗi; dòng trống bỏ qua.
 - Matching không dùng database id: tên chuẩn hóa + SĐT chỉ-chữ-số, fallback tên + lớp ở trường + trường; 1 khớp → update, nhiều khớp → bỏ qua (ambiguous), 0 khớp → create; update giống hệt DB → bỏ qua.
 - Preview dialog bắt buộc trước khi ghi; có lỗi thì disable xác nhận và không ghi gì.
@@ -1088,7 +1088,7 @@ Phase 9D đã triển khai (import danh sách học sinh):
 Phase 9E đã triển khai (import bảng điểm):
 
 - Export bảng điểm thêm sheet ẩn `_score_import_map` (veryHidden): meta classId/className/month, danh sách cột (columnId/label) và học sinh (membershipId/studentId/fullName). Sheet nhìn thấy không đổi và vẫn không hiện database ID.
-- Frontend parse ở `src/features/classes/utils/scoreSheetImport.ts`: tìm bảng chính theo dòng tiêu đề `STT`/`Họ tên`; validate lớp/tháng bằng map ẩn (classId/month) hoặc metadata `Lớp`/`Tháng` khi không có map — sai lớp/tháng/thiếu metadata đều chặn trước khi preview.
+- Frontend parse ở `src/features/classes/utils/scoreSheetImport.ts`: tìm bảng chính theo dòng tiêu đề `STT`/`Họ tên`; validate lớp/tháng bằng map ẩn (classId/month) hoặc metadata `Lớp`/`Tháng` khi không có map. Tháng được normalize từ text/date/serial Excel phổ biến trước khi so với tháng đang chọn. Nếu file có map ẩn của tháng cũ nhưng sheet chính đã sửa metadata đúng lớp + đúng tháng đang chọn, import bỏ qua map ẩn cũ và xử lý như file mẫu tháng mới để không dùng nhầm `columnId` tháng khác; sai lớp/tháng/thiếu metadata đều chặn trước khi preview.
 - Học sinh: import không tạo/sửa/xóa học sinh; mỗi dòng phải khớp đúng 1 học sinh hợp lệ của lớp/tháng (map ẩn theo membershipId, fallback tên chuẩn hóa); tên lạ/dòng thừa/file thiếu học sinh/tên trùng đều là lỗi chặn toàn bộ.
 - Cột điểm: khớp theo tên; cột chưa khớp ghép theo thứ tự với map ẩn = đổi tên; cột mới = thêm; cột DB thiếu trong file = xóa cột + toàn bộ điểm, chỉ sau preview cảnh báo mạnh; nhãn trống/trùng là lỗi.
 - Điểm: trống hoặc `"-"` = NULL (xóa trắng); số 0-10, nhận dấu phẩy thập phân; text khác là lỗi.

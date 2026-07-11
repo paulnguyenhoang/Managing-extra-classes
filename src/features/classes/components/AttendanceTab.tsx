@@ -33,6 +33,7 @@ import {
   StudentMakeupDialog,
   type PendingStudentMakeup,
 } from "@/features/classes/components/attendance/StudentMakeupDialog";
+import { excelExportButtonClassName } from "@/features/classes/utils/excelButtonStyles";
 import {
   addDays,
   formatDateRange,
@@ -408,9 +409,7 @@ export function AttendanceTab({
   const currentClassName = className;
   const scheduleKey = useMemo(
     () =>
-      scheduleItems
-        .map((item) => `${item.weekday}:${item.startTime}-${item.endTime}`)
-        .join("|"),
+      scheduleItems.map((item) => `${item.weekday}:${item.startTime}-${item.endTime}`).join("|"),
     [scheduleItems],
   );
   const dbSessions = useMemo(
@@ -431,9 +430,7 @@ export function AttendanceTab({
   );
   const todaySessions = sessions.filter((session) => isSameDay(session.date, today));
   const todaySession =
-    todaySessions.find(
-      (session) => !isSessionCancelled(session) && isSessionUnlocked(session),
-    ) ??
+    todaySessions.find((session) => !isSessionCancelled(session) && isSessionUnlocked(session)) ??
     todaySessions.find((session) => !isSessionCancelled(session)) ??
     todaySessions[0];
   const isSelectedWeekCurrent = isSameDay(weekStart, getWeekStart(today));
@@ -499,9 +496,7 @@ export function AttendanceTab({
         }
       } catch (error) {
         if (!cancelled) {
-          setAttendanceErrorMessage(
-            getErrorMessage(error, "Không tải được dữ liệu điểm danh."),
-          );
+          setAttendanceErrorMessage(getErrorMessage(error, "Không tải được dữ liệu điểm danh."));
           setAttendanceWeek(null);
         }
       } finally {
@@ -523,9 +518,7 @@ export function AttendanceTab({
       return;
     }
 
-    setWeekStart((current) =>
-      clampWeekStart(current, firstAllowedWeekStart, lastAllowedWeekStart),
-    );
+    setWeekStart((current) => clampWeekStart(current, firstAllowedWeekStart, lastAllowedWeekStart));
     setVisibleCalendarMonth((current) =>
       clampWeekStart(current, firstAllowedWeekStart, lastAllowedWeekStart),
     );
@@ -576,9 +569,7 @@ export function AttendanceTab({
       await refreshAttendanceWeek();
       setPendingCancelSession(null);
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không cập nhật được trạng thái buổi học."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không cập nhật được trạng thái buổi học."));
     }
   }
 
@@ -593,9 +584,7 @@ export function AttendanceTab({
       await refreshAttendanceWeek();
       setPendingRemoveMakeupSession(null);
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không hủy được buổi học bù."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không hủy được buổi học bù."));
     }
   }
 
@@ -610,9 +599,7 @@ export function AttendanceTab({
       await markSessionPresent(todaySession.dbId);
       await refreshAttendanceWeek();
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không đánh dấu được cả lớp đi học."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không đánh dấu được cả lớp đi học."));
     }
   }
 
@@ -632,9 +619,7 @@ export function AttendanceTab({
   }
 
   async function tryAddMakeupSession(input: MakeupSessionInput): Promise<string | null> {
-    const originalSession = sessions.find(
-      (session) => session.id === input.makeupForSessionId,
-    );
+    const originalSession = sessions.find((session) => session.id === input.makeupForSessionId);
     if (!originalSession?.dbId) {
       return "Không tìm thấy buổi học gốc trong database.";
     }
@@ -689,9 +674,7 @@ export function AttendanceTab({
         setPendingStudentMakeup({ student, session, options });
         setSelectedStudentMakeupSessionId(options[0]?.sessionId ?? "");
       } catch (error) {
-        setActionErrorMessage(
-          getErrorMessage(error, "Không tải được danh sách buổi học bù."),
-        );
+        setActionErrorMessage(getErrorMessage(error, "Không tải được danh sách buổi học bù."));
       }
       return;
     }
@@ -714,9 +697,7 @@ export function AttendanceTab({
       });
       await refreshAttendanceWeek();
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không lưu được điểm danh."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không lưu được điểm danh."));
     }
   }
 
@@ -746,9 +727,7 @@ export function AttendanceTab({
       setPendingStudentMakeup(null);
       setSelectedStudentMakeupSessionId("");
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không lưu được học bù cho học sinh."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không lưu được học bù cho học sinh."));
     }
   }
 
@@ -767,9 +746,7 @@ export function AttendanceTab({
       await refreshAttendanceWeek();
       setPendingRemoveStudentMakeup(null);
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không hủy được học bù của học sinh."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không hủy được học bù của học sinh."));
     }
   }
 
@@ -786,9 +763,7 @@ export function AttendanceTab({
       });
       await refreshAttendanceWeek();
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không lưu được điểm danh học sinh học bù."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không lưu được điểm danh học sinh học bù."));
     }
   }
 
@@ -812,9 +787,7 @@ export function AttendanceTab({
       await toggleAttendanceLock(session.dbId, !session.isLocked);
       await refreshAttendanceWeek();
     } catch (error) {
-      setActionErrorMessage(
-        getErrorMessage(error, "Không cập nhật được khóa điểm danh."),
-      );
+      setActionErrorMessage(getErrorMessage(error, "Không cập nhật được khóa điểm danh."));
     }
   }
 
@@ -901,10 +874,6 @@ export function AttendanceTab({
             <CheckCheck className="size-4" />
             <span className="hidden sm:inline">Đánh dấu cả lớp đi học</span>
           </Button>
-          <Button variant="outline" className="gap-2">
-            <Download className="size-4" />
-            <span className="hidden sm:inline">Xuất Excel</span>
-          </Button>
         </div>
       </section>
 
@@ -928,7 +897,10 @@ export function AttendanceTab({
           Lớp này chưa có học sinh trong database.
         </p>
       ) : null}
-      {!isLoadingAttendance && !attendanceErrorMessage && students.length > 0 && visibleStudents.length === 0 ? (
+      {!isLoadingAttendance &&
+      !attendanceErrorMessage &&
+      students.length > 0 &&
+      visibleStudents.length === 0 ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
           Không có học sinh trong thời gian này.
         </p>
@@ -964,67 +936,65 @@ export function AttendanceTab({
                   <TableCell>{index + 1}</TableCell>
                   <TableCell className="font-medium text-slate-950">{student.fullName}</TableCell>
                   {sessions.map((session) => {
-                  const isEligible = isStudentEligibleForSession(student, session);
-                  const isCancelled = isSessionCancelled(session);
-                  const isUnlocked = isSessionUnlocked(session);
-                  const status = getAttendanceCellStatus(student, session);
-                  const makeupDetailDto =
-                    status === "makeup" ? getMakeupDetail(student, session) : undefined;
-                  const makeupDetail = makeupDetailDto
-                    ? `Học bù tại ${makeupDetailDto.receivingClassName} - ${formatDayMonth(
-                        parseLocalDate(makeupDetailDto.receivingSessionDate),
-                      )}`
-                    : "";
-                  const receivingStatusNote = makeupDetailDto?.receivingAttendanceStatus
-                    ? `Lớp nhận: ${attendanceStatusLabel(
-                        makeupDetailDto.receivingAttendanceStatus,
-                      )}`
-                    : "";
+                    const isEligible = isStudentEligibleForSession(student, session);
+                    const isCancelled = isSessionCancelled(session);
+                    const isUnlocked = isSessionUnlocked(session);
+                    const status = getAttendanceCellStatus(student, session);
+                    const makeupDetailDto =
+                      status === "makeup" ? getMakeupDetail(student, session) : undefined;
+                    const makeupDetail = makeupDetailDto
+                      ? `Học bù tại ${makeupDetailDto.receivingClassName} - ${formatDayMonth(
+                          parseLocalDate(makeupDetailDto.receivingSessionDate),
+                        )}`
+                      : "";
+                    const receivingStatusNote = makeupDetailDto?.receivingAttendanceStatus
+                      ? `Lớp nhận: ${attendanceStatusLabel(
+                          makeupDetailDto.receivingAttendanceStatus,
+                        )}`
+                      : "";
 
-                  return (
-                    <TableCell key={session.id} className="text-center">
-                      {!isEligible ? (
-                        <span className="text-slate-300">-</span>
-                      ) : isCancelled ? (
-                        <Badge className="bg-red-100 text-red-900 hover:bg-red-100">
-                          Nghỉ
-                        </Badge>
-                      ) : isUnlocked ? (
-                        <div className="flex flex-col items-center gap-1">
-                          <AttendanceStatusButtons
-                            status={status}
-                            allowMakeup={session.type === "regular"}
-                            onSelect={(nextStatus) =>
-                              handleOfficialStatusSelect(student, session, nextStatus)
-                            }
-                          />
-                          {makeupDetail ? (
-                            <span className="max-w-40 text-xs font-normal text-slate-500">
-                              {makeupDetail}
-                              {receivingStatusNote ? (
-                                <>
-                                  <br />
-                                  {receivingStatusNote}
-                                </>
-                              ) : null}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span
-                          className="flex flex-col items-center gap-1"
-                          title="Bấm Mở khóa để chỉnh sửa buổi này"
-                        >
-                          <AttendanceStatusBadge status={status} />
-                          {makeupDetail ? (
-                            <span className="max-w-40 text-xs font-normal text-slate-500">
-                              {makeupDetail}
-                            </span>
-                          ) : null}
-                        </span>
-                      )}
-                    </TableCell>
-                  );
+                    return (
+                      <TableCell key={session.id} className="text-center">
+                        {!isEligible ? (
+                          <span className="text-slate-300">-</span>
+                        ) : isCancelled ? (
+                          <Badge className="bg-red-100 text-red-900 hover:bg-red-100">Nghỉ</Badge>
+                        ) : isUnlocked ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <AttendanceStatusButtons
+                              status={status}
+                              allowMakeup={session.type === "regular"}
+                              onSelect={(nextStatus) =>
+                                handleOfficialStatusSelect(student, session, nextStatus)
+                              }
+                            />
+                            {makeupDetail ? (
+                              <span className="max-w-40 text-xs font-normal text-slate-500">
+                                {makeupDetail}
+                                {receivingStatusNote ? (
+                                  <>
+                                    <br />
+                                    {receivingStatusNote}
+                                  </>
+                                ) : null}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span
+                            className="flex flex-col items-center gap-1"
+                            title="Bấm Mở khóa để chỉnh sửa buổi này"
+                          >
+                            <AttendanceStatusBadge status={status} />
+                            {makeupDetail ? (
+                              <span className="max-w-40 text-xs font-normal text-slate-500">
+                                {makeupDetail}
+                              </span>
+                            ) : null}
+                          </span>
+                        )}
+                      </TableCell>
+                    );
                   })}
                 </TableRow>
               );
@@ -1217,9 +1187,7 @@ export function AttendanceTab({
 
 function DateToneLegendItem({ className, label }: { className: string; label: string }) {
   return (
-    <span className={["rounded-full px-2 py-0.5 font-medium", className].join(" ")}>
-      {label}
-    </span>
+    <span className={["rounded-full px-2 py-0.5 font-medium", className].join(" ")}>{label}</span>
   );
 }
 
@@ -1356,4 +1324,3 @@ function getSessionEndDateTime(session: WeeklySession) {
   result.setHours(Number.isFinite(hour) ? hour : 23, Number.isFinite(minute) ? minute : 59, 0, 0);
   return result;
 }
-

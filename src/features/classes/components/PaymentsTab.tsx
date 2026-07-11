@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmPaidDialog } from "@/features/classes/components/ConfirmPaidDialog";
 import { TuitionWaiverDialog } from "@/features/classes/components/TuitionWaiverDialog";
+import { excelExportButtonClassName } from "@/features/classes/utils/excelButtonStyles";
 import { exportPaymentsToExcel } from "@/features/classes/utils/paymentExport";
 import {
   filterPaymentRows,
@@ -409,7 +410,7 @@ export function PaymentsTab({
           <Button
             type="button"
             variant="outline"
-            className="gap-2"
+            className={excelExportButtonClassName}
             disabled={isLoading || isSaving || isExporting || visibleRows.length === 0}
             onClick={exportVisiblePayments}
           >

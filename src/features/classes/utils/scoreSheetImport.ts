@@ -1,7 +1,7 @@
 import type ExcelJS from "exceljs";
 
 import { SCORE_IMPORT_MAP_SHEET } from "@/features/classes/utils/scoreExport";
-import { isValidMonthKey } from "@/lib/months";
+import { formatMonthLabel, isValidMonthKey } from "@/lib/months";
 import type { ImportScoreRowInput, ScoreSheetDto, ScoreSheetRow } from "@/types/score";
 
 export type ScoreImportColumnPlan = {
@@ -61,7 +61,10 @@ export async function parseScoreImportFile({
   eligibleRows,
 }: ParseScoreImportInput): Promise<ScoreImportPlan> {
   const workbook = await loadWorkbook(bytes);
-  const importMap = readImportMap(workbook);
+  let importMap = readImportMap(workbook);
+  const worksheet = findScoreWorksheet(workbook);
+  const header = findScoreTableHeader(worksheet);
+  const metadata = readSheetMetadata(worksheet, header.headerRowNumber);
 
   // Validate lớp/tháng trước, không đoán ngầm (Part D).
   if (importMap) {
@@ -69,23 +72,36 @@ export async function parseScoreImportFile({
       throw new Error("File Excel không đúng lớp hiện tại.");
     }
     if (importMap.month !== selectedMonth) {
-      throw new Error("File Excel không đúng tháng đang chọn.");
+      const metadataMonth = parseMonthText(metadata.month);
+      const metadataClassMatches =
+        metadata.className && normalizeMatchText(metadata.className) === normalizeMatchText(className);
+
+      if (metadataClassMatches && metadataMonth === selectedMonth) {
+        // Người dùng có thể dùng file tháng cũ làm mẫu cho tháng mới rồi sửa ô metadata.
+        // Khi đó bỏ map tháng/cột cũ để tránh ghi nhầm columnId của tháng khác.
+        importMap = null;
+      } else {
+        throw new Error(
+          `File Excel thuộc tháng ${formatMonthLabel(importMap.month)}, không phải tháng đang chọn ${formatMonthLabel(selectedMonth)}.`,
+        );
+      }
     }
   }
 
-  const worksheet = findScoreWorksheet(workbook);
-  const header = findScoreTableHeader(worksheet);
-
   if (!importMap) {
-    const metadata = readSheetMetadata(worksheet, header.headerRowNumber);
     if (!metadata.className || !metadata.month) {
       throw new Error("File Excel thiếu thông tin lớp hoặc tháng.");
     }
     if (normalizeMatchText(metadata.className) !== normalizeMatchText(className)) {
       throw new Error("File Excel không đúng lớp hiện tại.");
     }
-    if (parseMonthText(metadata.month) !== selectedMonth) {
-      throw new Error("File Excel không đúng tháng đang chọn.");
+    const metadataMonth = parseMonthText(metadata.month);
+    if (metadataMonth !== selectedMonth) {
+      throw new Error(
+        metadataMonth
+          ? `File Excel thuộc tháng ${formatMonthLabel(metadataMonth)}, không phải tháng đang chọn ${formatMonthLabel(selectedMonth)}.`
+          : "File Excel không đúng tháng đang chọn.",
+      );
     }
   }
 
@@ -145,10 +161,11 @@ function readImportMap(workbook: ExcelJS.Workbook): ImportMap | null {
     const kind = cellText(row, 1);
 
     if (kind === "meta") {
+      const month = cellMonthKey(row, 4) ?? cellText(row, 4);
       meta = {
         classId: Number(cellText(row, 2)),
         className: cellText(row, 3),
-        month: cellText(row, 4),
+        month,
       };
     } else if (kind === "column") {
       columns.push({ columnId: Number(cellText(row, 2)), label: cellText(row, 3) });
@@ -220,7 +237,7 @@ function readSheetMetadata(worksheet: ExcelJS.Worksheet, headerRowNumber: number
     if (label === "lớp" && !className) {
       className = cellText(row, 2);
     } else if (label === "tháng" && !month) {
-      month = cellText(row, 2);
+      month = cellMonthKey(row, 2) ?? cellText(row, 2);
     }
   }
 
@@ -524,16 +541,113 @@ function parseScoreCell(text: string): { ok: true; value: number | null } | { ok
   return { ok: true, value };
 }
 
-/// Nhận MM/YYYY hoặc YYYY-MM, trả về YYYY-MM; null nếu không hợp lệ.
+/// Nhận nhiều kiểu tháng Excel hay tự chuyển đổi, trả về YYYY-MM; null nếu không hợp lệ.
 function parseMonthText(text: string): string | null {
-  const slashMatch = text.match(/^(\d{1,2})\/(\d{4})$/);
-  if (slashMatch) {
-    const candidate = `${slashMatch[2]}-${slashMatch[1].padStart(2, "0")}`;
-    return isValidMonthKey(candidate) ? candidate : null;
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
   }
 
-  return isValidMonthKey(text) ? text : null;
+  if (isValidMonthKey(normalized)) {
+    return normalized;
+  }
+
+  const yearMonthMatch = normalized.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
+  if (yearMonthMatch) {
+    return buildMonthKey(Number(yearMonthMatch[1]), Number(yearMonthMatch[2]));
+  }
+
+  const monthYearMatch = normalized.match(/^(\d{1,2})[/-](\d{4})$/);
+  if (monthYearMatch) {
+    return buildMonthKey(Number(monthYearMatch[2]), Number(monthYearMatch[1]));
+  }
+
+  const dateLikeMatch = normalized.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+  if (dateLikeMatch) {
+    const first = Number(dateLikeMatch[1]);
+    const second = Number(dateLikeMatch[2]);
+    const year = normalizeYear(Number(dateLikeMatch[3]));
+
+    if (first > 12 && second <= 12) {
+      return buildMonthKey(year, second);
+    }
+
+    return buildMonthKey(year, first);
+  }
+
+  const monthNameMatch = normalized.match(/^([a-zA-Z]{3,})[-\s]+(\d{2}|\d{4})$/);
+  if (monthNameMatch) {
+    const month = ENGLISH_MONTHS[monthNameMatch[1].slice(0, 3).toLowerCase()];
+    return month ? buildMonthKey(normalizeYear(Number(monthNameMatch[2])), month) : null;
+  }
+
+  return null;
 }
+
+function cellMonthKey(row: ExcelJS.Row, columnNumber: number) {
+  const cell = row.getCell(columnNumber);
+  const valueMonth = monthKeyFromCellValue(cell.value);
+  return valueMonth ?? parseMonthText(cellText(row, columnNumber));
+}
+
+function monthKeyFromCellValue(value: ExcelJS.CellValue): string | null {
+  if (value instanceof Date) {
+    return buildMonthKey(value.getFullYear(), value.getMonth() + 1);
+  }
+
+  if (typeof value === "number" && value > 20000 && value < 80000) {
+    const date = excelSerialDateToUtc(value);
+    return buildMonthKey(date.getUTCFullYear(), date.getUTCMonth() + 1);
+  }
+
+  if (typeof value === "string") {
+    return parseMonthText(value);
+  }
+
+  if (value && typeof value === "object") {
+    if ("result" in value) {
+      return monthKeyFromCellValue(value.result as ExcelJS.CellValue);
+    }
+
+    if ("text" in value && typeof value.text === "string") {
+      return parseMonthText(value.text);
+    }
+
+    if ("richText" in value && Array.isArray(value.richText)) {
+      return parseMonthText(value.richText.map((item) => item.text).join(""));
+    }
+  }
+
+  return null;
+}
+
+function excelSerialDateToUtc(serial: number) {
+  return new Date(Date.UTC(1899, 11, 30) + serial * 24 * 60 * 60 * 1000);
+}
+
+function buildMonthKey(year: number, month: number) {
+  const candidate = `${year}-${String(month).padStart(2, "0")}`;
+  return isValidMonthKey(candidate) ? candidate : null;
+}
+
+function normalizeYear(year: number) {
+  return year < 100 ? 2000 + year : year;
+}
+
+const ENGLISH_MONTHS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
+};
 
 function cellText(row: ExcelJS.Row, columnNumber: number) {
   return String(row.getCell(columnNumber).text ?? "")

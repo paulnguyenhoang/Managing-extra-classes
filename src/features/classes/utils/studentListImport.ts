@@ -172,6 +172,10 @@ function readRawRows(
       const column = columnByKey.get(key);
       return column === undefined ? "" : normalizeText(cellText(row, column));
     };
+    const readMonthField = (key: HeaderKey) => {
+      const column = columnByKey.get(key);
+      return column === undefined ? "" : (cellMonthKey(row, column) ?? readField(key));
+    };
 
     const raw: RawImportRow = {
       excelRowNumber: rowNumber,
@@ -179,9 +183,9 @@ function readRawRows(
       schoolClass: readField("schoolClass"),
       school: readField("school"),
       parentPhone: readField("parentPhone"),
-      joinedMonthText: readField("joinedMonth"),
+      joinedMonthText: readMonthField("joinedMonth"),
       statusText: readField("status"),
-      leftMonthText: readField("leftMonth"),
+      leftMonthText: readMonthField("leftMonth"),
       note: readField("note"),
     };
 
@@ -238,7 +242,7 @@ function planImportRow(
   if (raw.joinedMonthText) {
     const parsed = parseMonthText(raw.joinedMonthText);
     if (!parsed) {
-      return fail("Tháng bắt đầu học không hợp lệ (dùng MM/YYYY hoặc YYYY-MM).");
+      return fail("Tháng bắt đầu học không hợp lệ.");
     }
     joinedMonth = parsed;
   } else {
@@ -266,7 +270,7 @@ function planImportRow(
 
     leftMonth = parseMonthText(raw.leftMonthText);
     if (!leftMonth) {
-      return fail("Tháng nghỉ không hợp lệ (dùng MM/YYYY hoặc YYYY-MM).");
+      return fail("Tháng nghỉ không hợp lệ.");
     }
 
     if (leftMonth < joinedMonth) {
@@ -429,16 +433,113 @@ function parseStatus(text: string): StudentStatus | null {
   return null;
 }
 
-/// Nhận MM/YYYY hoặc YYYY-MM, trả về YYYY-MM; null nếu không hợp lệ.
+/// Nhận nhiều kiểu tháng Excel hay tự chuyển đổi, trả về YYYY-MM; null nếu không hợp lệ.
 function parseMonthText(text: string): string | null {
-  const slashMatch = text.match(/^(\d{1,2})\/(\d{4})$/);
-  if (slashMatch) {
-    const candidate = `${slashMatch[2]}-${slashMatch[1].padStart(2, "0")}`;
-    return isValidMonthKey(candidate) ? candidate : null;
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
   }
 
-  return isValidMonthKey(text) ? text : null;
+  if (isValidMonthKey(normalized)) {
+    return normalized;
+  }
+
+  const yearMonthMatch = normalized.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
+  if (yearMonthMatch) {
+    return buildMonthKey(Number(yearMonthMatch[1]), Number(yearMonthMatch[2]));
+  }
+
+  const monthYearMatch = normalized.match(/^(\d{1,2})[/-](\d{4})$/);
+  if (monthYearMatch) {
+    return buildMonthKey(Number(monthYearMatch[2]), Number(monthYearMatch[1]));
+  }
+
+  const dateLikeMatch = normalized.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
+  if (dateLikeMatch) {
+    const first = Number(dateLikeMatch[1]);
+    const second = Number(dateLikeMatch[2]);
+    const year = normalizeYear(Number(dateLikeMatch[3]));
+
+    if (first > 12 && second <= 12) {
+      return buildMonthKey(year, second);
+    }
+
+    return buildMonthKey(year, first);
+  }
+
+  const monthNameMatch = normalized.match(/^([a-zA-Z]{3,})[-\s]+(\d{2}|\d{4})$/);
+  if (monthNameMatch) {
+    const month = ENGLISH_MONTHS[monthNameMatch[1].slice(0, 3).toLowerCase()];
+    return month ? buildMonthKey(normalizeYear(Number(monthNameMatch[2])), month) : null;
+  }
+
+  return null;
 }
+
+function cellMonthKey(row: ExcelJS.Row, columnNumber: number) {
+  const cell = row.getCell(columnNumber);
+  const valueMonth = monthKeyFromCellValue(cell.value);
+  return valueMonth ?? parseMonthText(cellText(row, columnNumber));
+}
+
+function monthKeyFromCellValue(value: ExcelJS.CellValue): string | null {
+  if (value instanceof Date) {
+    return buildMonthKey(value.getFullYear(), value.getMonth() + 1);
+  }
+
+  if (typeof value === "number" && value > 20000 && value < 80000) {
+    const date = excelSerialDateToUtc(value);
+    return buildMonthKey(date.getUTCFullYear(), date.getUTCMonth() + 1);
+  }
+
+  if (typeof value === "string") {
+    return parseMonthText(value);
+  }
+
+  if (value && typeof value === "object") {
+    if ("result" in value) {
+      return monthKeyFromCellValue(value.result as ExcelJS.CellValue);
+    }
+
+    if ("text" in value && typeof value.text === "string") {
+      return parseMonthText(value.text);
+    }
+
+    if ("richText" in value && Array.isArray(value.richText)) {
+      return parseMonthText(value.richText.map((item) => item.text).join(""));
+    }
+  }
+
+  return null;
+}
+
+function excelSerialDateToUtc(serial: number) {
+  return new Date(Date.UTC(1899, 11, 30) + serial * 24 * 60 * 60 * 1000);
+}
+
+function buildMonthKey(year: number, month: number) {
+  const candidate = `${year}-${String(month).padStart(2, "0")}`;
+  return isValidMonthKey(candidate) ? candidate : null;
+}
+
+function normalizeYear(year: number) {
+  return year < 100 ? 2000 + year : year;
+}
+
+const ENGLISH_MONTHS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
+};
 
 function cellText(row: ExcelJS.Row, columnNumber: number) {
   const cell = row.getCell(columnNumber);

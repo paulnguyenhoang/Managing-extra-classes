@@ -37,6 +37,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScoreImportPreviewDialog } from "@/features/classes/components/ScoreImportPreviewDialog";
+import {
+  excelExportButtonClassName,
+  excelImportButtonClassName,
+} from "@/features/classes/utils/excelButtonStyles";
 import { exportScoresToExcel } from "@/features/classes/utils/scoreExport";
 import {
   parseScoreImportFile,
@@ -575,7 +579,7 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
               </Button>
               <Button
                 variant="outline"
-                className="gap-2"
+                className={excelImportButtonClassName}
                 onClick={handleImportExcel}
                 disabled={isLoading || isSaving || isExporting || isImporting || !sheet}
               >
@@ -586,7 +590,7 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
               </Button>
               <Button
                 variant="outline"
-                className="gap-2"
+                className={excelExportButtonClassName}
                 onClick={exportVisibleScores}
                 disabled={
                   isLoading || isSaving || isExporting || isImporting || sortedRows.length === 0

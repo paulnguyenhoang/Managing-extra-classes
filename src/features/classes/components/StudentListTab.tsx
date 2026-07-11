@@ -22,6 +22,10 @@ import {
 import { PauseStudentDialog } from "@/features/classes/components/PauseStudentDialog";
 import { StudentImportPreviewDialog } from "@/features/classes/components/StudentImportPreviewDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
+import {
+  excelExportButtonClassName,
+  excelImportButtonClassName,
+} from "@/features/classes/utils/excelButtonStyles";
 import { exportStudentListToExcel } from "@/features/classes/utils/studentListExport";
 import {
   parseStudentImportFile,
@@ -472,7 +476,7 @@ export function StudentListTab({
           <Button
             type="button"
             variant="outline"
-            className="gap-2"
+            className={excelImportButtonClassName}
             onClick={handleImportExcel}
             disabled={isLoading || isSaving || isExporting || isImporting}
           >
@@ -484,7 +488,7 @@ export function StudentListTab({
           <Button
             type="button"
             variant="outline"
-            className="gap-2"
+            className={excelExportButtonClassName}
             onClick={exportVisibleStudents}
             disabled={
               isLoading || isSaving || isExporting || isImporting || filteredStudents.length === 0
