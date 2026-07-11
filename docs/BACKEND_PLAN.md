@@ -930,7 +930,7 @@ Commands mới/cập nhật:
 - `list_payments_by_class_month` lọc theo joined/left của membership; các payment action validate "thuộc lớp trong tháng" thay vì "đang active" — để ghi nhận TRẢ NỢ tháng đã học của học sinh đã nghỉ.
 - `get_unpaid_months_for_membership(membershipId, leftMonth)`: các tháng từ joined_month đến tháng trước leftMonth (clamp theo end lớp) chưa paid/waived. KHÔNG chặn việc nghỉ — chỉ trả dữ liệu để frontend cảnh báo. Nợ luôn được TÍNH từ payments, không lưu tay; đóng thêm học phí sẽ tự cập nhật nợ.
 - Nếu leftMonth = joinedMonth thì không có tháng nợ để kiểm tra; left_month luôn là exclusive boundary.
-- `unpaidCount` class overview: chỉ đếm membership active hợp lệ trong tháng hiện tại; trả 0 nếu tháng hiện tại ngoài khoảng lớp.
+- `unpaidCount` class overview: chỉ đếm membership active hợp lệ trong tháng hiện tại; trả 0 nếu tháng hiện tại ngoài khoảng lớp. Home card dùng thêm `startMonth/endMonth` để hiển thị `"Chưa mở lớp"`/`"Đã kết thúc"` khi lớp chưa hoặc không còn học trong tháng hiện tại.
 
 Month helpers dùng chung: `src-tauri/src/months/mod.rs` (Rust) và `src/lib/months.ts` (frontend) — validate/so sánh/cộng tháng/dải tháng/format MM/YYYY; Scores sẽ tái sử dụng.
 

@@ -439,7 +439,9 @@ fn ensure_membership_eligible_for_month(
 
     if let Some(left_month) = left_month {
         if month >= left_month.as_str() {
-            return Err("Học sinh đã nghỉ lớp từ tháng này, không thể cập nhật học phí.".to_string());
+            return Err(
+                "Học sinh đã nghỉ lớp từ tháng này, không thể cập nhật học phí.".to_string(),
+            );
         }
     }
 

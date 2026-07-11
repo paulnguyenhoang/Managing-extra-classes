@@ -72,6 +72,14 @@ pub struct BackupLogDto {
     created_at: String,
 }
 
+struct BackupLogSnapshot {
+    action: String,
+    file_path: String,
+    status: String,
+    message: Option<String>,
+    created_at: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestoreResultDto {
@@ -125,6 +133,63 @@ fn insert_backup_log(
     if let Err(error) = result {
         eprintln!("[backup] Không ghi được backup log: {error}");
     }
+}
+
+fn load_backup_log_snapshots(connection: &Connection) -> Result<Vec<BackupLogSnapshot>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT action, file_path, status, message, created_at
+             FROM backup_logs
+             ORDER BY id ASC",
+        )
+        .map_err(|error| format!("Không đọc được lịch sử sao lưu hiện tại: {error}"))?;
+
+    let rows = statement
+        .query_map([], |row| {
+            Ok(BackupLogSnapshot {
+                action: row.get(0)?,
+                file_path: row.get(1)?,
+                status: row.get(2)?,
+                message: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("Không đọc được lịch sử sao lưu hiện tại: {error}"))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("Không đọc được lịch sử sao lưu hiện tại: {error}"))
+}
+
+fn merge_backup_log_snapshots(
+    connection: &Connection,
+    logs: &[BackupLogSnapshot],
+) -> Result<(), String> {
+    for log in logs {
+        connection
+            .execute(
+                "INSERT INTO backup_logs (action, file_path, status, message, created_at)
+                 SELECT ?1, ?2, ?3, ?4, ?5
+                 WHERE NOT EXISTS (
+                   SELECT 1
+                   FROM backup_logs
+                   WHERE action = ?1
+                     AND file_path = ?2
+                     AND status = ?3
+                     AND ((message IS NULL AND ?4 IS NULL) OR message = ?4)
+                     AND created_at = ?5
+                 )",
+                params![
+                    log.action,
+                    log.file_path,
+                    log.status,
+                    log.message,
+                    log.created_at
+                ],
+            )
+            .map_err(|error| format!("Không khôi phục được lịch sử sao lưu: {error}"))?;
+    }
+
+    Ok(())
 }
 
 fn copy_database_to_file(source: &Connection, destination: &Path) -> Result<(), String> {
@@ -373,8 +438,11 @@ pub fn restore_backup(
     let backups_dir = backups_dir(&app)?;
 
     database.with_connection_mut(|connection| {
-        let safety_path =
-            backups_dir.join(format!("pre-restore-{}.sqlite", now_compact_timestamp(connection)?));
+        let existing_logs = load_backup_log_snapshots(connection)?;
+        let safety_path = backups_dir.join(format!(
+            "pre-restore-{}.sqlite",
+            now_compact_timestamp(connection)?
+        ));
 
         copy_database_to_file(connection, &safety_path).map_err(|error| {
             format!("Không tạo được bản sao lưu an toàn trước khi khôi phục: {error}")
@@ -384,19 +452,22 @@ pub fn restore_backup(
         // data.sqlite/-wal/-shm files stay owned by this connection and the
         // destination rolls back automatically if the copy fails midway.
         let restore_result = (|| -> Result<(), String> {
-            let source = Connection::open_with_flags(&source_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|error| format!("Không mở được file sao lưu: {error}"))?;
+            let source =
+                Connection::open_with_flags(&source_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|error| format!("Không mở được file sao lưu: {error}"))?;
 
             {
-                let backup = Backup::new(&source, connection)
-                    .map_err(|error| format!("Không khởi tạo được tiến trình khôi phục: {error}"))?;
+                let backup = Backup::new(&source, connection).map_err(|error| {
+                    format!("Không khởi tạo được tiến trình khôi phục: {error}")
+                })?;
                 backup
                     .run_to_completion(BACKUP_PAGES_PER_STEP, Duration::ZERO, None)
                     .map_err(|error| format!("Khôi phục database thất bại: {error}"))?;
             }
 
             db::configure_connection(connection)?;
-            db::run_migrations(connection)
+            db::run_migrations(connection)?;
+            merge_backup_log_snapshots(connection, &existing_logs)
         })();
 
         match restore_result {
@@ -474,8 +545,7 @@ pub fn open_app_data_folder(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn open_backup_folder(app: AppHandle) -> Result<(), String> {
     let dir = backups_dir(&app)?;
-    fs::create_dir_all(&dir)
-        .map_err(|error| format!("Không tạo được thư mục sao lưu: {error}"))?;
+    fs::create_dir_all(&dir).map_err(|error| format!("Không tạo được thư mục sao lưu: {error}"))?;
 
     tauri_plugin_opener::open_path(&dir, None::<&str>)
         .map_err(|error| format!("Không mở được thư mục sao lưu: {error}"))

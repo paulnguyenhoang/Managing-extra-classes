@@ -75,9 +75,7 @@ const MIGRATIONS: &[Migration] = &[
 ];
 
 pub fn latest_defined_migration() -> (i64, &'static str) {
-    let migration = MIGRATIONS
-        .last()
-        .expect("MIGRATIONS không được để trống");
+    let migration = MIGRATIONS.last().expect("MIGRATIONS không được để trống");
 
     (migration.version, migration.name)
 }

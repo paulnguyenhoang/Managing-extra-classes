@@ -215,7 +215,7 @@ Sidebar hiện có 5 item:
   - thời gian học từ `startMonth` đến `endMonth`, đồng bộ khi sửa trong ClassDetail
   - số học sinh
   - học phí tháng
-  - badge unpaid/paid theo `unpaidCount`
+  - badge học phí theo tháng hệ thống hiện tại: `"Chưa mở lớp"` nếu chưa tới `startMonth`, `"Đã kết thúc"` nếu đã qua `endMonth`, còn trong tháng đang học thì hiển thị `{unpaidCount} chưa đóng` hoặc `"Đủ học phí"`.
 - Nếu khối/năm học không có lớp, dùng `EmptyState`.
 - Click class card gọi `onOpenClass(classId)` để mở `ClassDetailPage`.
 - Không hiển thị database ID cho người dùng; STT nếu có luôn tính từ `index + 1`.
@@ -236,7 +236,7 @@ Hạn chế:
 
 - Không có sửa/xóa/archive lớp ở Home.
 - Lớp tạo mới chưa có học sinh cho đến khi thêm ở tab Danh sách học sinh.
-- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` đếm thật từ bảng `payments` cho tháng hệ thống hiện tại: membership active, đang thuộc lớp trong tháng (joined/left), chưa có payment row hoặc row đang `unpaid`; `paid`/`waived` không tính. Nếu tháng hiện tại nằm ngoài `start_month..end_month` của lớp thì `unpaidCount = 0`.
+- `studentCount` lấy từ số membership `active` trong SQLite. `unpaidCount` đếm thật từ bảng `payments` cho tháng hệ thống hiện tại: membership active, đang thuộc lớp trong tháng (joined/left), chưa có payment row hoặc row đang `unpaid`; `paid`/`waived` không tính. Nếu tháng hiện tại nằm ngoài `start_month..end_month` của lớp thì `unpaidCount = 0`; Home card vẫn dựa thêm vào `startMonth/endMonth` để hiển thị `"Chưa mở lớp"` hoặc `"Đã kết thúc"` thay vì hiểu nhầm là đủ học phí.
 
 ## 10. Class Detail Header hiện tại
 

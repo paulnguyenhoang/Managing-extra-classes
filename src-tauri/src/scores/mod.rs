@@ -194,7 +194,9 @@ pub fn save_score_values(
     for value in &request.values {
         if let Some(score) = value.value {
             if !(0.0..=10.0).contains(&score) {
-                return Err("Điểm phải là số từ 0 đến 10. Có thể để trống nếu chưa có điểm.".to_string());
+                return Err(
+                    "Điểm phải là số từ 0 đến 10. Có thể để trống nếu chưa có điểm.".to_string(),
+                );
             }
         }
     }
@@ -251,7 +253,12 @@ pub fn save_score_values(
                              ON CONFLICT(column_id, membership_id) DO UPDATE SET
                                value = excluded.value,
                                updated_at = CURRENT_TIMESTAMP",
-                            params![value.column_id, value.membership_id, value.student_id, score],
+                            params![
+                                value.column_id,
+                                value.membership_id,
+                                value.student_id,
+                                score
+                            ],
                         )
                         .map_err(|error| format!("Không lưu được điểm: {error}"))?;
                 }

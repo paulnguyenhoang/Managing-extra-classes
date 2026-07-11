@@ -193,8 +193,7 @@ pub fn get_attendance_week(
         let upcoming_makeup_sessions = list_upcoming_makeup_sessions(connection, class_id)?;
         let official_rows = list_attendance_rows(connection, class_id, &sessions)?;
         let session_ids: Vec<i64> = sessions.iter().map(|session| session.id).collect();
-        let receiving_makeup_rows =
-            list_receiving_makeup_rows(connection, class_id, &session_ids)?;
+        let receiving_makeup_rows = list_receiving_makeup_rows(connection, class_id, &session_ids)?;
         let makeup_details = list_makeup_details(connection, class_id, &session_ids)?;
 
         Ok(AttendanceWeekDto {
@@ -662,7 +661,9 @@ pub fn list_student_makeup_options(
                        AND is_archived = 0
                        AND status = 'active'",
                 )
-                .map_err(|error| format!("Không chuẩn bị được danh sách lớp nhận học bù: {error}"))?;
+                .map_err(|error| {
+                    format!("Không chuẩn bị được danh sách lớp nhận học bù: {error}")
+                })?;
             let rows = statement
                 .query_map(params![class_id, original_year_id, original_grade], |row| {
                     Ok((
@@ -707,24 +708,21 @@ pub fn list_student_makeup_options(
                 )
                 .map_err(|error| format!("Không chuẩn bị được buổi nhận học bù: {error}"))?;
             let rows = statement
-                .query_map(
-                    params![receiving_class_id, week_start, week_end],
-                    |row| {
-                        let is_locked: i64 = row.get(7)?;
-                        Ok(StudentMakeupOptionDto {
-                            receiving_class_id,
-                            receiving_class_name: receiving_class_name.clone(),
-                            receiving_session_id: row.get(0)?,
-                            receiving_session_date: row.get(1)?,
-                            start_time: row.get(2)?,
-                            end_time: row.get(3)?,
-                            session_index_in_week: row.get(4)?,
-                            r#type: row.get(5)?,
-                            status: row.get(6)?,
-                            is_locked: is_locked != 0,
-                        })
-                    },
-                )
+                .query_map(params![receiving_class_id, week_start, week_end], |row| {
+                    let is_locked: i64 = row.get(7)?;
+                    Ok(StudentMakeupOptionDto {
+                        receiving_class_id,
+                        receiving_class_name: receiving_class_name.clone(),
+                        receiving_session_id: row.get(0)?,
+                        receiving_session_date: row.get(1)?,
+                        start_time: row.get(2)?,
+                        end_time: row.get(3)?,
+                        session_index_in_week: row.get(4)?,
+                        r#type: row.get(5)?,
+                        status: row.get(6)?,
+                        is_locked: is_locked != 0,
+                    })
+                })
                 .map_err(|error| format!("Không đọc được buổi nhận học bù: {error}"))?;
             let class_options = collect_rows(rows, "Không parse được buổi nhận học bù")?;
 
@@ -1027,7 +1025,9 @@ fn clear_makeup_links_for_cancelled_session(
              WHERE receiving_session_id = ?1",
             params![session_id],
         )
-        .map_err(|error| format!("Không đánh dấu Nghỉ được học sinh học bù của buổi nghỉ: {error}"))?;
+        .map_err(|error| {
+            format!("Không đánh dấu Nghỉ được học sinh học bù của buổi nghỉ: {error}")
+        })?;
 
     Ok(())
 }
@@ -1158,10 +1158,7 @@ fn list_makeup_details(
     collect_rows(rows, "Không parse được chi tiết học bù")
 }
 
-fn load_class_meta(
-    connection: &Connection,
-    class_id: i64,
-) -> Result<(String, i64, i64), String> {
+fn load_class_meta(connection: &Connection, class_id: i64) -> Result<(String, i64, i64), String> {
     connection
         .query_row(
             "SELECT name, academic_year_id, COALESCE(grade, 9)

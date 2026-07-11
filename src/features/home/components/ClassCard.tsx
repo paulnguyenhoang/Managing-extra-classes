@@ -6,7 +6,7 @@ import {
   parseScheduleText,
 } from "@/features/classes/utils/classSchedule";
 import { formatCurrency } from "@/lib/format";
-import { formatMonthLabel } from "@/lib/months";
+import { compareMonths, currentMonthKey, formatMonthLabel } from "@/lib/months";
 import type { ClassOverview } from "@/types/class";
 
 type ClassCardProps = {
@@ -14,12 +14,43 @@ type ClassCardProps = {
   onOpen: (classId: number) => void;
 };
 
+function getCurrentMonthTuitionBadge(classItem: ClassOverview) {
+  const currentMonth = currentMonthKey();
+
+  if (compareMonths(currentMonth, classItem.startMonth) < 0) {
+    return {
+      label: "Chưa mở lớp",
+      className: "bg-slate-100 text-slate-700 hover:bg-slate-100",
+    };
+  }
+
+  if (compareMonths(currentMonth, classItem.endMonth) > 0) {
+    return {
+      label: "Đã kết thúc",
+      className: "bg-slate-100 text-slate-700 hover:bg-slate-100",
+    };
+  }
+
+  if (classItem.unpaidCount > 0) {
+    return {
+      label: `${classItem.unpaidCount} chưa đóng`,
+      className: "bg-amber-100 text-amber-900 hover:bg-amber-100",
+    };
+  }
+
+  return {
+    label: "Đủ học phí",
+    className: "bg-emerald-100 text-emerald-900 hover:bg-emerald-100",
+  };
+}
+
 export function ClassCard({ classItem, onOpen }: ClassCardProps) {
   const scheduleLines = formatScheduleLines(
     classItem.scheduleItems?.length
       ? classItem.scheduleItems
       : parseScheduleText(classItem.schedule),
   );
+  const tuitionBadge = getCurrentMonthTuitionBadge(classItem);
 
   return (
     <button
@@ -50,15 +81,7 @@ export function ClassCard({ classItem, onOpen }: ClassCardProps) {
             </span>
           </div>
         </div>
-        {classItem.unpaidCount > 0 ? (
-          <Badge className="shrink-0 bg-amber-100 text-amber-900 hover:bg-amber-100">
-            {classItem.unpaidCount} chưa đóng
-          </Badge>
-        ) : (
-          <Badge className="shrink-0 bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
-            Đủ học phí
-          </Badge>
-        )}
+        <Badge className={`shrink-0 ${tuitionBadge.className}`}>{tuitionBadge.label}</Badge>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
