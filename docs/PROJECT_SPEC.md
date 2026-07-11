@@ -12,7 +12,7 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
 - Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 8: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup, student-level makeup và backup/restore.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí. Excel import và các export điểm/điểm danh vẫn chưa triển khai.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm. Excel import và export điểm danh vẫn chưa triển khai.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -30,7 +30,7 @@ Các công nghệ/thư viện hiện diện trong `package.json`, config hoặc 
 - tw-animate-css: animation CSS được import trong `App.css`.
 - @fontsource-variable/geist: font được import trong `App.css`.
 - @tanstack/react-table, react-hook-form, zod, @hookform/resolvers: có trong dependency nhưng hiện chưa thấy được dùng trong các màn hình chính đã đọc.
-- exceljs: dùng ở frontend cho Phase 9A/9B export danh sách học sinh và học phí ra `.xlsx`.
+- exceljs: dùng ở frontend cho Phase 9A/9B/9C export danh sách học sinh, học phí và bảng điểm ra `.xlsx`.
 
 ## 4. Cấu trúc thư mục thực tế
 
@@ -577,7 +577,14 @@ Score validation:
 
 Export:
 
-- Nút `"Xuất bảng điểm"` chỉ hiển thị UI, chưa có behavior.
+- Nút `"Xuất bảng điểm"` đã có behavior thật từ Phase 9C (`src/features/classes/utils/scoreExport.ts`).
+- Xuất đúng bảng điểm đang hiển thị: lớp + tháng đang chọn, roster hợp lệ theo lifecycle, và đúng thứ tự đang nhìn thấy — mặc định sort tên tiếng Việt, hoặc theo cột điểm đang sort (tăng/giảm dần) ở view mode.
+- STT trong Excel là `index + 1` sau sort, không dùng database ID; không xuất membershipId/columnId hay bất kỳ id nội bộ nào.
+- Cột Excel: STT, Họ tên, rồi một cột cho mỗi bài kiểm tra của tháng theo đúng thứ tự cột hiện tại; điểm là numeric cell, ô trống hiển thị `"-"` giống UI.
+- Workbook có metadata (Lớp, Tháng, Ngày xuất, Số học sinh, Số bài kiểm tra, Sắp xếp) và bảng thống kê theo bài kiểm tra: số điểm đã nhập, điểm trung bình (làm tròn 2 chữ số), cao nhất, thấp nhất — bỏ qua ô trống; tháng chưa có bài kiểm tra thì thay bằng ghi chú và vẫn xuất STT + Họ tên.
+- Filename: `bang-diem-[ten-lop]-[YYYY-MM]-YYYYMMDD-HHMMSS.xlsx` qua helper filename chung.
+- Export chỉ đọc dữ liệu đã load, không ghi SQLite, không lưu draft; ở edit mode nút không hiển thị và handler chặn với thông báo `"Vui lòng lưu hoặc hủy cập nhật trước khi xuất Excel."`
+- Nút có loading `"Đang xuất..."`, disable khi đang tải/lưu/xuất hoặc không có học sinh; hủy save dialog thì không báo lỗi; thành công hiện `"Đã xuất file Excel."`
 
 ## 14. Tab Học phí hiện tại
 
@@ -893,7 +900,7 @@ State/data source:
 | Edit score value | ScoresTab | Input điểm trong edit mode (draft thưa) | draft local | local đến khi lưu | Validate 0-10 khi nhập và khi lưu |
 | Save scores | ScoresTab | Validate, gọi `save_score_values` batch, refresh từ DB | `score_values` | SQLite | Transaction upsert theo `(column_id, membership_id)`; trống = NULL |
 | Cancel score edit | ScoresTab | Discard draft, quay về giá trị DB | draft local | none | Không ghi DB |
-| Export score Excel | ScoresTab | Chưa có behavior | none | none | Export score sheet |
+| Export score Excel | ScoresTab | Tạo workbook `.xlsx` từ bảng điểm đang hiển thị theo tháng/sort, kèm thống kê theo bài kiểm tra, mở native save dialog qua `save_excel_file` | UI rows đã load từ `score_columns` + `score_values` | Không ghi DB | Phase 9C; STT tính từ row hiển thị, chặn export khi đang edit |
 | Change payment month | PaymentsTab | Chuyển month state và load lại rows SQLite | `selectedMonth`, `rows` | SQLite read | Query `payments` by class/month |
 | Search payment student | PaymentsTab | Lọc tên học sinh local | UI only | none | Search/filter khi data lớn |
 | Filter payment status | PaymentsTab | Lọc rows local | UI only | none | Query/filter |
@@ -933,7 +940,7 @@ State/data source:
 
 ## 20. Database status / future candidates based on current code
 
-Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí. Các export/import Excel còn lại vẫn là candidate cho phase sau:
+Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm. Export điểm danh và Excel import vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -969,7 +976,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 13. Phase 8 Backup/restore: đã triển khai.
 14. Phase 9A Excel export foundation + Student List export: đã triển khai.
 15. Phase 9B Payment export: đã triển khai.
-16. Phase 9C+ Excel export/import còn lại: next planned.
+16. Phase 9C Score sheet export: đã triển khai.
+17. Phase 9D+ Excel export điểm danh và import: next planned.
 
 ## 22. Questions to confirm before backend
 

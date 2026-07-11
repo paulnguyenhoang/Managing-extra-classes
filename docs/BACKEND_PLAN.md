@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8, Phase 9A và Phase 9B đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh và export học phí). Excel export cho điểm/điểm danh và Excel import vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9C đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh, export học phí và export bảng điểm). Excel export cho điểm danh và Excel import vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -27,7 +27,7 @@ Mục tiêu backend cho MVP:
   - Học bù cả lớp
   - Học bù theo học sinh
 - Hỗ trợ sao lưu/khôi phục file database (đã triển khai Phase 8: SQLite backup API + `backup_logs`).
-- Nền tảng export Excel từ dữ liệu thật đã có ở Phase 9A cho danh sách học sinh và Phase 9B cho học phí.
+- Nền tảng export Excel từ dữ liệu thật đã có ở Phase 9A cho danh sách học sinh, Phase 9B cho học phí và Phase 9C cho bảng điểm.
 - Chuẩn bị import Excel theo template cố định, ưu tiên danh sách học sinh.
 
 Nguyên tắc dữ liệu đã chốt:
@@ -128,10 +128,11 @@ Vị trí database gợi ý:
 - Excel import/export là workflow quan trọng vì thân thiện với giáo viên và gần với cách các hệ thống trường học như VNEDU thường vận hành.
 - Phase 9A đã triển khai export danh sách học sinh bằng ExcelJS ở frontend và Rust command `save_excel_file` để mở native save dialog/ghi file `.xlsx`.
 - Phase 9B đã triển khai export học phí theo lớp/tháng từ rows đang hiển thị trong `PaymentsTab`.
+- Phase 9C đã triển khai export bảng điểm theo lớp/tháng từ sheet đang hiển thị trong `ScoresTab`, gồm cột điểm động và thống kê theo bài kiểm tra.
 - Excel export nên hỗ trợ:
   - danh sách học sinh (đã triển khai Phase 9A)
   - báo cáo học phí (đã triển khai Phase 9B ở cấp lớp/tháng)
-  - bảng điểm
+  - bảng điểm (đã triển khai Phase 9C ở cấp lớp/tháng)
   - bảng điểm danh
 - Excel import nên cân nhắc sau, bắt đầu từ import danh sách học sinh theo template cố định.
 - Excel không phải database chính. SQLite vẫn là nguồn sự thật; Excel chỉ là kênh nhập/xuất dữ liệu.
@@ -1065,6 +1066,15 @@ Phase 9B đã triển khai:
 - Workbook có summary theo visible rows: đã đóng, chưa đóng, miễn giảm, tổng đã thu.
 - Export không ghi database và không biến virtual unpaid rows thành payment rows thật.
 
+Phase 9C đã triển khai:
+
+- Export bảng điểm từ `ScoresTab` theo lớp và tháng đang chọn (`src/features/classes/utils/scoreExport.ts`, filename helper `buildScoreSheetFileName`).
+- File xuất đúng rows/thứ tự đang hiển thị: sort tên tiếng Việt mặc định hoặc sort theo cột điểm (tăng/giảm dần) ở view mode; roster lọc theo lifecycle tháng.
+- Cột động theo `score_columns` của tháng; điểm là numeric cell, ô trống là `"-"`; không xuất database id nào.
+- Workbook có metadata (lớp, tháng, ngày xuất, số học sinh, số bài kiểm tra, kiểu sắp xếp) và bảng thống kê theo bài kiểm tra: số điểm đã nhập, trung bình (2 chữ số), cao nhất, thấp nhất — bỏ qua ô trống.
+- Tháng chưa có bài kiểm tra vẫn export STT + Họ tên kèm ghi chú.
+- Ở edit mode export bị chặn (nút không hiển thị; handler báo `"Vui lòng lưu hoặc hủy cập nhật trước khi xuất Excel."`); export không ghi database, không lưu draft.
+
 Phần next planned:
 
 Mục tiêu:
@@ -1074,7 +1084,6 @@ Mục tiêu:
 
 Deliverables:
 
-- Phase 9C: Export bảng điểm theo tháng.
 - Phase 9D: Export điểm danh theo tuần/tháng.
 - Phase 9E: Import danh sách học sinh từ template cố định là ứng viên đầu tiên.
 - Không coi Excel là database chính; import chỉ ghi dữ liệu đã validate vào SQLite.
@@ -1193,7 +1202,7 @@ Excel import/export:
 - `schema_migrations` giữ cơ chế tracking migration hiện tại.
 - Database IDs là internal identifiers, có thể có gap, không renumber để làm đẹp.
 - STT trong UI/Excel luôn tính từ row hiển thị bằng `index + 1`, không dùng database ID.
-- Phase 9A/9B export danh sách học sinh và học phí là hành vi frontend-only về dữ liệu: đọc rows đã load từ SQLite, tạo file Excel, rồi gọi Rust command để lưu file; không thay đổi schema hoặc dữ liệu DB.
+- Phase 9A/9B/9C export danh sách học sinh, học phí và bảng điểm là hành vi frontend-only về dữ liệu: đọc rows đã load từ SQLite, tạo file Excel, rồi gọi Rust command để lưu file; không thay đổi schema hoặc dữ liệu DB.
 - Không hard-delete học sinh trong normal use.
 - Một học sinh có thể thuộc nhiều lớp.
 - Student status lưu theo `class_memberships`.
