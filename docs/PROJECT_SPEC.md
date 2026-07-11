@@ -11,8 +11,8 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - App type: ứng dụng desktop Tauri dùng React + TypeScript.
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
-- Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 7C: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup và student-level makeup.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore, Excel và các trang global placeholder chưa có logic thật.
+- Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 8: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup, student-level makeup và backup/restore.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Excel import và các export học phí/điểm/điểm danh vẫn chưa triển khai.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -29,7 +29,8 @@ Các công nghệ/thư viện hiện diện trong `package.json`, config hoặc 
 - class-variance-authority, clsx, tailwind-merge: helper className và variant cho UI.
 - tw-animate-css: animation CSS được import trong `App.css`.
 - @fontsource-variable/geist: font được import trong `App.css`.
-- @tanstack/react-table, exceljs, react-hook-form, zod, @hookform/resolvers: có trong dependency nhưng hiện chưa thấy được dùng trong các màn hình chính đã đọc.
+- @tanstack/react-table, react-hook-form, zod, @hookform/resolvers: có trong dependency nhưng hiện chưa thấy được dùng trong các màn hình chính đã đọc.
+- exceljs: dùng ở frontend cho Phase 9A export danh sách học sinh ra `.xlsx`.
 
 ## 4. Cấu trúc thư mục thực tế
 
@@ -102,8 +103,13 @@ src/
     academicYearApi.ts
     attendanceApi.ts
     classApi.ts
+    excelExportApi.ts
     studentApi.ts
   lib/
+    excel/
+      exportWorkbook.ts
+      filename.ts
+      worksheetStyle.ts
     format.ts
     utils.ts
   types/
@@ -124,6 +130,7 @@ src/
 - `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/settings`: các trang sidebar dạng placeholder.
 - `src/features/backup`: trang sao lưu/khôi phục SQLite (functional từ Phase 8).
 - `src/services`: wrapper gọi Tauri commands cho dữ liệu đã nối SQLite.
+- `src/lib/excel`: helper frontend dùng ExcelJS để tạo workbook, style worksheet và đặt tên file an toàn.
 - `src/data/mockData.ts`: dữ liệu mẫu và selector/helper lấy dữ liệu.
 - `src/types`: type dữ liệu domain.
 - `src/lib`: helper format và className.
@@ -146,7 +153,7 @@ src/
 - Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
 - Logout reset `selectedClassId` và quay về `"login"`.
 
-Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage` và 4 tab trong lớp. Các trang `Lịch học`, `Tổng hợp học phí`, `Sao lưu dữ liệu`, `Cài đặt` hiện là placeholder đơn giản.
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp và `BackupPage`. Các trang `Lịch học`, `Tổng hợp học phí`, `Cài đặt` hiện là placeholder đơn giản.
 
 ## 6. Danh sách màn hình/trang hiện có
 
@@ -342,7 +349,12 @@ Delete/archive/mark inactive:
 
 Export:
 
-- Nút `"Xuất Excel"` chỉ hiển thị UI, chưa có behavior.
+- Nút `"Xuất Excel"` đã có behavior thật từ Phase 9A.
+- Export dùng dữ liệu đang hiển thị trong bảng sau khi search/filter local; không dùng database id làm STT, STT trong file = row index + 1.
+- Nếu đang có dòng học sinh mới chưa lưu, UI chặn export và yêu cầu bấm `"Lưu cập nhật"` trước.
+- Frontend tạo workbook `.xlsx` bằng ExcelJS, gọi command Rust `save_excel_file` để mở native save dialog và ghi file.
+- File export hiện gồm các cột: STT, Họ tên, Lớp ở trường, Trường, SĐT phụ huynh, Bắt đầu học, Trạng thái, Tháng nghỉ, Ghi chú.
+- SĐT được format dạng dễ đọc trong Excel nhưng vẫn giữ dạng text để không mất số 0 đầu.
 
 State/data source:
 
@@ -797,7 +809,7 @@ State/data source:
 
 - SQLite `app_settings` hiện lưu password hash/salt và `current_academic_year_id`.
 - Settings page chỉ render card tĩnh trong component.
-- Backup page chỉ render action tĩnh disabled.
+- BackupPage đã functional từ Phase 8: sao lưu/khôi phục SQLite, validate file, safety backup, log `backup_logs`, reload app state sau restore.
 
 ## 17. Current state management
 
@@ -855,7 +867,7 @@ State/data source:
 | Add student | StudentListTab | Thêm dòng mới inline, lưu tạo `students` + `class_memberships` | `students`, `class_memberships` | SQLite khi bấm Lưu cập nhật | Có thể thêm validate nâng cao sau |
 | Remove new student row | StudentListTab | Xóa dòng mới chưa lưu bằng icon thùng rác | local `students`, `newStudentIds` | local only | Nếu đã persist cần delete draft hoặc rollback |
 | Edit student | StudentListTab | Sửa fields và status trong edit mode, bấm lưu gọi DB | `students`, `class_memberships.status` | SQLite | Update student/class membership/status |
-| Export student Excel | StudentListTab | Chưa có behavior | none | none | Dùng Excel export sau |
+| Export student Excel | StudentListTab | Tạo workbook `.xlsx` từ danh sách học sinh đang hiển thị, mở native save dialog qua Rust command `save_excel_file` | UI rows đã load từ `students` + `class_memberships` | Không ghi DB | Phase 9A; STT tính từ row hiển thị, cancel dialog không đổi UI |
 | Navigate week | AttendanceTab | Tuần trước/sau hoặc chọn tuần trong mini calendar; gọi `get_attendance_week`, backend materialize buổi thường nếu thiếu | `weekStart`, `attendance_sessions`, `attendance_records` | SQLite read/write session lazily | Week mở lần đầu có thể tạo session regular |
 | Add class-level makeup session | AttendanceTab/AddMakeupSessionDialog | Gọi `create_class_makeup_session`; transaction tạo `class_makeup`, hủy/khóa buổi gốc và ghi Nghỉ cho roster hợp lệ | `attendance_sessions`, `attendance_records` | SQLite | Backend chặn trùng lịch/session toàn bộ lớp active và trùng makeup của cùng buổi gốc |
 | Remove class-level makeup session | AttendanceTab | Xác nhận rồi gọi `remove_class_makeup_session`; xóa records/session bù và mở lại buổi gốc | `attendance_sessions`, `attendance_records` | SQLite | Record Nghỉ của buổi gốc được giữ lại |
@@ -891,12 +903,12 @@ State/data source:
 
 ## 19. Current limitations / chưa có
 
-- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, attendance Phase 7C và backup/restore Phase 8; Excel chưa nối DB.
+- SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, attendance Phase 7C và backup/restore Phase 8.
 - Điểm danh buổi thường và buổi học bù cả lớp đã lưu SQLite cho `present`/`absent`/`makeup`; `"Chưa điểm danh"` không tạo row. Lock/unlock, cancel/restore, class-level makeup và student-level makeup đã persist.
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite. AttendanceTab nhận roster chính thức từ `get_attendance_week`, lọc theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
-- Chưa có Excel export thật dù nhiều nút export đã hiện.
+- Đã có export Excel thật cho danh sách học sinh ở `StudentListTab`; export học phí, bảng điểm, điểm danh và toàn bộ import Excel vẫn chưa triển khai.
 - Trang Lịch học global chỉ là placeholder.
 - Trang Tổng hợp học phí global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
@@ -914,7 +926,7 @@ State/data source:
 
 ## 20. Database status / future candidates based on current code
 
-Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore); Excel vẫn là candidate cho phase sau:
+Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A đã có nền export Excel và export danh sách học sinh; các export/import Excel còn lại vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -947,8 +959,9 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore); E
 10. Phase 7A Attendance regular sessions: đã triển khai.
 11. Phase 7B Attendance cancel/restore + class-level makeup: đã triển khai.
 12. Phase 7C Student-level makeup: đã triển khai.
-13. Phase 8 Backup/restore: next planned, chưa triển khai.
-14. Phase 9 Excel import/export: planned, chưa triển khai.
+13. Phase 8 Backup/restore: đã triển khai.
+14. Phase 9A Excel export foundation + Student List export: đã triển khai.
+15. Phase 9B+ Excel export/import còn lại: next planned.
 
 ## 22. Questions to confirm before backend
 
@@ -976,4 +989,4 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore); E
 - Có cần lịch sử chỉnh sửa học phí/điểm danh/điểm không?
 - Có cần xác nhận khi đổi trạng thái điểm danh từng cell không, hay click đổi ngay là đủ?
 - Backup sẽ lưu vào thư mục nào, có cho người dùng chọn đường dẫn không?
-- Excel export cần mẫu file cố định hay chỉ xuất bảng đang xem?
+- Các export Excel còn lại cần mẫu file cố định hay chỉ xuất bảng đang xem; Excel import danh sách học sinh cần chốt template cố định.

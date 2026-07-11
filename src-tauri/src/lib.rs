@@ -1,6 +1,7 @@
 mod attendance;
 mod backup;
 mod db;
+mod excel;
 mod months;
 mod payments;
 mod school;
@@ -97,7 +98,8 @@ pub fn run() {
             backup::list_backup_logs,
             backup::open_app_data_folder,
             backup::open_backup_folder,
-            backup::pick_backup_file
+            backup::pick_backup_file,
+            excel::save_excel_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

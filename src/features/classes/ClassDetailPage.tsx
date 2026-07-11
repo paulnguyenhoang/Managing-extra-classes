@@ -426,6 +426,8 @@ export function ClassDetailPage({
         <TabsPrimitive.Content value="students" className="outline-none">
           <StudentListTab
             classId={classId}
+            className={className}
+            academicYearLabel={academicYear?.label}
             classStartMonth={startMonth}
             classEndMonth={endMonth}
             onStudentsChanged={refreshClassDetail}

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { PauseStudentDialog } from "@/features/classes/components/PauseStudentDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
+import { exportStudentListToExcel } from "@/features/classes/utils/studentListExport";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { formatPhoneNumber, normalizePhoneNumber } from "@/lib/format";
 import {
@@ -41,6 +42,8 @@ import type { StudentListItem, StudentStatus } from "@/types/student";
 
 type StudentListTabProps = {
   classId: number;
+  className: string;
+  academicYearLabel?: string;
   classStartMonth: string;
   classEndMonth: string;
   onStudentsChanged?: () => void | Promise<void>;
@@ -64,6 +67,8 @@ const studentStatusConfig: Record<
 
 export function StudentListTab({
   classId,
+  className,
+  academicYearLabel,
   classStartMonth,
   classEndMonth,
   onStudentsChanged,
@@ -79,7 +84,9 @@ export function StudentListTab({
   const [searchQuery, setSearchQuery] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [pendingPauseStudent, setPendingPauseStudent] = useState<StudentListItem | null>(null);
   const [debtByMembershipId, setDebtByMembershipId] = useState<Record<string, number>>({});
   const hasValidRange =
@@ -121,6 +128,7 @@ export function StudentListTab({
     setNewStudentIds([]);
     setIsEditing(false);
     setErrorMessage("");
+    setSuccessMessage("");
   }, [dbStudents]);
 
   // "Còn nợ X tháng" cho học sinh đã nghỉ — tính từ bảng payments, không lưu tay.
@@ -218,6 +226,7 @@ export function StudentListTab({
 
     setIsSaving(true);
     setErrorMessage("");
+    setSuccessMessage("");
 
     try {
       for (const student of students) {
@@ -264,7 +273,47 @@ export function StudentListTab({
     }
 
     setErrorMessage("");
+    setSuccessMessage("");
     setIsEditing(true);
+  }
+
+  async function exportVisibleStudents() {
+    if (newStudentIds.length > 0) {
+      setSuccessMessage("");
+      setErrorMessage("Vui lòng lưu cập nhật trước khi xuất Excel.");
+      return;
+    }
+
+    if (filteredStudents.length === 0) {
+      setSuccessMessage("");
+      setErrorMessage("Không có học sinh để xuất Excel.");
+      return;
+    }
+
+    setIsExporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const result = await exportStudentListToExcel({
+        rows: filteredStudents,
+        className,
+        academicYearLabel,
+        classStartMonth,
+        classEndMonth,
+      });
+
+      if (result) {
+        setSuccessMessage("Đã xuất file Excel.");
+      }
+    } catch (error) {
+      console.warn("[students] export failed", error);
+      setErrorMessage(
+        typeof error === "string" ? error : "Không xuất được file Excel.",
+      );
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   function handleStatusChange(student: StudentListItem, nextStatus: StudentStatus) {
@@ -327,7 +376,7 @@ export function StudentListTab({
             variant={isEditing ? "default" : "outline"}
             className="gap-2"
             onClick={toggleEditing}
-            disabled={isLoading || isSaving}
+            disabled={isLoading || isSaving || isExporting}
           >
             {isEditing ? <Check className="size-4" /> : <Pencil className="size-4" />}
             <span className="hidden sm:inline">
@@ -338,14 +387,22 @@ export function StudentListTab({
             type="button"
             className="gap-2"
             onClick={addInlineStudent}
-            disabled={isLoading || isSaving}
+            disabled={isLoading || isSaving || isExporting}
           >
             <Plus className="size-4" />
             <span className="hidden sm:inline">Thêm học sinh</span>
           </Button>
-          <Button variant="outline" className="gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={exportVisibleStudents}
+            disabled={isLoading || isSaving || isExporting || filteredStudents.length === 0}
+          >
             <Download className="size-4" />
-            <span className="hidden sm:inline">Xuất Excel</span>
+            <span className="hidden sm:inline">
+              {isExporting ? "Đang xuất..." : "Xuất Excel"}
+            </span>
           </Button>
         </div>
       </div>
@@ -355,6 +412,11 @@ export function StudentListTab({
       {(loadErrorMessage || errorMessage) && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {loadErrorMessage || errorMessage}
+        </p>
+      )}
+      {successMessage && !errorMessage && (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {successMessage}
         </p>
       )}
 
