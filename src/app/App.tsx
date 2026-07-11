@@ -210,7 +210,15 @@ function App() {
     }
 
     if (screen === "schedule") {
-      return <SchedulePage />;
+      return (
+        <SchedulePage
+          academicYears={academicYears}
+          selectedYearId={selectedYearId}
+          classOverviews={classOverviews}
+          onYearChange={handleYearChange}
+          onOpenClass={handleOpenClass}
+        />
+      );
     }
 
     if (screen === "tuition-dashboard") {

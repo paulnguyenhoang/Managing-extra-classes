@@ -4,6 +4,7 @@ mod db;
 mod excel;
 mod months;
 mod payments;
+mod schedule;
 mod school;
 mod scores;
 mod settings;
@@ -76,6 +77,7 @@ pub fn run() {
             payments::update_payment_note,
             payments::get_unpaid_months_for_membership,
             payments::list_tuition_dashboard,
+            schedule::list_global_schedule_month,
             scores::list_score_sheet,
             scores::add_score_column,
             scores::rename_score_column,
