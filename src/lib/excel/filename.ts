@@ -33,3 +33,12 @@ export function buildPaymentFileName(
   const safeClassName = safeFileNameSegment(className) || "lop-hoc";
   return `hoc-phi-${safeClassName}-${month}-${compactDateTimeForFileName(date)}.xlsx`;
 }
+
+export function buildScoreSheetFileName(
+  className: string,
+  month: string,
+  date = new Date(),
+) {
+  const safeClassName = safeFileNameSegment(className) || "lop-hoc";
+  return `bang-diem-${safeClassName}-${month}-${compactDateTimeForFileName(date)}.xlsx`;
+}

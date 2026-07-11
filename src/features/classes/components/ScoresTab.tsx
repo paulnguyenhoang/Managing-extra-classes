@@ -35,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { exportScoresToExcel } from "@/features/classes/utils/scoreExport";
 import {
   canUseScoreInput,
   formatScoreMonthLabel,
@@ -57,13 +58,14 @@ import type { SaveScoreValueInput, ScoreColumnDto, ScoreSheetDto } from "@/types
 
 type ScoresTabProps = {
   classId: number;
+  className: string;
   classStartMonth: string;
   classEndMonth: string;
 };
 
 const NEW_COLUMN_LABEL = "Bài kiểm tra mới";
 
-export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTabProps) {
+export function ScoresTab({ classId, className, classStartMonth, classEndMonth }: ScoresTabProps) {
   const hasValidRange =
     isValidMonthKey(classStartMonth) &&
     isValidMonthKey(classEndMonth) &&
@@ -80,7 +82,9 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   const [sheet, setSheet] = useState<ScoreSheetDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   // Draft thưa: chỉ giữ các ô/tên cột đã sửa; hiển thị = draft ?? giá trị DB.
   const [draftLabels, setDraftLabels] = useState<Record<number, string>>({});
@@ -117,6 +121,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     setIsEditing(false);
     setDraftLabels({});
     setDraftValues({});
+    setSuccessMessage("");
     refreshSheet().finally(() => {
       if (!cancelled) {
         setIsLoading(false);
@@ -189,6 +194,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     setDraftValues({});
     setIsEditing(true);
     setErrorMessage("");
+    setSuccessMessage("");
     resetScoreSort();
   }
 
@@ -202,6 +208,7 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
   async function handleAddColumn() {
     setIsSaving(true);
     setErrorMessage("");
+    setSuccessMessage("");
     resetScoreSort();
 
     try {
@@ -287,6 +294,56 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
     }
 
     return sortDirection === "asc" ? "↑" : "↓";
+  }
+
+  function getExportSortLabel() {
+    if (!sortColumnId || !sortDirection) {
+      return "Theo tên học sinh";
+    }
+
+    const sortedColumn = columns.find((column) => column.id === sortColumnId);
+    if (!sortedColumn) {
+      return "Theo tên học sinh";
+    }
+
+    return `Theo ${sortedColumn.label} ${sortDirection === "asc" ? "tăng dần" : "giảm dần"}`;
+  }
+
+  async function exportVisibleScores() {
+    if (isEditing) {
+      setSuccessMessage("");
+      setErrorMessage("Vui lòng lưu hoặc hủy cập nhật trước khi xuất Excel.");
+      return;
+    }
+
+    if (sortedRows.length === 0) {
+      setSuccessMessage("");
+      setErrorMessage("Không có học sinh để xuất Excel.");
+      return;
+    }
+
+    setIsExporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const result = await exportScoresToExcel({
+        rows: sortedRows,
+        columns,
+        className,
+        selectedMonth,
+        sortLabel: getExportSortLabel(),
+      });
+
+      if (result) {
+        setSuccessMessage("Đã xuất file Excel.");
+      }
+    } catch (error) {
+      console.warn("[scores] export failed", error);
+      setErrorMessage("Không thể xuất file Excel. Vui lòng thử lại.");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   async function saveEditing() {
@@ -423,9 +480,16 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
                 <Pencil className="size-4" />
                 <span className="hidden sm:inline">Cập nhật</span>
               </Button>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={exportVisibleScores}
+                disabled={isLoading || isSaving || isExporting || sortedRows.length === 0}
+              >
                 <Download className="size-4" />
-                <span className="hidden sm:inline">Xuất bảng điểm</span>
+                <span className="hidden sm:inline">
+                  {isExporting ? "Đang xuất..." : "Xuất bảng điểm"}
+                </span>
               </Button>
             </>
           )}
@@ -435,6 +499,11 @@ export function ScoresTab({ classId, classStartMonth, classEndMonth }: ScoresTab
       {errorMessage ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
           {errorMessage}
+        </div>
+      ) : null}
+      {successMessage && !errorMessage ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {successMessage}
         </div>
       ) : null}
       {isLoading ? (

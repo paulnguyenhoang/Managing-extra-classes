@@ -445,7 +445,12 @@ export function ClassDetailPage({
           />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="scores" className="outline-none">
-          <ScoresTab classId={classId} classStartMonth={startMonth} classEndMonth={endMonth} />
+          <ScoresTab
+            classId={classId}
+            className={className}
+            classStartMonth={startMonth}
+            classEndMonth={endMonth}
+          />
         </TabsPrimitive.Content>
         <TabsPrimitive.Content value="payments" className="outline-none">
           <PaymentsTab
