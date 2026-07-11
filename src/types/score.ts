@@ -79,3 +79,29 @@ export type SaveScoreValuesInput = {
   month: string;
   values: SaveScoreValueInput[];
 };
+
+export type ImportScoreColumnInput = {
+  existingColumnId: number | null;
+  label: string;
+};
+
+export type ImportScoreRowInput = {
+  membershipId: number;
+  studentId: number;
+  fullName: string;
+  values: Array<number | null>;
+};
+
+export type ImportScoreSheetInput = {
+  classId: number;
+  month: string;
+  columns: ImportScoreColumnInput[];
+  deletedColumnIds: number[];
+  rows: Array<Omit<ImportScoreRowInput, "fullName">>;
+};
+
+export type ImportScoreSummary = {
+  createdColumnCount: number;
+  updatedColumnCount: number;
+  deletedColumnCount: number;
+};

@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddScoreColumnInput,
+  ImportScoreSheetInput,
+  ImportScoreSummary,
   RenameScoreColumnInput,
   SaveScoreValuesInput,
   ScoreSheetDto,
@@ -25,4 +27,8 @@ export function deleteScoreColumn(columnId: number) {
 
 export function saveScoreValues(input: SaveScoreValuesInput) {
   return invoke<void>("save_score_values", { request: input });
+}
+
+export function importScoreSheet(input: ImportScoreSheetInput) {
+  return invoke<ImportScoreSummary>("import_score_sheet", { request: input });
 }

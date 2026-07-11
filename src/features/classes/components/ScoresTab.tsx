@@ -7,6 +7,7 @@ import {
   Plus,
   Save,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -35,7 +36,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ScoreImportPreviewDialog } from "@/features/classes/components/ScoreImportPreviewDialog";
 import { exportScoresToExcel } from "@/features/classes/utils/scoreExport";
+import {
+  parseScoreImportFile,
+  type ScoreImportPlan,
+} from "@/features/classes/utils/scoreSheetImport";
 import {
   canUseScoreInput,
   formatScoreMonthLabel,
@@ -47,9 +53,11 @@ import {
   type ScoreSortDirection,
 } from "@/features/classes/utils/scores";
 import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
+import { pickExcelImportFile } from "@/services/excelImportApi";
 import {
   addScoreColumn,
   deleteScoreColumn,
+  importScoreSheet,
   listScoreSheet,
   renameScoreColumn,
   saveScoreValues,
@@ -83,6 +91,8 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importPlan, setImportPlan] = useState<ScoreImportPlan | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isEditing, setIsEditing] = useState(false);
@@ -328,6 +338,7 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
 
     try {
       const result = await exportScoresToExcel({
+        classId,
         rows: sortedRows,
         columns,
         className,
@@ -343,6 +354,84 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
       setErrorMessage("Không thể xuất file Excel. Vui lòng thử lại.");
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function handleImportExcel() {
+    if (isEditing) {
+      setSuccessMessage("");
+      setErrorMessage("Vui lòng lưu hoặc hủy cập nhật trước khi nhập Excel.");
+      return;
+    }
+
+    if (!sheet) {
+      return;
+    }
+
+    setIsImporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const file = await pickExcelImportFile();
+      if (!file) {
+        return;
+      }
+
+      setImportPlan(
+        await parseScoreImportFile({
+          fileName: file.fileName,
+          bytes: file.bytes,
+          classId,
+          className,
+          selectedMonth,
+          sheet,
+          eligibleRows: sortedRows,
+        }),
+      );
+    } catch (error) {
+      console.warn("[scores] import parse failed", error);
+      setErrorMessage(getImportErrorMessage(error));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function confirmImport() {
+    if (!importPlan) {
+      return;
+    }
+
+    setIsImporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await importScoreSheet({
+        classId,
+        month: selectedMonth,
+        columns: importPlan.columns.map((column) => ({
+          existingColumnId: column.existingColumnId,
+          label: column.label,
+        })),
+        deletedColumnIds: importPlan.deletedColumns.map((column) => column.id),
+        rows: importPlan.rows.map((row) => ({
+          membershipId: row.membershipId,
+          studentId: row.studentId,
+          values: row.values,
+        })),
+      });
+
+      setImportPlan(null);
+      resetScoreSort();
+      await refreshSheet();
+      setSuccessMessage("Đã nhập bảng điểm.");
+    } catch (error) {
+      console.warn("[scores] import failed", error);
+      setImportPlan(null);
+      setErrorMessage(getImportErrorMessage(error));
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -467,7 +556,11 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
             </>
           ) : (
             <>
-              <Button className="gap-2" onClick={handleAddColumn} disabled={isSaving}>
+              <Button
+                className="gap-2"
+                onClick={handleAddColumn}
+                disabled={isSaving || isImporting}
+              >
                 <Plus className="size-4" />
                 <span className="hidden sm:inline">Thêm bài kiểm tra</span>
               </Button>
@@ -475,7 +568,7 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
                 variant="outline"
                 className="gap-2"
                 onClick={startEditing}
-                disabled={isSaving || !hasColumns}
+                disabled={isSaving || isImporting || !hasColumns}
               >
                 <Pencil className="size-4" />
                 <span className="hidden sm:inline">Cập nhật</span>
@@ -483,8 +576,21 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
               <Button
                 variant="outline"
                 className="gap-2"
+                onClick={handleImportExcel}
+                disabled={isLoading || isSaving || isExporting || isImporting || !sheet}
+              >
+                <Upload className="size-4" />
+                <span className="hidden sm:inline">
+                  {isImporting ? "Đang nhập..." : "Nhập Excel"}
+                </span>
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-2"
                 onClick={exportVisibleScores}
-                disabled={isLoading || isSaving || isExporting || sortedRows.length === 0}
+                disabled={
+                  isLoading || isSaving || isExporting || isImporting || sortedRows.length === 0
+                }
               >
                 <Download className="size-4" />
                 <span className="hidden sm:inline">
@@ -613,6 +719,17 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
         </div>
       ) : null}
 
+      <ScoreImportPreviewDialog
+        plan={importPlan}
+        isImporting={isImporting}
+        onOpenChange={(open) => {
+          if (!open) {
+            setImportPlan(null);
+          }
+        }}
+        onConfirm={confirmImport}
+      />
+
       <Dialog
         open={Boolean(pendingDeleteColumn)}
         onOpenChange={(open) => {
@@ -642,4 +759,14 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
       </Dialog>
     </div>
   );
+}
+
+function getImportErrorMessage(error: unknown) {
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return error instanceof Error
+    ? error.message
+    : "Không thể đọc file Excel. Vui lòng kiểm tra lại file.";
 }

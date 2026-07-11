@@ -80,6 +80,7 @@ pub fn run() {
             scores::rename_score_column,
             scores::delete_score_column,
             scores::save_score_values,
+            scores::import_score_sheet,
             attendance::get_attendance_week,
             attendance::set_attendance_status,
             attendance::toggle_attendance_lock,

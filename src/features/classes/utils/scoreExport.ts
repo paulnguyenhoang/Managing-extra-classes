@@ -13,6 +13,7 @@ import { saveExcelFile, type ExcelSaveResult } from "@/services/excelExportApi";
 import type { ScoreColumnDto, ScoreSheetRow } from "@/types/score";
 
 export type ExportScoresInput = {
+  classId: number;
   rows: ScoreSheetRow[];
   columns: ScoreColumnDto[];
   className: string;
@@ -20,7 +21,11 @@ export type ExportScoresInput = {
   sortLabel: string;
 };
 
+/// Tên sheet ẩn chứa map id để import an toàn; không hiện ID trong sheet nhìn thấy.
+export const SCORE_IMPORT_MAP_SHEET = "_score_import_map";
+
 export async function exportScoresToExcel({
+  classId,
   rows,
   columns,
   className,
@@ -74,8 +79,39 @@ export async function exportScoresToExcel({
   applyColumnWidths(worksheet, [8, 28, ...columns.map(() => 14)]);
   freezeHeader(worksheet, headerRowNumber);
 
+  addImportMapSheet(workbook, { classId, className, selectedMonth, rows, columns });
+
   const bytes = await workbookToBytes(workbook);
   return saveExcelFile(buildScoreSheetFileName(className, selectedMonth, exportedAt), bytes);
+}
+
+/// Sheet ẩn (veryHidden) cho phép import ghép đúng học sinh/cột theo id thay vì chỉ theo tên.
+function addImportMapSheet(
+  workbook: ExcelJS.Workbook,
+  {
+    classId,
+    className,
+    selectedMonth,
+    rows,
+    columns,
+  }: {
+    classId: number;
+    className: string;
+    selectedMonth: string;
+    rows: ScoreSheetRow[];
+    columns: ScoreColumnDto[];
+  },
+) {
+  const mapSheet = workbook.addWorksheet(SCORE_IMPORT_MAP_SHEET);
+  mapSheet.state = "veryHidden";
+
+  mapSheet.addRow(["meta", classId, className, selectedMonth]);
+  columns.forEach((column) => {
+    mapSheet.addRow(["column", column.id, column.label]);
+  });
+  rows.forEach((row) => {
+    mapSheet.addRow(["student", row.membershipId, row.studentId, row.fullName]);
+  });
 }
 
 function addColumnStatistics(
