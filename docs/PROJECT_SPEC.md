@@ -154,7 +154,7 @@ src/
 - Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
 - Logout reset `selectedClassId` và quay về `"login"`.
 
-Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage` và `TuitionDashboardPage`. Các trang `Lịch học`, `Cài đặt` hiện là placeholder đơn giản.
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage`, `TuitionDashboardPage` và `SchedulePage`. Trang `Cài đặt` hiện là placeholder đơn giản.
 
 ## 6. Danh sách màn hình/trang hiện có
 
@@ -168,7 +168,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong l
 | Tab Điểm danh | `AttendanceTab.tsx` | Điểm danh theo tuần | implemented Phase 7C | Regular/class makeup + Có học/Nghỉ/Học bù + lock/cancel/restore lưu SQLite; receiving makeup rows lưu qua `student_makeup_records.receiving_attendance_status` |
 | Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | SQLite Phase 6: `score_columns`/`score_values`, keyed theo membership/month |
 | Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | SQLite Phase 5: bảng `payments`, khóa `(membership_id, month)` |
-| Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
+| Lịch học | `SchedulePage.tsx` | Lịch tháng tổng hợp buổi học các lớp | implemented | SQLite Phase 11: command `list_global_schedule_month`, read-only |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Dashboard học phí toàn app theo năm học/tháng | implemented | SQLite Phase 10: command `list_tuition_dashboard`, read-only |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Sao lưu/khôi phục database SQLite | implemented | SQLite Phase 8: backup API, `backup_logs`, safety backup trước restore |
 | Cài đặt | `SettingsPage.tsx` | Placeholder thiết lập | placeholder | Card mô tả tĩnh |
@@ -190,7 +190,7 @@ Sidebar hiện có 5 item:
 | Item | Screen value | Component mở ra | Trạng thái |
 |---|---|---|---|
 | Tổng quan | `home` | `HomePage` | functional |
-| Lịch học | `schedule` | `SchedulePage` | placeholder |
+| Lịch học | `schedule` | `SchedulePage` | functional |
 | Học phí | `tuition-dashboard` | `TuitionDashboardPage` | functional |
 | Sao lưu dữ liệu | `backup` | `BackupPage` | functional |
 | Cài đặt | `settings` | `SettingsPage` | placeholder |
@@ -727,11 +727,14 @@ State/data source:
 
 ### Lịch học
 
-- File: `src/features/schedule/SchedulePage.tsx`.
-- UI: title `"Lịch học"`, description `"Lịch tổng hợp các lớp theo tháng/tuần sẽ được phát triển sau."`
-- Có card `"Buổi học sắp tới"` với 3 session mock tĩnh.
-- Không có tương tác thật.
-- Trạng thái: placeholder.
+- File: `src/features/schedule/SchedulePage.tsx`, service `src/services/scheduleApi.ts`, backend `src-tauri/src/schedule/mod.rs` (command `list_global_schedule_month`).
+- Lịch tháng dạng lưới 7 cột T2..CN (tuần bắt đầu Thứ 2), tự dựng bằng React/Tailwind, không dùng thư viện calendar; ngày kề tháng hiển thị mờ; hôm nay có chấm tròn highlight.
+- Backend CHỈ ĐỌC: sinh buổi thường trong bộ nhớ từ `class_schedules` cho các lớp có tháng trong `start_month..end_month`, rồi overlay `attendance_sessions` đã persist trong tháng (regular ghép theo lớp/ngày/thứ tự buổi, fallback theo lớp/ngày khi lịch đã đổi; class_makeup và buổi lịch sử không còn khớp lịch vẫn hiển thị). Mở lịch KHÔNG materialize session, KHÔNG ghi DB.
+- Mỗi ô ngày hiển thị tối đa 3 badge buổi học (`"18:00 Văn 9 - Ôn thi"`, prefix `"Bù · "` cho học bù cả lớp, `"Nghỉ · "` cho buổi đã hủy; màu sky/amber/red nhạt), quá 3 hiện `"+N buổi nữa"`; click ô ngày mở panel `"Buổi học ngày ..."` liệt kê đủ buổi.
+- Click badge/buổi mở dialog chi tiết: loại buổi, trạng thái (Đang học/Nghỉ + cảnh báo `"Buổi này đang được đánh dấu nghỉ."`), ngày (Thứ..., dd/MM/yyyy), giờ, khối, thời gian lớp, học phí tháng, số học sinh (đếm theo lifecycle tháng đang xem), ghi chú nếu có; nút `"Mở lớp"` mở ClassDetailPage, `"Đóng"`.
+- Toolbar: chọn năm học (đồng bộ App/Home), tháng trước/sau + label `"Tháng MM/YYYY"` + nút `"Hôm nay"` (clamp trong năm học), filter khối (Tất cả/8/9), filter lớp (từ classOverviews của năm), filter loại buổi (Tất cả/Buổi thường/Học bù cả lớp/Buổi nghỉ) — filter chạy frontend trên events đã load.
+- Loading/error/empty states tiếng Việt: `"Không thể tải lịch học. Vui lòng thử lại."`, `"Không có buổi học nào trong tháng này."`, `"Năm học này chưa có lớp."`
+- Trạng thái: implemented (Phase 11), read-only — không tạo/sửa attendance records hay payment từ lịch tổng hợp.
 
 ### Học phí dashboard/global page
 
@@ -743,7 +746,7 @@ State/data source:
 - Bảng: STT (= index + 1 sau filter/sort, không dùng database ID), Học sinh (kèm lớp ở trường/trường), Lớp, Khối, Trạng thái (màu giống PaymentsTab), Học phí tháng, Số tiền đã thu, Ngày đóng, Ghi chú, nút `"Mở lớp"` mở ClassDetailPage của lớp đó qua `onOpenClass`.
 - Sort hiển thị: khối → tên lớp → tên tiếng Việt (helper chung) → membershipId ổn định.
 - Loading/error/empty state tiếng Việt; đổi năm học reset filter lớp và kéo tháng về trong khoảng năm.
-- Trạng thái: implemented (Phase 10). SchedulePage và SettingsPage vẫn là placeholder.
+- Trạng thái: implemented (Phase 10). SettingsPage vẫn là placeholder.
 
 ### Sao lưu dữ liệu
 
@@ -957,7 +960,6 @@ State/data source:
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Đã có export Excel thật cho danh sách học sinh ở `StudentListTab` và học phí ở `PaymentsTab`; export bảng điểm, điểm danh và toàn bộ import Excel vẫn chưa triển khai.
-- Trang Lịch học global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
@@ -1013,7 +1015,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 17. Phase 9D Student list import: đã triển khai.
 18. Phase 9E Score sheet import: đã triển khai.
 19. Phase 10 Global tuition dashboard: đã triển khai (read-only, command `list_tuition_dashboard`).
-20. Phase 11 Global Schedule Page, Phase 12 Settings Page: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
+20. Phase 11 Global Schedule Page: đã triển khai (read-only, command `list_global_schedule_month`).
+21. Phase 12 Settings Page: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
 
 ## 22. Questions to confirm before backend
 

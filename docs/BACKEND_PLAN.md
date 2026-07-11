@@ -1119,10 +1119,24 @@ Trạng thái hiện tại: đã triển khai.
 - Backend sort theo khối → tên lớp → tên học sinh → membership id; frontend re-sort tên tiếng Việt bằng helper chung.
 - Frontend: `src/services/tuitionDashboardApi.ts` + `TuitionDashboardPage.tsx` (năm học đồng bộ App/Home, tháng trong năm, filter khối/lớp/trạng thái, search, summary cards theo visible rows, nút `"Mở lớp"` mở ClassDetailPage).
 
+### Phase 11. Global Schedule Page
+
+Trạng thái hiện tại: đã triển khai.
+
+- Command `list_global_schedule_month(academic_year_id, month)` trong `src-tauri/src/schedule/mod.rs` — CHỈ ĐỌC, không ghi DB.
+- Buổi thường được TÍNH trong bộ nhớ từ `class_schedules` (cùng thứ tự sort với Attendance để `session_index_in_week` khớp: `CASE weekday=0 THEN 7`, start_time, sort_order) cho mọi ngày trong tháng khớp weekday, chỉ với lớp có `start_month <= month <= end_month`. KHÔNG materialize `attendance_sessions` khi xem lịch — khác với AttendanceTab (mở tuần mới materialize).
+- Overlay `attendance_sessions` đã persist trong tháng của mọi lớp thuộc năm học: regular trùng (class, date, session_index) thay thế slot sinh từ lịch (giữ sessionId/status/isLocked/note, hiện được buổi Nghỉ); fallback ghép theo (class, date) khi thứ tự buổi đã đổi; session lịch sử không khớp lịch hiện tại và class_makeup được thêm riêng — lịch sử không bị mất.
+- Ngày/thứ tính bằng SQLite (`strftime('%w')`, recursive CTE cho các ngày trong tháng) — không thêm crate date nào.
+- Tháng ngoài khoảng năm học → trả events rỗng; năm học không tồn tại → lỗi tiếng Việt.
+- Event kèm thông tin lớp cho dialog: grade, start/end month, status, monthly_fee, student_count (đếm membership hợp lệ trong tháng theo cùng rule lifecycle).
+- Sort: date → start_time → end_time → grade → class name.
+- Frontend: `src/services/scheduleApi.ts` + `src/types/schedule.ts` + `SchedulePage.tsx` (lưới tháng tự dựng, filter khối/lớp/loại buổi frontend-only, dialog chi tiết, nút `"Mở lớp"`). Không thêm dependency mới.
+
 ### Next planned
 
-- Phase 11: Global Schedule Page.
 - Phase 12: Settings Page.
+- Phase 13: Backend hardening cho rule chống trùng lịch (hiện mới enforce ở frontend + khi tạo class makeup).
+- Optional: attendance export/import, payment import — chỉ làm nếu thật sự cần.
 
 ## 10. Testing checklist
 
