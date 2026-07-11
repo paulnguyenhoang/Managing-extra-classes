@@ -68,6 +68,7 @@ pub fn run() {
             students::update_class_membership_status,
             students::pause_student_membership,
             students::reactivate_student_membership,
+            students::import_students_for_class,
             payments::list_payments_by_class_month,
             payments::set_payment_paid,
             payments::set_payment_unpaid,
@@ -99,7 +100,8 @@ pub fn run() {
             backup::open_app_data_folder,
             backup::open_backup_folder,
             backup::pick_backup_file,
-            excel::save_excel_file
+            excel::save_excel_file,
+            excel::pick_excel_import_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

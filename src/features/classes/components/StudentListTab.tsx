@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Check, Download, Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PauseStudentDialog } from "@/features/classes/components/PauseStudentDialog";
+import { StudentImportPreviewDialog } from "@/features/classes/components/StudentImportPreviewDialog";
 import { useClassStudents } from "@/features/classes/hooks/useClassStudents";
 import { exportStudentListToExcel } from "@/features/classes/utils/studentListExport";
+import {
+  parseStudentImportFile,
+  type StudentImportPlan,
+} from "@/features/classes/utils/studentListImport";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { formatPhoneNumber, normalizePhoneNumber } from "@/lib/format";
 import {
@@ -31,9 +36,11 @@ import {
   isValidMonthKey,
   monthsInRange,
 } from "@/lib/months";
+import { pickExcelImportFile } from "@/services/excelImportApi";
 import { getUnpaidMonthsForMembership } from "@/services/paymentApi";
 import {
   createStudentForClass,
+  importStudentsForClass,
   pauseStudentMembership,
   reactivateStudentMembership,
   updateStudent,
@@ -85,6 +92,8 @@ export function StudentListTab({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importPlan, setImportPlan] = useState<StudentImportPlan | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [pendingPauseStudent, setPendingPauseStudent] = useState<StudentListItem | null>(null);
@@ -123,12 +132,13 @@ export function StudentListTab({
     [normalizedQuery, students],
   );
 
+  // Không reset successMessage ở đây: refresh sau khi nhập Excel cần giữ thông báo thành công;
+  // các handler đều tự clear message khi bắt đầu thao tác mới.
   useEffect(() => {
     setStudents(dbStudents);
     setNewStudentIds([]);
     setIsEditing(false);
     setErrorMessage("");
-    setSuccessMessage("");
   }, [dbStudents]);
 
   // "Còn nợ X tháng" cho học sinh đã nghỉ — tính từ bảng payments, không lưu tay.
@@ -316,6 +326,71 @@ export function StudentListTab({
     }
   }
 
+  async function handleImportExcel() {
+    if (isEditing || newStudentIds.length > 0) {
+      setSuccessMessage("");
+      setErrorMessage("Vui lòng lưu hoặc hủy cập nhật trước khi nhập Excel.");
+      return;
+    }
+
+    setIsImporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const file = await pickExcelImportFile();
+      if (!file) {
+        return;
+      }
+
+      // Match với roster DB gốc, không dùng danh sách đã filter theo search.
+      setImportPlan(
+        await parseStudentImportFile({
+          fileName: file.fileName,
+          bytes: file.bytes,
+          roster: dbStudents,
+          classStartMonth,
+          classEndMonth,
+        }),
+      );
+    } catch (error) {
+      console.warn("[students] import parse failed", error);
+      setErrorMessage(getImportErrorMessage(error));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function confirmImport() {
+    if (!importPlan) {
+      return;
+    }
+
+    const rows = importPlan.rows.flatMap((row) => (row.input ? [row.input] : []));
+    if (rows.length === 0) {
+      setImportPlan(null);
+      return;
+    }
+
+    setIsImporting(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      await importStudentsForClass({ classId, rows });
+      setImportPlan(null);
+      await refresh();
+      await onStudentsChanged?.();
+      setSuccessMessage("Đã nhập danh sách học sinh.");
+    } catch (error) {
+      console.warn("[students] import failed", error);
+      setImportPlan(null);
+      setErrorMessage(getImportErrorMessage(error));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   function handleStatusChange(student: StudentListItem, nextStatus: StudentStatus) {
     if (nextStatus === student.status) {
       return;
@@ -332,6 +407,7 @@ export function StudentListTab({
   async function reactivateStudent(student: StudentListItem) {
     setIsSaving(true);
     setErrorMessage("");
+    setSuccessMessage("");
 
     try {
       await reactivateStudentMembership(Number(student.membershipId));
@@ -352,6 +428,7 @@ export function StudentListTab({
       return;
     }
 
+    setSuccessMessage("");
     await pauseStudentMembership(Number(pendingPauseStudent.membershipId), leftMonth);
     setPendingPauseStudent(null);
     await refresh();
@@ -387,7 +464,7 @@ export function StudentListTab({
             type="button"
             className="gap-2"
             onClick={addInlineStudent}
-            disabled={isLoading || isSaving || isExporting}
+            disabled={isLoading || isSaving || isExporting || isImporting}
           >
             <Plus className="size-4" />
             <span className="hidden sm:inline">Thêm học sinh</span>
@@ -396,8 +473,22 @@ export function StudentListTab({
             type="button"
             variant="outline"
             className="gap-2"
+            onClick={handleImportExcel}
+            disabled={isLoading || isSaving || isExporting || isImporting}
+          >
+            <Upload className="size-4" />
+            <span className="hidden sm:inline">
+              {isImporting ? "Đang nhập..." : "Nhập Excel"}
+            </span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
             onClick={exportVisibleStudents}
-            disabled={isLoading || isSaving || isExporting || filteredStudents.length === 0}
+            disabled={
+              isLoading || isSaving || isExporting || isImporting || filteredStudents.length === 0
+            }
           >
             <Download className="size-4" />
             <span className="hidden sm:inline">
@@ -556,6 +647,18 @@ export function StudentListTab({
         </Table>
       </div>
 
+      <StudentImportPreviewDialog
+        plan={importPlan}
+        className={className}
+        isImporting={isImporting}
+        onOpenChange={(open) => {
+          if (!open) {
+            setImportPlan(null);
+          }
+        }}
+        onConfirm={confirmImport}
+      />
+
       <PauseStudentDialog
         open={Boolean(pendingPauseStudent)}
         studentName={pendingPauseStudent?.fullName ?? ""}
@@ -573,6 +676,16 @@ export function StudentListTab({
       />
     </div>
   );
+}
+
+function getImportErrorMessage(error: unknown) {
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return error instanceof Error
+    ? error.message
+    : "Không thể đọc file Excel. Vui lòng kiểm tra lại file.";
 }
 
 function StudentStatusBadge({ status }: { status: StudentStatus }) {

@@ -63,6 +63,36 @@ pub struct UpdateClassMembershipStatusRequest {
     status: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStudentRowInput {
+    full_name: String,
+    school_class: String,
+    school: String,
+    parent_phone: String,
+    joined_month: String,
+    status: String,
+    left_month: Option<String>,
+    note: Option<String>,
+    matched_membership_id: Option<i64>,
+    matched_student_id: Option<i64>,
+    action: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStudentsRequest {
+    class_id: i64,
+    rows: Vec<ImportStudentRowInput>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStudentsSummaryDto {
+    created_count: i64,
+    updated_count: i64,
+}
+
 struct SeedStudent {
     class_key: &'static str,
     full_name: &'static str,
@@ -380,6 +410,197 @@ pub fn reactivate_student_membership(
 
         Ok(())
     })
+}
+
+#[tauri::command]
+pub fn import_students_for_class(
+    database: tauri::State<'_, AppDatabase>,
+    request: ImportStudentsRequest,
+) -> Result<ImportStudentsSummaryDto, String> {
+    validate_class_exists(&database, request.class_id)?;
+
+    if request.rows.is_empty() {
+        return Err("Không có dòng nào để nhập.".to_string());
+    }
+
+    database.with_connection_mut(|connection| {
+        let (class_start_month, class_end_month) = class_month_range(connection, request.class_id)?;
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction nhập học sinh: {error}"))?;
+
+        let mut created_count = 0i64;
+        let mut updated_count = 0i64;
+
+        for (index, row) in request.rows.iter().enumerate() {
+            let row_label = format!("Dòng {} ({})", index + 1, row.full_name.trim());
+
+            validate_import_row(row, &class_start_month, &class_end_month)
+                .map_err(|error| format!("{row_label}: {error}"))?;
+
+            let full_name = row.full_name.trim().to_string();
+            let school_class = row.school_class.trim().to_string();
+            let school = row.school.trim().to_string();
+            let parent_phone = row.parent_phone.trim().to_string();
+            let note = normalize_optional_text(row.note.as_deref());
+            let left_month = if row.status == "paused" {
+                row.left_month.clone()
+            } else {
+                None
+            };
+
+            match row.action.as_str() {
+                "create" => {
+                    transaction
+                        .execute(
+                            "INSERT INTO students
+                             (full_name, school_class, school, parent_phone, note, is_archived, created_at, updated_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            params![full_name, school_class, school, parent_phone, note],
+                        )
+                        .map_err(|error| format!("{row_label}: không tạo được học sinh: {error}"))?;
+                    let student_id = transaction.last_insert_rowid();
+
+                    transaction
+                        .execute(
+                            "INSERT INTO class_memberships
+                             (class_id, student_id, status, joined_at, left_at, note, joined_month, left_month, created_at, updated_at)
+                             VALUES (?1, ?2, ?3, CURRENT_DATE, NULL, NULL, ?4, ?5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                            params![
+                                request.class_id,
+                                student_id,
+                                row.status,
+                                row.joined_month,
+                                left_month
+                            ],
+                        )
+                        .map_err(|error| {
+                            format!("{row_label}: không thêm được học sinh vào lớp: {error}")
+                        })?;
+
+                    created_count += 1;
+                }
+                "update" => {
+                    let membership_id = row.matched_membership_id.ok_or_else(|| {
+                        format!("{row_label}: thiếu thông tin học sinh cần cập nhật.")
+                    })?;
+                    let student_id = row.matched_student_id.ok_or_else(|| {
+                        format!("{row_label}: thiếu thông tin học sinh cần cập nhật.")
+                    })?;
+
+                    let membership: Option<(i64, i64)> = transaction
+                        .query_row(
+                            "SELECT class_id, student_id FROM class_memberships WHERE id = ?1",
+                            params![membership_id],
+                            |db_row| Ok((db_row.get(0)?, db_row.get(1)?)),
+                        )
+                        .optional()
+                        .map_err(|error| {
+                            format!("{row_label}: không đọc được học sinh trong lớp: {error}")
+                        })?;
+
+                    let Some((membership_class_id, membership_student_id)) = membership else {
+                        return Err(format!("{row_label}: không tìm thấy học sinh trong lớp."));
+                    };
+
+                    if membership_class_id != request.class_id
+                        || membership_student_id != student_id
+                    {
+                        return Err(format!(
+                            "{row_label}: thông tin học sinh không khớp với lớp hiện tại."
+                        ));
+                    }
+
+                    transaction
+                        .execute(
+                            "UPDATE students
+                             SET full_name = ?1,
+                                 school_class = ?2,
+                                 school = ?3,
+                                 parent_phone = ?4,
+                                 note = ?5,
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE id = ?6 AND is_archived = 0",
+                            params![full_name, school_class, school, parent_phone, note, student_id],
+                        )
+                        .map_err(|error| {
+                            format!("{row_label}: không cập nhật được học sinh: {error}")
+                        })?;
+
+                    transaction
+                        .execute(
+                            "UPDATE class_memberships
+                             SET status = ?1,
+                                 joined_month = ?2,
+                                 left_month = ?3,
+                                 left_at = CASE WHEN ?1 = 'paused' THEN CURRENT_DATE ELSE NULL END,
+                                 updated_at = CURRENT_TIMESTAMP
+                             WHERE id = ?4",
+                            params![row.status, row.joined_month, left_month, membership_id],
+                        )
+                        .map_err(|error| {
+                            format!("{row_label}: không cập nhật được học sinh trong lớp: {error}")
+                        })?;
+
+                    updated_count += 1;
+                }
+                _ => {
+                    return Err(format!("{row_label}: hành động nhập không hợp lệ."));
+                }
+            }
+        }
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được dữ liệu nhập học sinh: {error}"))?;
+
+        Ok(ImportStudentsSummaryDto {
+            created_count,
+            updated_count,
+        })
+    })
+}
+
+fn validate_import_row(
+    row: &ImportStudentRowInput,
+    class_start_month: &str,
+    class_end_month: &str,
+) -> Result<(), String> {
+    validate_student_name(&row.full_name)?;
+    validate_membership_status(&row.status)?;
+
+    crate::months::validate_month(&row.joined_month)
+        .map_err(|_| "tháng bắt đầu học không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+
+    if row.joined_month.as_str() < class_start_month || row.joined_month.as_str() > class_end_month
+    {
+        return Err(format!(
+            "tháng bắt đầu học phải nằm trong thời gian học của lớp ({} - {}).",
+            crate::months::format_month_label(class_start_month),
+            crate::months::format_month_label(class_end_month)
+        ));
+    }
+
+    if row.status == "paused" {
+        let left_month = row
+            .left_month
+            .as_deref()
+            .ok_or_else(|| "học sinh đã nghỉ cần có tháng nghỉ.".to_string())?;
+
+        crate::months::validate_month(left_month)
+            .map_err(|_| "tháng nghỉ không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
+
+        if left_month < row.joined_month.as_str() {
+            return Err("tháng nghỉ không được trước tháng bắt đầu học.".to_string());
+        }
+
+        if left_month > class_end_month {
+            return Err("tháng nghỉ không được vượt quá thời gian học của lớp.".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn class_month_range(connection: &Connection, class_id: i64) -> Result<(String, String), String> {

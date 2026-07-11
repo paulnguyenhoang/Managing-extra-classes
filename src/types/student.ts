@@ -59,3 +59,27 @@ export type UpdateStudentInput = {
   parentPhone: string;
   note?: string;
 };
+
+export type StudentImportRowInput = {
+  fullName: string;
+  schoolClass: string;
+  school: string;
+  parentPhone: string;
+  joinedMonth: string;
+  status: StudentStatus;
+  leftMonth: string | null;
+  note: string | null;
+  matchedMembershipId: number | null;
+  matchedStudentId: number | null;
+  action: "create" | "update";
+};
+
+export type ImportStudentsInput = {
+  classId: number;
+  rows: StudentImportRowInput[];
+};
+
+export type ImportStudentsSummary = {
+  createdCount: number;
+  updatedCount: number;
+};

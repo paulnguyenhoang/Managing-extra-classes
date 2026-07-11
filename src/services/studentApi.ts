@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ClassStudentRosterItem,
   CreateStudentForClassInput,
+  ImportStudentsInput,
+  ImportStudentsSummary,
   StudentStatus,
   UpdateStudentInput,
 } from "@/types/student";
@@ -35,4 +37,8 @@ export function reactivateStudentMembership(membershipId: number) {
   return invoke<void>("reactivate_student_membership", {
     request: { membershipId },
   });
+}
+
+export function importStudentsForClass(input: ImportStudentsInput) {
+  return invoke<ImportStudentsSummary>("import_students_for_class", { request: input });
 }
