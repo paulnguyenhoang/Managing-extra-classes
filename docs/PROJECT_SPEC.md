@@ -12,7 +12,7 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
 - Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
 - Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 8: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup, student-level makeup và backup/restore.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm; Phase 9D đã có import danh sách học sinh từ Excel. Import học phí/điểm và export điểm danh vẫn chưa triển khai.
+- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm; Phase 9D đã có import danh sách học sinh; Phase 9E đã có import bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -30,7 +30,7 @@ Các công nghệ/thư viện hiện diện trong `package.json`, config hoặc 
 - tw-animate-css: animation CSS được import trong `App.css`.
 - @fontsource-variable/geist: font được import trong `App.css`.
 - @tanstack/react-table, react-hook-form, zod, @hookform/resolvers: có trong dependency nhưng hiện chưa thấy được dùng trong các màn hình chính đã đọc.
-- exceljs: dùng ở frontend cho Phase 9A/9B/9C export danh sách học sinh, học phí và bảng điểm ra `.xlsx`.
+- exceljs: dùng ở frontend cho Phase 9A-9C export danh sách học sinh/học phí/bảng điểm ra `.xlsx` và Phase 9D/9E đọc file import.
 
 ## 4. Cấu trúc thư mục thực tế
 
@@ -598,6 +598,20 @@ Export:
 - Filename: `bang-diem-[ten-lop]-[YYYY-MM]-YYYYMMDD-HHMMSS.xlsx` qua helper filename chung.
 - Export chỉ đọc dữ liệu đã load, không ghi SQLite, không lưu draft; ở edit mode nút không hiển thị và handler chặn với thông báo `"Vui lòng lưu hoặc hủy cập nhật trước khi xuất Excel."`
 - Nút có loading `"Đang xuất..."`, disable khi đang tải/lưu/xuất hoặc không có học sinh; hủy save dialog thì không báo lỗi; thành công hiện `"Đã xuất file Excel."`
+- Từ Phase 9E, file export có thêm sheet ẩn `_score_import_map` (state veryHidden) chứa classId/className/month + membershipId/studentId/fullName + columnId/label để import ghép an toàn theo id; sheet nhìn thấy vẫn không hiện database ID.
+
+Import:
+
+- Nút `"Nhập Excel"` đã có behavior thật từ Phase 9E (`src/features/classes/utils/scoreSheetImport.ts`, dialog `ScoreImportPreviewDialog`, command `import_score_sheet`).
+- Nhận file export của ScoresTab: sheet `"Bảng điểm"` (hoặc sheet đầu tiên) với dòng tiêu đề `STT` / `Họ tên`; STT bị bỏ qua; ưu tiên sheet map ẩn, file tự tạo không có map vẫn nhập được nếu ghép tên/cột không mơ hồ.
+- Validate lớp/tháng TRƯỚC khi ghi: map ẩn so classId/month, không có map thì so metadata `Lớp`/`Tháng` (nhận MM/YYYY hoặc YYYY-MM); sai lớp → `"File Excel không đúng lớp hiện tại."`, sai tháng → `"File Excel không đúng tháng đang chọn."`, thiếu metadata → `"File Excel thiếu thông tin lớp hoặc tháng."`
+- Import KHÔNG tạo/sửa/xóa học sinh: mọi dòng phải khớp đúng 1 học sinh hợp lệ của lớp/tháng (map ẩn theo membershipId, fallback theo tên chuẩn hóa); tên lạ/tên sửa/dòng thừa → lỗi `"Học sinh không tồn tại trong lớp/tháng hiện tại."`; tên trùng → lỗi `"Tên học sinh bị trùng, không thể tự động ghép điểm."`; file thiếu học sinh đang có → lỗi `"Thiếu học sinh trong file Excel."` — mọi lỗi đều chặn toàn bộ import.
+- Cột điểm: khớp theo tên chuẩn hóa; cột chưa khớp + map ẩn → đổi tên theo thứ tự; cột mới → thêm; cột DB thiếu trong file → XÓA cột và toàn bộ điểm, chỉ sau khi preview cảnh báo rõ; tên cột trống/trùng trong file → lỗi.
+- Ô điểm: trống hoặc `"-"` = xóa trắng điểm (NULL); số 0-10, nhận dấu phẩy thập phân (`8,5` → 8.5); text khác → lỗi.
+- Preview dialog bắt buộc: file/lớp/tháng, số học sinh, cột thêm/đổi tên/xóa, số điểm thay đổi/xóa trắng, danh sách lỗi; có lỗi thì `"Xác nhận nhập"` bị disable; có xóa cột thì cảnh báo mạnh và nút confirm chuyển destructive.
+- Backend `import_score_sheet` re-validate toàn bộ (cột thuộc lớp/tháng, cover đủ mọi cột hiện có, roster khớp đúng eligible memberships, điểm 0-10) và chạy MỘT transaction: xóa cột thiếu (điểm trước, cột sau) → cập nhật/tạo cột với sort_order theo thứ tự file → upsert điểm (NULL chỉ update row có sẵn, không tạo row thừa). Chỉ ghi `score_columns`/`score_values` của lớp/tháng đang chọn.
+- Ở edit mode, import bị chặn với `"Vui lòng lưu hoặc hủy cập nhật trước khi nhập Excel."`; hủy picker/preview không đổi gì; thành công hiện `"Đã nhập bảng điểm."` và refresh sheet từ DB.
+- Import học phí và export/import điểm danh vẫn là phase sau.
 
 ## 14. Tab Học phí hiện tại
 
@@ -914,7 +928,8 @@ State/data source:
 | Edit score value | ScoresTab | Input điểm trong edit mode (draft thưa) | draft local | local đến khi lưu | Validate 0-10 khi nhập và khi lưu |
 | Save scores | ScoresTab | Validate, gọi `save_score_values` batch, refresh từ DB | `score_values` | SQLite | Transaction upsert theo `(column_id, membership_id)`; trống = NULL |
 | Cancel score edit | ScoresTab | Discard draft, quay về giá trị DB | draft local | none | Không ghi DB |
-| Export score Excel | ScoresTab | Tạo workbook `.xlsx` từ bảng điểm đang hiển thị theo tháng/sort, kèm thống kê theo bài kiểm tra, mở native save dialog qua `save_excel_file` | UI rows đã load từ `score_columns` + `score_values` | Không ghi DB | Phase 9C; STT tính từ row hiển thị, chặn export khi đang edit |
+| Export score Excel | ScoresTab | Tạo workbook `.xlsx` từ bảng điểm đang hiển thị theo tháng/sort, kèm thống kê theo bài kiểm tra + sheet map ẩn, mở native save dialog qua `save_excel_file` | UI rows đã load từ `score_columns` + `score_values` | Không ghi DB | Phase 9C/9E; STT tính từ row hiển thị, chặn export khi đang edit |
+| Import score Excel | ScoresTab | Native picker + parse ExcelJS + preview dialog, xác nhận gọi `import_score_sheet` (transaction) | `score_columns` + `score_values` của lớp/tháng đang chọn | SQLite | Phase 9E; STT bị bỏ qua, không đụng students/payments/attendance, xóa cột thiếu chỉ sau preview |
 | Change payment month | PaymentsTab | Chuyển month state và load lại rows SQLite | `selectedMonth`, `rows` | SQLite read | Query `payments` by class/month |
 | Search payment student | PaymentsTab | Lọc tên học sinh local | UI only | none | Search/filter khi data lớn |
 | Filter payment status | PaymentsTab | Lọc rows local | UI only | none | Query/filter |
@@ -954,7 +969,7 @@ State/data source:
 
 ## 20. Database status / future candidates based on current code
 
-Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A-9C đã có export danh sách học sinh, học phí và bảng điểm; Phase 9D đã có import danh sách học sinh. Import học phí/điểm và export điểm danh vẫn là candidate cho phase sau:
+Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). Phase 9A-9C đã có export danh sách học sinh, học phí và bảng điểm; Phase 9D/9E đã có import danh sách học sinh và bảng điểm. Import học phí và export/import điểm danh vẫn là candidate cho phase sau:
 
 | Entity | Trạng thái hiện tại |
 |---|---|
@@ -992,7 +1007,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 15. Phase 9B Payment export: đã triển khai.
 16. Phase 9C Score sheet export: đã triển khai.
 17. Phase 9D Student list import: đã triển khai.
-18. Phase 9E+ import học phí/điểm, export điểm danh: next planned.
+18. Phase 9E Score sheet import: đã triển khai.
+19. Phase 9F+ import học phí, export/import điểm danh: next planned.
 
 ## 22. Questions to confirm before backend
 

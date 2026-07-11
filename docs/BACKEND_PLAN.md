@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9D đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm và import danh sách học sinh). Import học phí/điểm và export điểm danh vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9E đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm, import danh sách học sinh và import bảng điểm). Import học phí và export/import điểm danh vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -28,7 +28,7 @@ Mục tiêu backend cho MVP:
   - Học bù theo học sinh
 - Hỗ trợ sao lưu/khôi phục file database (đã triển khai Phase 8: SQLite backup API + `backup_logs`).
 - Nền tảng export Excel từ dữ liệu thật đã có ở Phase 9A cho danh sách học sinh, Phase 9B cho học phí và Phase 9C cho bảng điểm.
-- Import Excel danh sách học sinh theo định dạng export đã triển khai ở Phase 9D; import học phí/điểm là phase sau.
+- Import Excel danh sách học sinh (Phase 9D) và bảng điểm (Phase 9E) theo định dạng export đã triển khai; import học phí là phase sau.
 
 Nguyên tắc dữ liệu đã chốt:
 
@@ -134,7 +134,7 @@ Vị trí database gợi ý:
   - báo cáo học phí (đã triển khai Phase 9B ở cấp lớp/tháng)
   - bảng điểm (đã triển khai Phase 9C ở cấp lớp/tháng)
   - bảng điểm danh
-- Excel import đã bắt đầu từ danh sách học sinh (Phase 9D), nhận đúng định dạng file export của StudentListTab; import học phí/điểm cân nhắc phase sau.
+- Excel import đã có cho danh sách học sinh (Phase 9D) và bảng điểm (Phase 9E), nhận đúng định dạng file export tương ứng; import học phí cân nhắc phase sau.
 - Excel không phải database chính. SQLite vẫn là nguồn sự thật; Excel chỉ là kênh nhập/xuất dữ liệu.
 
 ### ID strategy
@@ -1085,6 +1085,16 @@ Phase 9D đã triển khai (import danh sách học sinh):
 - Command `import_students_for_class`: re-validate từng dòng ở backend (không tin frontend), một transaction cho cả đợt; create insert `students` + `class_memberships`; update chỉ update field của student + joined_month/status/left_month của membership sau khi kiểm tra membership thuộc đúng lớp/học sinh; trả `createdCount`/`updatedCount`.
 - Safety rules: không xóa học sinh/membership vắng mặt trong file (no delete by omission); không đụng payments/scores/attendance — nếu đổi joined/left_month làm record cũ rơi ra ngoài khoảng, record vẫn được giữ nguyên; ô Excel trống khi update giữ giá trị hiện có.
 
+Phase 9E đã triển khai (import bảng điểm):
+
+- Export bảng điểm thêm sheet ẩn `_score_import_map` (veryHidden): meta classId/className/month, danh sách cột (columnId/label) và học sinh (membershipId/studentId/fullName). Sheet nhìn thấy không đổi và vẫn không hiện database ID.
+- Frontend parse ở `src/features/classes/utils/scoreSheetImport.ts`: tìm bảng chính theo dòng tiêu đề `STT`/`Họ tên`; validate lớp/tháng bằng map ẩn (classId/month) hoặc metadata `Lớp`/`Tháng` khi không có map — sai lớp/tháng/thiếu metadata đều chặn trước khi preview.
+- Học sinh: import không tạo/sửa/xóa học sinh; mỗi dòng phải khớp đúng 1 học sinh hợp lệ của lớp/tháng (map ẩn theo membershipId, fallback tên chuẩn hóa); tên lạ/dòng thừa/file thiếu học sinh/tên trùng đều là lỗi chặn toàn bộ.
+- Cột điểm: khớp theo tên; cột chưa khớp ghép theo thứ tự với map ẩn = đổi tên; cột mới = thêm; cột DB thiếu trong file = xóa cột + toàn bộ điểm, chỉ sau preview cảnh báo mạnh; nhãn trống/trùng là lỗi.
+- Điểm: trống hoặc `"-"` = NULL (xóa trắng); số 0-10, nhận dấu phẩy thập phân; text khác là lỗi.
+- Command `import_score_sheet` re-validate ở backend (không tin frontend): tháng trong khoảng lớp; cột existing/deleted phải cover đúng toàn bộ cột hiện có của lớp/tháng (chặn file cũ/lệch state); roster request phải khớp đúng eligible memberships; điểm 0-10. MỘT transaction: xóa cột thiếu (values trước) → update label/sort_order cột giữ lại → insert cột mới (sort_order theo thứ tự file) → upsert values (NULL chỉ update row có sẵn).
+- Import chỉ ghi `score_columns`/`score_values`; không đụng students/payments/attendance.
+
 Phần next planned:
 
 Mục tiêu:
@@ -1093,9 +1103,8 @@ Mục tiêu:
 
 Deliverables:
 
-- Phase 9E: Import học phí.
-- Phase 9F: Import điểm.
-- Export điểm danh theo tuần/tháng (chưa xếp phase).
+- Phase 9F: Import học phí.
+- Export/import điểm danh theo tuần/tháng (chưa xếp phase).
 - Không coi Excel là database chính; import chỉ ghi dữ liệu đã validate vào SQLite.
 
 ## 10. Testing checklist
@@ -1212,7 +1221,7 @@ Excel import/export:
 - `schema_migrations` giữ cơ chế tracking migration hiện tại.
 - Database IDs là internal identifiers, có thể có gap, không renumber để làm đẹp.
 - STT trong UI/Excel luôn tính từ row hiển thị bằng `index + 1`, không dùng database ID.
-- Phase 9A/9B/9C export danh sách học sinh, học phí và bảng điểm là hành vi frontend-only về dữ liệu: đọc rows đã load từ SQLite, tạo file Excel, rồi gọi Rust command để lưu file; không thay đổi schema hoặc dữ liệu DB.
+- Phase 9A/9B/9C export danh sách học sinh, học phí và bảng điểm là hành vi frontend-only về dữ liệu: đọc rows đã load từ SQLite, tạo file Excel, rồi gọi Rust command để lưu file; không thay đổi schema hoặc dữ liệu DB. Phase 9D/9E import ghi DB qua command riêng có transaction và re-validate backend, không đổi schema.
 - Không hard-delete học sinh trong normal use.
 - Một học sinh có thể thuộc nhiều lớp.
 - Student status lưu theo `class_memberships`.
