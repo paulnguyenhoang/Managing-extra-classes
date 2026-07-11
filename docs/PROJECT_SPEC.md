@@ -127,7 +127,8 @@ src/
 - `src/components/ui`: shadcn/ui wrappers.
 - `src/features/home`: trang tổng quan và card lớp.
 - `src/features/classes`: trang chi tiết lớp, 4 tab lõi, hooks/utils cho điểm danh, điểm, học phí, lịch học.
-- `src/features/schedule`, `src/features/tuition-dashboard`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/features/schedule`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/features/tuition-dashboard`: dashboard học phí toàn app (functional từ Phase 10).
 - `src/features/backup`: trang sao lưu/khôi phục SQLite (functional từ Phase 8).
 - `src/services`: wrapper gọi Tauri commands cho dữ liệu đã nối SQLite.
 - `src/lib/excel`: helper frontend dùng ExcelJS để tạo workbook, style worksheet và đặt tên file an toàn.
@@ -153,7 +154,7 @@ src/
 - Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
 - Logout reset `selectedClassId` và quay về `"login"`.
 
-Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp và `BackupPage`. Các trang `Lịch học`, `Tổng hợp học phí`, `Cài đặt` hiện là placeholder đơn giản.
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage` và `TuitionDashboardPage`. Các trang `Lịch học`, `Cài đặt` hiện là placeholder đơn giản.
 
 ## 6. Danh sách màn hình/trang hiện có
 
@@ -168,7 +169,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong l
 | Tab Nhập điểm | `ScoresTab.tsx` | Bảng điểm theo tháng | implemented | SQLite Phase 6: `score_columns`/`score_values`, keyed theo membership/month |
 | Tab Học phí | `PaymentsTab.tsx` | Theo dõi học phí theo tháng | implemented | SQLite Phase 5: bảng `payments`, khóa `(membership_id, month)` |
 | Lịch học | `SchedulePage.tsx` | Placeholder lịch tổng hợp | placeholder | Có card buổi học sắp tới mock |
-| Tổng hợp học phí | `TuitionDashboardPage.tsx` | Placeholder dashboard học phí toàn app | placeholder | Summary card mock tĩnh |
+| Tổng hợp học phí | `TuitionDashboardPage.tsx` | Dashboard học phí toàn app theo năm học/tháng | implemented | SQLite Phase 10: command `list_tuition_dashboard`, read-only |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Sao lưu/khôi phục database SQLite | implemented | SQLite Phase 8: backup API, `backup_logs`, safety backup trước restore |
 | Cài đặt | `SettingsPage.tsx` | Placeholder thiết lập | placeholder | Card mô tả tĩnh |
 
@@ -190,7 +191,7 @@ Sidebar hiện có 5 item:
 |---|---|---|---|
 | Tổng quan | `home` | `HomePage` | functional |
 | Lịch học | `schedule` | `SchedulePage` | placeholder |
-| Học phí | `tuition-dashboard` | `TuitionDashboardPage` | placeholder |
+| Học phí | `tuition-dashboard` | `TuitionDashboardPage` | functional |
 | Sao lưu dữ liệu | `backup` | `BackupPage` | functional |
 | Cài đặt | `settings` | `SettingsPage` | placeholder |
 
@@ -734,11 +735,15 @@ State/data source:
 
 ### Học phí dashboard/global page
 
-- File: `src/features/tuition-dashboard/TuitionDashboardPage.tsx`.
-- UI: title `"Tổng hợp học phí"`, description `"Dashboard tổng hợp học phí theo tháng sẽ được phát triển sau."`
-- Có 4 summary card mock tĩnh: đã thu tháng này, chưa đóng, miễn giảm, số lớp theo dõi.
-- Không liên kết với `PaymentsTab`.
-- Trạng thái: placeholder.
+- File: `src/features/tuition-dashboard/TuitionDashboardPage.tsx`, service `src/services/tuitionDashboardApi.ts`, backend command `list_tuition_dashboard` trong `src-tauri/src/payments/mod.rs`.
+- Title `"Tổng hợp học phí"`, description `"Theo dõi học phí theo tháng trên toàn bộ các lớp."`
+- Controls: chọn năm học (đồng bộ với Home qua `handleYearChange` của App), chọn tháng trong khoảng năm học kèm nút tháng trước/sau (mặc định clamp tháng hiện tại), filter khối (Tất cả/8/9), filter lớp (sinh từ rows đang có), filter trạng thái (Tất cả/Chưa đóng/Đã đóng/Miễn giảm) và search (tên, lớp ở trường, trường, SĐT, tên lớp, ghi chú).
+- Backend query mọi lớp active của năm học có `start_month <= month <= end_month`, membership hợp lệ theo CÙNG rule lifecycle với PaymentsTab (`joined_month <= month` và `left_month` NULL hoặc `month < left_month`), LEFT JOIN `payments` theo (membership, month); chưa có payment row → dòng ảo unpaid amount 0. XEM DASHBOARD KHÔNG TẠO PAYMENT ROW, không ghi DB — Phase 10 hoàn toàn read-only.
+- Summary cards tính theo danh sách đang hiển thị (label `"Tổng hợp theo danh sách đang hiển thị"`): Tổng đã thu (paid + waived), Chưa đóng, Đã đóng, Miễn giảm, Số học sinh.
+- Bảng: STT (= index + 1 sau filter/sort, không dùng database ID), Học sinh (kèm lớp ở trường/trường), Lớp, Khối, Trạng thái (màu giống PaymentsTab), Học phí tháng, Số tiền đã thu, Ngày đóng, Ghi chú, nút `"Mở lớp"` mở ClassDetailPage của lớp đó qua `onOpenClass`.
+- Sort hiển thị: khối → tên lớp → tên tiếng Việt (helper chung) → membershipId ổn định.
+- Loading/error/empty state tiếng Việt; đổi năm học reset filter lớp và kéo tháng về trong khoảng năm.
+- Trạng thái: implemented (Phase 10). SchedulePage và SettingsPage vẫn là placeholder.
 
 ### Sao lưu dữ liệu
 
@@ -953,7 +958,6 @@ State/data source:
 - Chưa có React Router.
 - Đã có export Excel thật cho danh sách học sinh ở `StudentListTab` và học phí ở `PaymentsTab`; export bảng điểm, điểm danh và toàn bộ import Excel vẫn chưa triển khai.
 - Trang Lịch học global chỉ là placeholder.
-- Trang Tổng hợp học phí global chỉ là placeholder.
 - Trang Cài đặt chỉ là placeholder.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
@@ -1008,7 +1012,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 16. Phase 9C Score sheet export: đã triển khai.
 17. Phase 9D Student list import: đã triển khai.
 18. Phase 9E Score sheet import: đã triển khai.
-19. Phase 9F+ import học phí, export/import điểm danh: next planned.
+19. Phase 10 Global tuition dashboard: đã triển khai (read-only, command `list_tuition_dashboard`).
+20. Phase 11 Global Schedule Page, Phase 12 Settings Page: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
 
 ## 22. Questions to confirm before backend
 

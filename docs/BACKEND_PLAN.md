@@ -1103,9 +1103,26 @@ Mục tiêu:
 
 Deliverables:
 
-- Phase 9F: Import học phí.
 - Export/import điểm danh theo tuần/tháng (chưa xếp phase).
+- Import học phí: optional, chỉ làm nếu thật sự cần.
 - Không coi Excel là database chính; import chỉ ghi dữ liệu đã validate vào SQLite.
+
+### Phase 10. Global Tuition Dashboard
+
+Trạng thái hiện tại: đã triển khai.
+
+- Command `list_tuition_dashboard(academic_year_id, month)` trong `src-tauri/src/payments/mod.rs`: JOIN classes/class_memberships/students + LEFT JOIN payments theo (membership, month).
+- Chỉ lấy lớp active của năm học có `start_month <= month <= end_month`; membership hợp lệ theo cùng rule lifecycle với PaymentsTab; membership paused vẫn hiện nếu hợp lệ trong tháng.
+- Chưa có payment row → trả dòng ảo `unpaid`, amount 0, paidAt/paymentId NULL. Command CHỈ ĐỌC — xem dashboard không insert payment row, không ghi DB.
+- Tháng ngoài khoảng năm học → trả rows rỗng (frontend chỉ cho chọn tháng trong năm nên bình thường không xảy ra).
+- Summary (tổng học sinh, đã đóng, chưa đóng, miễn giảm, tổng đã thu = paid + waived) tính từ rows trả về; frontend tính lại theo rows đang hiển thị khi có filter/search.
+- Backend sort theo khối → tên lớp → tên học sinh → membership id; frontend re-sort tên tiếng Việt bằng helper chung.
+- Frontend: `src/services/tuitionDashboardApi.ts` + `TuitionDashboardPage.tsx` (năm học đồng bộ App/Home, tháng trong năm, filter khối/lớp/trạng thái, search, summary cards theo visible rows, nút `"Mở lớp"` mở ClassDetailPage).
+
+### Next planned
+
+- Phase 11: Global Schedule Page.
+- Phase 12: Settings Page.
 
 ## 10. Testing checklist
 
