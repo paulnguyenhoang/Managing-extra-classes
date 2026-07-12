@@ -32,17 +32,20 @@ import {
   paymentFilterOptions,
   type PaymentFilter,
 } from "@/features/classes/utils/payments";
+import { getClassMonthOptionsForYear } from "@/features/classes/utils/classMonthOptions";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
 import { formatCurrency, formatDate, formatPhoneNumber, paymentStatusLabel } from "@/lib/format";
-import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
+import { clampMonthToRange, currentMonthKey } from "@/lib/months";
 import { listTuitionDashboard } from "@/services/tuitionDashboardApi";
 import type { AcademicYear } from "@/types/academic-year";
+import type { ClassOverview } from "@/types/class";
 import type { PaymentStatus } from "@/types/payment";
-import type { TuitionDashboardDto, TuitionDashboardRowDto } from "@/types/tuition";
+import type { TuitionDashboardDto } from "@/types/tuition";
 
 type TuitionDashboardPageProps = {
   academicYears: AcademicYear[];
   selectedYearId: number | null;
+  classOverviews: ClassOverview[];
   onYearChange: (yearId: number) => void | Promise<void>;
   onOpenClass: (classId: number) => void;
 };
@@ -58,23 +61,15 @@ const statusBadgeClasses: Record<PaymentStatus, string> = {
 export function TuitionDashboardPage({
   academicYears,
   selectedYearId,
+  classOverviews,
   onYearChange,
   onOpenClass,
 }: TuitionDashboardPageProps) {
   const selectedYear = academicYears.find((year) => year.id === selectedYearId) ?? null;
-  const monthOptions = useMemo(() => {
-    if (!selectedYear) {
-      return [currentMonthKey()];
-    }
-
-    const startMonth = selectedYear.startsAt.slice(0, 7);
-    const endMonth = selectedYear.endsAt.slice(0, 7);
-    if (!isValidMonthKey(startMonth) || !isValidMonthKey(endMonth) || startMonth > endMonth) {
-      return [currentMonthKey()];
-    }
-
-    return monthsInRange(startMonth, endMonth);
-  }, [selectedYear]);
+  const monthOptions = useMemo(
+    () => getClassMonthOptionsForYear(selectedYear, classOverviews),
+    [classOverviews, selectedYear],
+  );
 
   const [selectedMonth, setSelectedMonth] = useState(() => currentMonthKey());
   const [dashboard, setDashboard] = useState<TuitionDashboardDto | null>(null);
@@ -134,19 +129,41 @@ export function TuitionDashboardPage({
     };
   }, [monthOptions, selectedMonth, selectedYearId]);
 
-  const classOptions = useMemo(() => {
-    const seen = new Map<number, { id: number; name: string; grade: number }>();
-    (dashboard?.rows ?? []).forEach((row) => {
-      if (!seen.has(row.classId)) {
-        seen.set(row.classId, { id: row.classId, name: row.className, grade: row.grade });
-      }
-    });
+  const classOptions = useMemo(
+    () =>
+      classOverviews
+        .filter(
+          (classItem) =>
+            selectedYearId === null || classItem.academicYearId === selectedYearId,
+        )
+        .map((classItem) => ({
+          id: classItem.id,
+          name: classItem.name,
+          grade: classItem.grade ?? 9,
+        }))
+        .sort(
+          (first, second) =>
+            first.grade - second.grade || first.name.localeCompare(second.name, "vi"),
+        ),
+    [classOverviews, selectedYearId],
+  );
 
-    return [...seen.values()].sort(
-      (first, second) =>
-        first.grade - second.grade || first.name.localeCompare(second.name, "vi"),
-    );
-  }, [dashboard]);
+  const filteredClassOptions = useMemo(
+    () =>
+      classOptions.filter(
+        (classItem) => gradeFilter === "all" || String(classItem.grade) === gradeFilter,
+      ),
+    [classOptions, gradeFilter],
+  );
+
+  useEffect(() => {
+    if (
+      classFilter !== "all" &&
+      !filteredClassOptions.some((classItem) => String(classItem.id) === classFilter)
+    ) {
+      setClassFilter("all");
+    }
+  }, [classFilter, filteredClassOptions]);
 
   const visibleRows = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -301,7 +318,7 @@ export function TuitionDashboardPage({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Tất cả lớp</SelectItem>
-            {classOptions.map((classItem) => (
+            {filteredClassOptions.map((classItem) => (
               <SelectItem key={classItem.id} value={String(classItem.id)}>
                 {classItem.name}
               </SelectItem>

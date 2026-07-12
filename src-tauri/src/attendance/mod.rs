@@ -1243,13 +1243,29 @@ fn materialize_regular_sessions(
 ) -> Result<(), String> {
     let schedules = list_schedules(connection, class_id)?;
     let today = current_local_date(connection)?;
+    let week_end = sqlite_date(connection, week_start, 6)?;
+    let has_existing_regular_session_in_week = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1
+               FROM attendance_sessions
+               WHERE class_id = ?1
+                 AND session_date BETWEEN ?2 AND ?3
+                 AND type = 'regular'
+             )",
+            params![class_id, week_start, week_end],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| format!("Không kiểm tra được buổi điểm danh trong tuần: {error}"))?
+        != 0;
 
     for (index, schedule) in schedules.iter().enumerate() {
         let offset = weekday_to_week_offset(schedule.weekday)?;
         let session_date = sqlite_date(connection, week_start, offset)?;
         let session_month = month_from_date(&session_date)?;
+        let is_past_session = session_date.as_str() < today.as_str();
 
-        if !include_past && session_date.as_str() < today.as_str() {
+        if !include_past && is_past_session && has_existing_regular_session_in_week {
             continue;
         }
 
@@ -1257,25 +1273,29 @@ fn materialize_regular_sessions(
             continue;
         }
 
-        let updated_count = connection
-            .execute(
-                "UPDATE attendance_sessions
-                 SET start_time = ?1,
-                     end_time = ?2,
-                     session_index_in_week = ?3,
-                     updated_at = CURRENT_TIMESTAMP
-                 WHERE class_id = ?4
-                   AND session_date = ?5
-                   AND type = 'regular'",
-                params![
-                    schedule.start_time,
-                    schedule.end_time,
-                    (index as i64) + 1,
-                    class_id,
-                    session_date
-                ],
-            )
-            .map_err(|error| format!("Không cập nhật được buổi điểm danh theo lịch: {error}"))?;
+        let updated_count = if include_past || !is_past_session {
+            connection
+                .execute(
+                    "UPDATE attendance_sessions
+                     SET start_time = ?1,
+                         end_time = ?2,
+                         session_index_in_week = ?3,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE class_id = ?4
+                       AND session_date = ?5
+                       AND type = 'regular'",
+                    params![
+                        schedule.start_time,
+                        schedule.end_time,
+                        (index as i64) + 1,
+                        class_id,
+                        session_date
+                    ],
+                )
+                .map_err(|error| format!("Không cập nhật được buổi điểm danh theo lịch: {error}"))?
+        } else {
+            0
+        };
 
         if updated_count > 0 {
             continue;

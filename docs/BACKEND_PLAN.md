@@ -1112,25 +1112,29 @@ Deliverables:
 Trạng thái hiện tại: đã triển khai.
 
 - Command `list_tuition_dashboard(academic_year_id, month)` trong `src-tauri/src/payments/mod.rs`: JOIN classes/class_memberships/students + LEFT JOIN payments theo (membership, month).
-- Chỉ lấy lớp active của năm học có `start_month <= month <= end_month`; membership hợp lệ theo cùng rule lifecycle với PaymentsTab; membership paused vẫn hiện nếu hợp lệ trong tháng.
+- Command chỉ kiểm tra `academic_year_id` có tồn tại; dữ liệu tháng dựa trên `classes.start_month/end_month` và lifecycle của membership, không bị chặn bởi `academic_years.starts_at/ends_at`.
+- Chỉ lấy lớp của năm học có `start_month <= month <= end_month`; membership hợp lệ theo cùng rule lifecycle với PaymentsTab; membership paused vẫn hiện nếu hợp lệ trong tháng.
 - Chưa có payment row → trả dòng ảo `unpaid`, amount 0, paidAt/paymentId NULL. Command CHỈ ĐỌC — xem dashboard không insert payment row, không ghi DB.
-- Tháng ngoài khoảng năm học → trả rows rỗng (frontend chỉ cho chọn tháng trong năm nên bình thường không xảy ra).
+- Nếu tháng không có lớp nào hoạt động theo `start_month/end_month` thì trả rows rỗng; năm học không tồn tại → lỗi tiếng Việt.
 - Summary (tổng học sinh, đã đóng, chưa đóng, miễn giảm, tổng đã thu = paid + waived) tính từ rows trả về; frontend tính lại theo rows đang hiển thị khi có filter/search.
 - Backend sort theo khối → tên lớp → tên học sinh → membership id; frontend re-sort tên tiếng Việt bằng helper chung.
-- Frontend: `src/services/tuitionDashboardApi.ts` + `TuitionDashboardPage.tsx` (năm học đồng bộ App/Home, tháng trong năm, filter khối/lớp/trạng thái, search, summary cards theo visible rows, nút `"Mở lớp"` mở ClassDetailPage).
+- Frontend: `src/services/tuitionDashboardApi.ts` + `TuitionDashboardPage.tsx` (năm học đồng bộ App/Home, tháng sinh từ dải `startMonth..endMonth` thật của các lớp trong năm đang chọn, filter khối/lớp/trạng thái, search, summary cards theo visible rows, nút `"Mở lớp"` mở ClassDetailPage).
+- Dropdown lớp trong dashboard lấy từ `classOverviews` của đúng năm học đang chọn, rồi lọc theo khối nếu filter khối là Khối 8/Khối 9. Không dùng tên lớp đơn thuần để gom qua nhiều năm học, vì các năm sau có thể đặt trùng tên lớp.
 
 ### Phase 11. Global Schedule Page
 
 Trạng thái hiện tại: đã triển khai.
 
 - Command `list_global_schedule_month(academic_year_id, month)` trong `src-tauri/src/schedule/mod.rs` — CHỈ ĐỌC, không ghi DB.
+- Command chỉ kiểm tra `academic_year_id` có tồn tại; dữ liệu tháng dựa trên `classes.start_month/end_month`, không bị chặn bởi `academic_years.starts_at/ends_at`.
 - Buổi thường được TÍNH trong bộ nhớ từ `class_schedules` (cùng thứ tự sort với Attendance để `session_index_in_week` khớp: `CASE weekday=0 THEN 7`, start_time, sort_order) cho mọi ngày trong tháng khớp weekday, chỉ với lớp có `start_month <= month <= end_month`. KHÔNG materialize `attendance_sessions` khi xem lịch — khác với AttendanceTab (mở tuần mới materialize).
 - Overlay `attendance_sessions` đã persist trong tháng của mọi lớp thuộc năm học: regular trùng (class, date, session_index) thay thế slot sinh từ lịch (giữ sessionId/status/isLocked/note, hiện được buổi Nghỉ); fallback ghép theo (class, date) khi thứ tự buổi đã đổi; session lịch sử không khớp lịch hiện tại và class_makeup được thêm riêng — lịch sử không bị mất.
 - Ngày/thứ tính bằng SQLite (`strftime('%w')`, recursive CTE cho các ngày trong tháng) — không thêm crate date nào.
-- Tháng ngoài khoảng năm học → trả events rỗng; năm học không tồn tại → lỗi tiếng Việt.
+- Nếu tháng không có lớp nào hoạt động theo `start_month/end_month` thì trả events rỗng; năm học không tồn tại → lỗi tiếng Việt.
 - Event kèm thông tin lớp cho dialog: grade, start/end month, status, monthly_fee, student_count (đếm membership hợp lệ trong tháng theo cùng rule lifecycle).
 - Sort: date → start_time → end_time → grade → class name.
-- Frontend: `src/services/scheduleApi.ts` + `src/types/schedule.ts` + `SchedulePage.tsx` (lưới tháng tự dựng, filter khối/lớp/loại buổi frontend-only, dialog chi tiết, nút `"Mở lớp"`). Không thêm dependency mới.
+- Frontend: `src/services/scheduleApi.ts` + `src/types/schedule.ts` + `SchedulePage.tsx` (lưới tháng tự dựng, tháng sinh từ dải `startMonth..endMonth` thật của các lớp trong năm đang chọn, filter khối/lớp/loại buổi frontend-only, dialog chi tiết, nút `"Mở lớp"`). Không thêm dependency mới.
+- Dropdown lớp trong lịch tổng hợp lấy từ `classOverviews` của đúng năm học đang chọn, rồi lọc theo khối nếu filter khối là Khối 8/Khối 9. Điều này tránh lẫn lớp trùng tên giữa các năm học.
 
 ### Next planned
 
@@ -1262,7 +1266,10 @@ Excel import/export:
 - Không có late/excused trong MVP.
 - Regular attendance sessions có thể được materialize khi mở tuần hoặc khi có thao tác đầu tiên.
 - Sửa lịch học không rewrite các attendance sessions trong quá khứ.
+- Khi mở một tuần quá khứ chưa từng có regular session nào, backend có thể materialize lần đầu từ lịch hiện tại để lớp mới tạo với `start_month` ở quá khứ không bị trắng tab Điểm danh. Nếu tuần quá khứ đã có regular session, backend không update/ghi thêm theo lịch mới.
 - Khi sửa lịch học, service chỉ dọn/sync regular attendance sessions từ ngày hiện tại trở đi và chỉ với session chưa có `attendance_records`; session quá khứ giữ nguyên để không làm sai lịch sử điểm danh.
+- Các trang global theo tháng như Lịch học và Tổng hợp học phí dùng `classes.start_month/end_month` làm nguồn xác định tháng có dữ liệu; `academic_years.starts_at/ends_at` là metadata năm học, không được dùng để ẩn lớp có tháng bắt đầu/kết thúc hợp lệ.
+- Dropdown lớp ở các trang global phải lọc theo `academic_year_id` đang chọn trước, sau đó mới lọc theo khối, để không lẫn lớp trùng tên giữa các năm học.
 - Class-level makeup là `attendance_sessions.type = class_makeup`.
 - Class-level makeup phải có `start_time` và `end_time`.
 - Backend service phải chặn lịch học/lịch học bù trùng khoảng giờ giữa các lớp active, vì app chỉ phục vụ một giáo viên dạy trực tiếp.

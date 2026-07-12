@@ -521,35 +521,17 @@ pub fn list_tuition_dashboard(
     validate_month(&month)?;
 
     database.with_connection(|connection| {
-        let year_range: Option<(String, String)> = connection
+        let year_exists: Option<i64> = connection
             .query_row(
-                "SELECT starts_at, ends_at FROM academic_years WHERE id = ?1",
+                "SELECT id FROM academic_years WHERE id = ?1",
                 params![academic_year_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .optional()
             .map_err(|error| format!("Không đọc được năm học: {error}"))?;
 
-        let Some((starts_at, ends_at)) = year_range else {
+        if year_exists.is_none() {
             return Err("Không tìm thấy năm học.".to_string());
-        };
-
-        // Tháng ngoài năm học: trả kết quả rỗng thay vì lỗi (frontend chỉ chọn tháng trong năm).
-        let year_start_month = starts_at.chars().take(7).collect::<String>();
-        let year_end_month = ends_at.chars().take(7).collect::<String>();
-        if month < year_start_month || month > year_end_month {
-            return Ok(TuitionDashboardDto {
-                academic_year_id,
-                month,
-                rows: Vec::new(),
-                summary: TuitionDashboardSummaryDto {
-                    total_students: 0,
-                    paid_count: 0,
-                    unpaid_count: 0,
-                    waived_count: 0,
-                    total_collected: 0,
-                },
-            });
         }
 
         let mut statement = connection

@@ -329,7 +329,10 @@ pub fn import_score_sheet(
 
         let normalized = column.label.trim().to_lowercase();
         if !normalized_labels.insert(normalized) {
-            return Err(format!("Tên cột điểm bị trùng: \"{}\".", column.label.trim()));
+            return Err(format!(
+                "Tên cột điểm bị trùng: \"{}\".",
+                column.label.trim()
+            ));
         }
     }
 

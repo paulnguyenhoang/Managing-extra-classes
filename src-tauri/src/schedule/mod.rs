@@ -84,27 +84,17 @@ pub fn list_global_schedule_month(
         .map_err(|_| "Tháng lịch học không hợp lệ, cần định dạng YYYY-MM.".to_string())?;
 
     database.with_connection(|connection| {
-        let year_range: Option<(String, String)> = connection
+        let year_exists: Option<i64> = connection
             .query_row(
-                "SELECT starts_at, ends_at FROM academic_years WHERE id = ?1",
+                "SELECT id FROM academic_years WHERE id = ?1",
                 params![academic_year_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .optional()
             .map_err(|error| format!("Không đọc được năm học: {error}"))?;
 
-        let Some((starts_at, ends_at)) = year_range else {
+        if year_exists.is_none() {
             return Err("Không tìm thấy năm học.".to_string());
-        };
-
-        let year_start_month = starts_at.chars().take(7).collect::<String>();
-        let year_end_month = ends_at.chars().take(7).collect::<String>();
-        if month < year_start_month || month > year_end_month {
-            return Ok(GlobalScheduleMonthDto {
-                academic_year_id,
-                month,
-                events: Vec::new(),
-            });
         }
 
         let classes = load_classes(connection, academic_year_id, &month)?;
@@ -179,11 +169,13 @@ pub fn list_global_schedule_month(
                 }
 
                 // Lịch đã đổi thứ tự buổi: ghép theo cùng lớp/ngày nếu còn slot sinh từ lịch.
-                let fallback = candidate_index.iter().find(|((class_id, date, _), &index)| {
-                    *class_id == session.class_id
-                        && *date == session.session_date
-                        && events[index].source == "schedule"
-                });
+                let fallback = candidate_index
+                    .iter()
+                    .find(|((class_id, date, _), &index)| {
+                        *class_id == session.class_id
+                            && *date == session.session_date
+                            && events[index].source == "schedule"
+                    });
                 if let Some((_, &index)) = fallback {
                     events[index] = event;
                     continue;

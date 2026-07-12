@@ -24,10 +24,9 @@ import {
   clampMonthToRange,
   currentMonthKey,
   formatMonthLabel,
-  isValidMonthKey,
-  monthsInRange,
 } from "@/lib/months";
 import { listGlobalScheduleMonth } from "@/services/scheduleApi";
+import { getClassMonthOptionsForYear } from "@/features/classes/utils/classMonthOptions";
 import type { AcademicYear } from "@/types/academic-year";
 import type { ClassOverview } from "@/types/class";
 import type { GlobalScheduleEventDto, GlobalScheduleMonthDto } from "@/types/schedule";
@@ -78,19 +77,10 @@ export function SchedulePage({
   onOpenClass,
 }: SchedulePageProps) {
   const selectedYear = academicYears.find((year) => year.id === selectedYearId) ?? null;
-  const monthOptions = useMemo(() => {
-    if (!selectedYear) {
-      return [currentMonthKey()];
-    }
-
-    const startMonth = selectedYear.startsAt.slice(0, 7);
-    const endMonth = selectedYear.endsAt.slice(0, 7);
-    if (!isValidMonthKey(startMonth) || !isValidMonthKey(endMonth) || startMonth > endMonth) {
-      return [currentMonthKey()];
-    }
-
-    return monthsInRange(startMonth, endMonth);
-  }, [selectedYear]);
+  const monthOptions = useMemo(
+    () => getClassMonthOptionsForYear(selectedYear, classOverviews),
+    [classOverviews, selectedYear],
+  );
 
   const [selectedMonth, setSelectedMonth] = useState(() => currentMonthKey());
   const [scheduleMonth, setScheduleMonth] = useState<GlobalScheduleMonthDto | null>(null);
@@ -157,13 +147,35 @@ export function SchedulePage({
 
   const classOptions = useMemo(
     () =>
-      [...classOverviews].sort(
-        (first, second) =>
-          (first.grade ?? 9) - (second.grade ?? 9) ||
-          first.name.localeCompare(second.name, "vi"),
-      ),
-    [classOverviews],
+      classOverviews
+        .filter(
+          (classItem) =>
+            selectedYearId === null || classItem.academicYearId === selectedYearId,
+        )
+        .sort(
+          (first, second) =>
+            (first.grade ?? 9) - (second.grade ?? 9) ||
+            first.name.localeCompare(second.name, "vi"),
+        ),
+    [classOverviews, selectedYearId],
   );
+
+  const filteredClassOptions = useMemo(
+    () =>
+      classOptions.filter(
+        (classItem) => gradeFilter === "all" || String(classItem.grade) === gradeFilter,
+      ),
+    [classOptions, gradeFilter],
+  );
+
+  useEffect(() => {
+    if (
+      classFilter !== "all" &&
+      !filteredClassOptions.some((classItem) => String(classItem.id) === classFilter)
+    ) {
+      setClassFilter("all");
+    }
+  }, [classFilter, filteredClassOptions]);
 
   const visibleEvents = useMemo(
     () =>
@@ -201,7 +213,6 @@ export function SchedulePage({
   }, [visibleEvents]);
 
   const calendarWeeks = useMemo(() => buildMonthGrid(selectedMonth), [selectedMonth]);
-  const selectedDateEvents = selectedDate ? eventsByDate.get(selectedDate) ?? [] : [];
 
   const selectedMonthIndex = monthOptions.indexOf(selectedMonth);
   const canGoPreviousMonth = selectedMonthIndex > 0;
@@ -310,7 +321,7 @@ export function SchedulePage({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tất cả lớp</SelectItem>
-              {classOptions.map((classItem) => (
+              {filteredClassOptions.map((classItem) => (
                 <SelectItem key={classItem.id} value={String(classItem.id)}>
                   {classItem.name}
                 </SelectItem>
@@ -415,38 +426,6 @@ export function SchedulePage({
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {selectedDate ? (
-        <Card className="rounded-lg border-slate-200 shadow-sm">
-          <CardContent className="space-y-2 p-4">
-            <p className="text-sm font-semibold text-slate-950">
-              Buổi học ngày {formatFullDateLabel(selectedDate)}
-            </p>
-            {selectedDateEvents.length > 0 ? (
-              <div className="space-y-1.5">
-                {selectedDateEvents.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    onClick={() => setSelectedEvent(event)}
-                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                  >
-                    <span className="font-medium text-slate-950">
-                      {event.startTime} - {event.endTime}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-slate-700">
-                      {event.className}
-                    </span>
-                    <EventStatusBadge event={event} />
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Ngày này không có buổi học nào.</p>
-            )}
           </CardContent>
         </Card>
       ) : null}

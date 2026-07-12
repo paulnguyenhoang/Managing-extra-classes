@@ -226,6 +226,7 @@ function App() {
         <TuitionDashboardPage
           academicYears={academicYears}
           selectedYearId={selectedYearId}
+          classOverviews={classOverviews}
           onYearChange={handleYearChange}
           onOpenClass={handleOpenClass}
         />

@@ -397,7 +397,7 @@ Attendance columns:
 
 - Phase 7B: `AttendanceTab` gọi command `get_attendance_week(classId, weekStart)` và nhận cả session `regular` lẫn `class_makeup` trong tuần.
 - Backend materialize các `attendance_sessions` loại `regular` từ `class_schedules` khi mở tuần.
-- Backend chỉ materialize session theo lịch hiện tại cho ngày hiện tại/tương lai; ngày quá khứ chỉ hiển thị session đã từng được sinh/lưu trước đó.
+- Backend materialize session theo lịch hiện tại khi mở tuần. Với tuần quá khứ, nếu tuần đó chưa có regular session nào thì backend vẫn sinh lần đầu để lớp mới tạo với `startMonth` ở quá khứ có thể xem điểm danh; nếu tuần quá khứ đã có session thì không ghi lại hoặc thêm theo lịch mới.
 - Khi sửa lịch, session regular từ ngày hiện tại trở đi chưa có record sẽ được dọn để lần mở tuần tiếp theo sinh lại theo lịch mới; session quá khứ không bị rewrite.
 - Frontend map session DB về `WeeklySession` để giữ UI cũ.
 - Buổi học bù cả lớp đã persist trong `attendance_sessions` với `type = class_makeup` và `makeup_for_session_id` trỏ về buổi gốc.
@@ -732,7 +732,7 @@ State/data source:
 - Backend CHỈ ĐỌC: sinh buổi thường trong bộ nhớ từ `class_schedules` cho các lớp có tháng trong `start_month..end_month`, rồi overlay `attendance_sessions` đã persist trong tháng (regular ghép theo lớp/ngày/thứ tự buổi, fallback theo lớp/ngày khi lịch đã đổi; class_makeup và buổi lịch sử không còn khớp lịch vẫn hiển thị). Mở lịch KHÔNG materialize session, KHÔNG ghi DB.
 - Mỗi ô ngày hiển thị tối đa 3 badge buổi học (`"18:00 Văn 9 - Ôn thi"`, prefix `"Bù · "` cho học bù cả lớp, `"Nghỉ · "` cho buổi đã hủy; màu sky/amber/red nhạt), quá 3 hiện `"+N buổi nữa"`; click ô ngày mở panel `"Buổi học ngày ..."` liệt kê đủ buổi.
 - Click badge/buổi mở dialog chi tiết: loại buổi, trạng thái (Đang học/Nghỉ + cảnh báo `"Buổi này đang được đánh dấu nghỉ."`), ngày (Thứ..., dd/MM/yyyy), giờ, khối, thời gian lớp, học phí tháng, số học sinh (đếm theo lifecycle tháng đang xem), ghi chú nếu có; nút `"Mở lớp"` mở ClassDetailPage, `"Đóng"`.
-- Toolbar: chọn năm học (đồng bộ App/Home), tháng trước/sau + label `"Tháng MM/YYYY"` + nút `"Hôm nay"` (clamp trong năm học), filter khối (Tất cả/8/9), filter lớp (từ classOverviews của năm), filter loại buổi (Tất cả/Buổi thường/Học bù cả lớp/Buổi nghỉ) — filter chạy frontend trên events đã load.
+- Toolbar: chọn năm học (đồng bộ App/Home), tháng trước/sau + label `"Tháng MM/YYYY"` + nút `"Hôm nay"` (clamp theo dải tháng hoạt động của các lớp trong năm đang chọn), filter khối (Tất cả/8/9), filter lớp (từ `classOverviews` thuộc đúng năm học đang chọn, rồi lọc tiếp theo khối nếu đã chọn khối), filter loại buổi (Tất cả/Buổi thường/Học bù cả lớp/Buổi nghỉ) — filter chạy frontend trên events đã load.
 - Loading/error/empty states tiếng Việt: `"Không thể tải lịch học. Vui lòng thử lại."`, `"Không có buổi học nào trong tháng này."`, `"Năm học này chưa có lớp."`
 - Trạng thái: implemented (Phase 11), read-only — không tạo/sửa attendance records hay payment từ lịch tổng hợp.
 
@@ -740,8 +740,8 @@ State/data source:
 
 - File: `src/features/tuition-dashboard/TuitionDashboardPage.tsx`, service `src/services/tuitionDashboardApi.ts`, backend command `list_tuition_dashboard` trong `src-tauri/src/payments/mod.rs`.
 - Title `"Tổng hợp học phí"`, description `"Theo dõi học phí theo tháng trên toàn bộ các lớp."`
-- Controls: chọn năm học (đồng bộ với Home qua `handleYearChange` của App), chọn tháng trong khoảng năm học kèm nút tháng trước/sau (mặc định clamp tháng hiện tại), filter khối (Tất cả/8/9), filter lớp (sinh từ rows đang có), filter trạng thái (Tất cả/Chưa đóng/Đã đóng/Miễn giảm) và search (tên, lớp ở trường, trường, SĐT, tên lớp, ghi chú).
-- Backend query mọi lớp active của năm học có `start_month <= month <= end_month`, membership hợp lệ theo CÙNG rule lifecycle với PaymentsTab (`joined_month <= month` và `left_month` NULL hoặc `month < left_month`), LEFT JOIN `payments` theo (membership, month); chưa có payment row → dòng ảo unpaid amount 0. XEM DASHBOARD KHÔNG TẠO PAYMENT ROW, không ghi DB — Phase 10 hoàn toàn read-only.
+- Controls: chọn năm học (đồng bộ với Home qua `handleYearChange` của App), chọn tháng trong dải hoạt động thật của các lớp thuộc năm học đó kèm nút tháng trước/sau (mặc định clamp tháng hiện tại), filter khối (Tất cả/8/9), filter lớp (từ `classOverviews` thuộc đúng năm học đang chọn, rồi lọc tiếp theo khối nếu đã chọn khối), filter trạng thái (Tất cả/Chưa đóng/Đã đóng/Miễn giảm) và search (tên, lớp ở trường, trường, SĐT, tên lớp, ghi chú).
+- Backend query mọi lớp của năm học có `start_month <= month <= end_month`, membership hợp lệ theo CÙNG rule lifecycle với PaymentsTab (`joined_month <= month` và `left_month` NULL hoặc `month < left_month`), LEFT JOIN `payments` theo (membership, month); chưa có payment row → dòng ảo unpaid amount 0. Backend chỉ kiểm tra năm học có tồn tại, không chặn theo `academic_years.starts_at/ends_at`, nên các lớp có `start_month` sớm như `2025-07` vẫn hiển thị nếu thuộc năm học đang chọn. XEM DASHBOARD KHÔNG TẠO PAYMENT ROW, không ghi DB — Phase 10 hoàn toàn read-only.
 - Summary cards tính theo danh sách đang hiển thị (label `"Tổng hợp theo danh sách đang hiển thị"`): Tổng đã thu (paid + waived), Chưa đóng, Đã đóng, Miễn giảm, Số học sinh.
 - Bảng: STT (= index + 1 sau filter/sort, không dùng database ID), Học sinh (kèm lớp ở trường/trường), Lớp, Khối, Trạng thái (màu giống PaymentsTab), Học phí tháng, Số tiền đã thu, Ngày đóng, Ghi chú, nút `"Mở lớp"` mở ClassDetailPage của lớp đó qua `onOpenClass`.
 - Sort hiển thị: khối → tên lớp → tên tiếng Việt (helper chung) → membershipId ổn định.
@@ -959,7 +959,7 @@ State/data source:
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite. AttendanceTab nhận roster chính thức từ `get_attendance_week`, lọc theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`.
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
-- Đã có export Excel thật cho danh sách học sinh ở `StudentListTab` và học phí ở `PaymentsTab`; export bảng điểm, điểm danh và toàn bộ import Excel vẫn chưa triển khai.
+- Đã có export Excel thật cho danh sách học sinh, học phí và bảng điểm; đã có import Excel cho danh sách học sinh và bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
 - Trang Cài đặt chỉ là placeholder.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
