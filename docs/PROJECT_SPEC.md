@@ -154,7 +154,7 @@ src/
 - Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
 - Logout reset `selectedClassId` và quay về `"login"`.
 
-Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage`, `TuitionDashboardPage` và `SchedulePage`. Trang `Cài đặt` hiện là placeholder đơn giản.
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage`, `TuitionDashboardPage` và `SchedulePage`. Trang `Cài đặt` đã có phần quản lý năm học (Phase 12A); các mục Bảo mật/Thông tin ứng dụng vẫn là placeholder.
 
 ## 6. Danh sách màn hình/trang hiện có
 
@@ -171,7 +171,7 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong l
 | Lịch học | `SchedulePage.tsx` | Lịch tháng tổng hợp buổi học các lớp | implemented | SQLite Phase 11: command `list_global_schedule_month`, read-only |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Dashboard học phí toàn app theo năm học/tháng | implemented | SQLite Phase 10: command `list_tuition_dashboard`, read-only |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Sao lưu/khôi phục database SQLite | implemented | SQLite Phase 8: backup API, `backup_logs`, safety backup trước restore |
-| Cài đặt | `SettingsPage.tsx` | Placeholder thiết lập | placeholder | Card mô tả tĩnh |
+| Cài đặt | `SettingsPage.tsx` | Quản lý năm học (tạo/sửa/đặt hiện tại) | partial | Phase 12A; Bảo mật/Thông tin ứng dụng còn placeholder |
 
 ## 7. Login flow hiện tại
 
@@ -193,7 +193,7 @@ Sidebar hiện có 5 item:
 | Lịch học | `schedule` | `SchedulePage` | functional |
 | Học phí | `tuition-dashboard` | `TuitionDashboardPage` | functional |
 | Sao lưu dữ liệu | `backup` | `BackupPage` | functional |
-| Cài đặt | `settings` | `SettingsPage` | placeholder |
+| Cài đặt | `settings` | `SettingsPage` | partial (Năm học functional) |
 
 - Item global `"Học sinh"` không còn trong sidebar.
 - Sidebar chỉ đổi màn hình bằng local state, không đổi URL.
@@ -761,14 +761,17 @@ State/data source:
 
 ### Cài đặt
 
-- File: `src/features/settings/SettingsPage.tsx`.
-- UI: title `"Cài đặt"`, description `"Các thiết lập ứng dụng sẽ được phát triển sau."`
-- Card tĩnh:
-  - Đổi mật khẩu
-  - Năm học hiện tại
-  - Thông tin ứng dụng
-- Không có form hoặc behavior.
-- Trạng thái: placeholder.
+- File: `src/features/settings/SettingsPage.tsx`; backend commands trong `src-tauri/src/school/mod.rs`.
+- Title `"Cài đặt"`, description `"Quản lý thiết lập ứng dụng."`
+- Card `"Năm học"` (functional từ Phase 12A):
+  - Hiển thị `"Năm học hiện tại: [label]"` và bảng năm học (STT theo row hiển thị, Năm học, Thời gian dd/mm/yyyy, badge `"Đang sử dụng"`, hành động).
+  - `"Tạo năm học mới"` mở dialog: tên (gợi ý năm kế tiếp từ năm mới nhất), ngày bắt đầu/kết thúc (mặc định 01/08 - 31/07 năm sau), checkbox `"Đặt làm năm học hiện tại"`; validate tên bắt buộc/ngày kết thúc sau ngày bắt đầu; cảnh báo (không chặn) khi khoảng thời gian trùng năm khác; backend chặn tên trùng (case-insensitive).
+  - Tạo năm học KHÔNG tự tạo/copy lớp; năm mới dùng được ngay ở Home/Lịch học/Tổng hợp học phí và CreateClassDialog.
+  - `"Sửa"` mở dialog cập nhật label/ngày; nếu năm đã có lớp thì cảnh báo `"Năm học này đã có lớp. Việc sửa ngày bắt đầu/kết thúc không tự động thay đổi thời gian học của các lớp."` — ngày của năm học chỉ là metadata/dải chung, `start_month/end_month` của lớp mới quyết định hoạt động thật; không tự đổi lớp.
+  - `"Đặt làm hiện tại"` có confirm `"Đổi năm học hiện tại?"`; xác nhận gọi `set_current_academic_year` (transaction: is_current + `app_settings.current_academic_year_id`), App chuyển `selectedYearId` và reload lớp — không di chuyển/copy/xóa lớp hay dữ liệu nào.
+  - Không có nút xóa năm học (bỏ qua ở Phase 12A để giảm rủi ro).
+- Card `"Bảo mật"` (đổi mật khẩu/khóa app) và `"Thông tin ứng dụng"`: vẫn placeholder.
+- Trạng thái: partial — mục Năm học implemented (Phase 12A).
 
 ## 16. Data và type hiện tại
 
@@ -950,7 +953,10 @@ State/data source:
 | Chọn file khôi phục | BackupPage | Native picker + `validate_backup_file` | none | SQLite (read-only) | Restore disable nếu file không hợp lệ |
 | Khôi phục dữ liệu | BackupPage | Confirm dialog + `restore_backup` (safety backup + copy vào live connection + migrations) | tất cả bảng + `backup_logs` | SQLite | App reload dữ liệu, về Home |
 | Mở thư mục dữ liệu/sao lưu | BackupPage | `open_app_data_folder` / `open_backup_folder` qua opener plugin | none | none | none |
-| Settings cards | SettingsPage | Static only | none | none | Implement settings later |
+| Tạo năm học mới | SettingsPage | Dialog + `create_academic_year` (kèm tùy chọn đặt hiện tại trong transaction) | `academic_years` + `app_settings` | SQLite | Không tạo lớp tự động |
+| Sửa năm học | SettingsPage | Dialog + `update_academic_year` (chỉ metadata năm học) | `academic_years` | SQLite | Không đổi start/end month của lớp |
+| Đặt năm học hiện tại | SettingsPage | Confirm + `set_current_academic_year`, App reload năm/lớp | `academic_years` + `app_settings` | SQLite | Không đụng lớp/payments/scores/attendance |
+| Settings security cards | SettingsPage | Static only | none | none | Phase 12B đổi mật khẩu/app lock |
 
 ## 19. Current limitations / chưa có
 
@@ -960,7 +966,7 @@ State/data source:
 - Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
 - Chưa có React Router.
 - Đã có export Excel thật cho danh sách học sinh, học phí và bảng điểm; đã có import Excel cho danh sách học sinh và bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
-- Trang Cài đặt chỉ là placeholder.
+- Trang Cài đặt: mục Năm học đã functional (Phase 12A); Bảo mật/Thông tin ứng dụng còn placeholder.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
 - Chưa có xử lý hard delete/archive học sinh hiện có.
@@ -1016,7 +1022,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 18. Phase 9E Score sheet import: đã triển khai.
 19. Phase 10 Global tuition dashboard: đã triển khai (read-only, command `list_tuition_dashboard`).
 20. Phase 11 Global Schedule Page: đã triển khai (read-only, command `list_global_schedule_month`).
-21. Phase 12 Settings Page: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
+21. Phase 12A Academic Year Management trong Settings: đã triển khai (`create_academic_year`, `update_academic_year`, `set_current_academic_year`).
+22. Phase 12B Change Password/App Lock: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
 
 ## 22. Questions to confirm before backend
 

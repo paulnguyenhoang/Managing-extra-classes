@@ -1136,11 +1136,24 @@ Trạng thái hiện tại: đã triển khai.
 - Frontend: `src/services/scheduleApi.ts` + `src/types/schedule.ts` + `SchedulePage.tsx` (lưới tháng tự dựng, tháng sinh từ dải `startMonth..endMonth` thật của các lớp trong năm đang chọn, filter khối/lớp/loại buổi frontend-only, dialog chi tiết, nút `"Mở lớp"`). Không thêm dependency mới.
 - Dropdown lớp trong lịch tổng hợp lấy từ `classOverviews` của đúng năm học đang chọn, rồi lọc theo khối nếu filter khối là Khối 8/Khối 9. Điều này tránh lẫn lớp trùng tên giữa các năm học.
 
+### Phase 12A. Academic Year Management trong Settings
+
+Trạng thái hiện tại: đã triển khai.
+
+- Commands trong `src-tauri/src/school/mod.rs`:
+  - `list_academic_years`: trả thêm `classCount` (đếm lớp active của năm) để frontend cảnh báo khi sửa; sort `starts_at DESC` (năm mới nhất trước).
+  - `create_academic_year(label, startsAt, endsAt, makeCurrent?)`: validate label không trống + unique (case-insensitive, trim), ngày ISO hợp lệ (check bằng SQLite `date()`), `endsAt > startsAt`; insert với `is_current = 0`; nếu `makeCurrent` thì cùng transaction clear `is_current` các năm khác, set năm mới và upsert `app_settings.current_academic_year_id`. KHÔNG seed/copy lớp tự động.
+  - `update_academic_year(id, label, startsAt, endsAt)`: validate như trên (unique label loại trừ chính nó); chỉ sửa metadata năm học — KHÔNG tự đổi `start_month/end_month` của các lớp thuộc năm (frontend cảnh báo khi năm đã có lớp).
+  - `set_current_academic_year` (đã có từ trước): transaction set `is_current` + `app_settings.current_academic_year_id`.
+- Overlap khoảng thời gian giữa các năm: chỉ cảnh báo ở frontend, backend không chặn (trừ tên trùng).
+- Không có delete năm học ở Phase 12A (tránh rủi ro dữ liệu); nếu làm sau này chỉ cho xóa năm 0 lớp.
+- Frontend: `academicYearApi.ts` thêm `createAcademicYear`/`updateAcademicYear`; `SettingsPage` quản lý năm học; `App.handleAcademicYearsChanged` reload danh sách năm và chuyển `selectedYearId` + reload lớp khi năm hiện tại đổi — Home/SchedulePage/TuitionDashboard đồng bộ.
+
 ### Next planned
 
-- Phase 12: Settings Page.
+- Phase 12B: Change Password/App Lock trong Settings.
 - Phase 13: Backend hardening cho rule chống trùng lịch (hiện mới enforce ở frontend + khi tạo class makeup).
-- Optional: attendance export/import, payment import — chỉ làm nếu thật sự cần.
+- Optional: class copy/rollover sang năm học mới; attendance export/import, payment import — chỉ làm nếu thật sự cần.
 
 ## 10. Testing checklist
 
