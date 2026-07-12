@@ -188,7 +188,7 @@ export function SettingsPage({ academicYears, classOverviews, onYearsChanged }: 
   }
 
   return (
-    <div className="min-h-full min-w-0 space-y-3 pb-0">
+    <div className="min-h-full min-w-0 space-y-8 pb-0">
       <section>
         <h2 className="text-2xl font-semibold text-slate-950 md:text-3xl">Cài đặt</h2>
         <p className="mt-1 max-w-3xl text-muted-foreground">Quản lý thiết lập ứng dụng.</p>
