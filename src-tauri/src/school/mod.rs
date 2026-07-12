@@ -15,6 +15,25 @@ pub struct AcademicYearDto {
     starts_at: String,
     ends_at: String,
     is_current: bool,
+    class_count: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAcademicYearRequest {
+    label: String,
+    starts_at: String,
+    ends_at: String,
+    make_current: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAcademicYearRequest {
+    id: i64,
+    label: String,
+    starts_at: String,
+    ends_at: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -291,9 +310,11 @@ pub fn list_academic_years(
     database.with_connection(|connection| {
         let mut statement = connection
             .prepare(
-                "SELECT id, label, starts_at, ends_at, is_current
-                 FROM academic_years
-                 ORDER BY starts_at DESC",
+                "SELECT
+                   y.id, y.label, y.starts_at, y.ends_at, y.is_current,
+                   (SELECT COUNT(*) FROM classes c WHERE c.academic_year_id = y.id AND c.is_archived = 0)
+                 FROM academic_years y
+                 ORDER BY y.starts_at DESC",
             )
             .map_err(|error| format!("Không chuẩn bị được truy vấn năm học: {error}"))?;
 
@@ -305,6 +326,7 @@ pub fn list_academic_years(
                     starts_at: row.get(2)?,
                     ends_at: row.get(3)?,
                     is_current: row.get::<_, i64>(4)? == 1,
+                    class_count: row.get(5)?,
                 })
             })
             .map_err(|error| format!("Không đọc được danh sách năm học: {error}"))?;
@@ -361,6 +383,174 @@ pub fn set_current_academic_year(
             .commit()
             .map_err(|error| format!("Không commit được năm học hiện tại: {error}"))
     })
+}
+
+#[tauri::command]
+pub fn create_academic_year(
+    database: tauri::State<'_, AppDatabase>,
+    request: CreateAcademicYearRequest,
+) -> Result<AcademicYearDto, String> {
+    let label = request.label.trim().to_string();
+    let make_current = request.make_current.unwrap_or(false);
+
+    database.with_connection_mut(|connection| {
+        validate_academic_year_fields(connection, &label, &request.starts_at, &request.ends_at, None)?;
+
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction tạo năm học: {error}"))?;
+
+        transaction
+            .execute(
+                "INSERT INTO academic_years (label, starts_at, ends_at, is_current, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                params![label, request.starts_at, request.ends_at],
+            )
+            .map_err(|error| format!("Không tạo được năm học: {error}"))?;
+        let academic_year_id = transaction.last_insert_rowid();
+
+        if make_current {
+            transaction
+                .execute(
+                    "UPDATE academic_years SET is_current = 0, updated_at = CURRENT_TIMESTAMP",
+                    [],
+                )
+                .map_err(|error| format!("Không cập nhật được năm học hiện tại: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE academic_years
+                     SET is_current = 1, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?1",
+                    params![academic_year_id],
+                )
+                .map_err(|error| format!("Không đặt được năm học hiện tại: {error}"))?;
+            transaction
+                .execute(
+                    "INSERT INTO app_settings (key, value, updated_at)
+                     VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = CURRENT_TIMESTAMP",
+                    params![CURRENT_ACADEMIC_YEAR_KEY, academic_year_id.to_string()],
+                )
+                .map_err(|error| format!("Không lưu được cài đặt năm học hiện tại: {error}"))?;
+        }
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được năm học mới: {error}"))?;
+
+        get_academic_year_dto(connection, academic_year_id)
+    })
+}
+
+#[tauri::command]
+pub fn update_academic_year(
+    database: tauri::State<'_, AppDatabase>,
+    request: UpdateAcademicYearRequest,
+) -> Result<AcademicYearDto, String> {
+    let label = request.label.trim().to_string();
+
+    database.with_connection_mut(|connection| {
+        ensure_academic_year_exists(connection, request.id)?;
+        validate_academic_year_fields(
+            connection,
+            &label,
+            &request.starts_at,
+            &request.ends_at,
+            Some(request.id),
+        )?;
+
+        // Chỉ sửa metadata năm học; KHÔNG tự đổi start_month/end_month của các lớp thuộc năm.
+        connection
+            .execute(
+                "UPDATE academic_years
+                 SET label = ?1, starts_at = ?2, ends_at = ?3, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?4",
+                params![label, request.starts_at, request.ends_at, request.id],
+            )
+            .map_err(|error| format!("Không cập nhật được năm học: {error}"))?;
+
+        get_academic_year_dto(connection, request.id)
+    })
+}
+
+fn validate_academic_year_fields(
+    connection: &Connection,
+    label: &str,
+    starts_at: &str,
+    ends_at: &str,
+    exclude_id: Option<i64>,
+) -> Result<(), String> {
+    if label.is_empty() {
+        return Err("Tên năm học không được để trống.".to_string());
+    }
+
+    validate_iso_date(connection, starts_at)
+        .map_err(|_| "Ngày bắt đầu không hợp lệ, cần định dạng YYYY-MM-DD.".to_string())?;
+    validate_iso_date(connection, ends_at)
+        .map_err(|_| "Ngày kết thúc không hợp lệ, cần định dạng YYYY-MM-DD.".to_string())?;
+
+    if ends_at <= starts_at {
+        return Err("Ngày kết thúc phải sau ngày bắt đầu.".to_string());
+    }
+
+    let duplicate: Option<i64> = connection
+        .query_row(
+            "SELECT id FROM academic_years
+             WHERE LOWER(TRIM(label)) = LOWER(TRIM(?1)) AND id != COALESCE(?2, -1)
+             LIMIT 1",
+            params![label, exclude_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("Không kiểm tra được tên năm học: {error}"))?;
+
+    if duplicate.is_some() {
+        return Err("Tên năm học đã tồn tại.".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_iso_date(connection: &Connection, value: &str) -> Result<(), ()> {
+    let normalized: Option<String> = connection
+        .query_row("SELECT date(?1)", params![value], |row| row.get(0))
+        .optional()
+        .map_err(|_| ())?;
+
+    match normalized {
+        Some(normalized) if normalized == value => Ok(()),
+        _ => Err(()),
+    }
+}
+
+fn get_academic_year_dto(
+    connection: &Connection,
+    academic_year_id: i64,
+) -> Result<AcademicYearDto, String> {
+    connection
+        .query_row(
+            "SELECT
+               y.id, y.label, y.starts_at, y.ends_at, y.is_current,
+               (SELECT COUNT(*) FROM classes c WHERE c.academic_year_id = y.id AND c.is_archived = 0)
+             FROM academic_years y
+             WHERE y.id = ?1",
+            params![academic_year_id],
+            |row| {
+                Ok(AcademicYearDto {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    starts_at: row.get(2)?,
+                    ends_at: row.get(3)?,
+                    is_current: row.get::<_, i64>(4)? == 1,
+                    class_count: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được năm học: {error}"))?
+        .ok_or_else(|| "Không tìm thấy năm học.".to_string())
 }
 
 #[tauri::command]

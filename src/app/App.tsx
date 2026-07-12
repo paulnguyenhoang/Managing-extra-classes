@@ -176,6 +176,25 @@ function App() {
     setClassOverviews((current) => [...current, createdClass]);
   }
 
+  // Sau khi tạo/sửa/đổi năm học ở Settings: tải lại danh sách năm; nếu năm hiện tại
+  // đổi thì chuyển selectedYearId và load lớp của năm đó.
+  async function handleAcademicYearsChanged(nextCurrentYearId?: number) {
+    try {
+      setAcademicYears(await listAcademicYears());
+      setSchoolDataError("");
+    } catch (error) {
+      console.warn("[school-data] reload years failed", error);
+      setSchoolDataError("Không tải lại được danh sách năm học.");
+      return;
+    }
+
+    if (nextCurrentYearId !== undefined && nextCurrentYearId !== selectedYearId) {
+      setSelectedYearId(nextCurrentYearId);
+      setSelectedGrade(null);
+      await loadClassesForYear(nextCurrentYearId);
+    }
+  }
+
   function handleDataRestored() {
     setSelectedClassId(null);
     setSelectedGrade(null);
@@ -238,7 +257,12 @@ function App() {
     }
 
     if (screen === "settings") {
-      return <SettingsPage />;
+      return (
+        <SettingsPage
+          academicYears={academicYears}
+          onYearsChanged={handleAcademicYearsChanged}
+        />
+      );
     }
 
     return (

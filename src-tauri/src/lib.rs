@@ -55,6 +55,8 @@ pub fn run() {
             school::list_academic_years,
             school::get_current_academic_year_id,
             school::set_current_academic_year,
+            school::create_academic_year,
+            school::update_academic_year,
             school::list_class_overviews_by_year,
             school::get_class_detail,
             school::create_class,
