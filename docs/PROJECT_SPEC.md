@@ -770,7 +770,8 @@ State/data source:
   - `"Sửa"` mở dialog cập nhật label/ngày; nếu năm đã có lớp thì cảnh báo `"Năm học này đã có lớp. Việc sửa ngày bắt đầu/kết thúc không tự động thay đổi thời gian học của các lớp."` — ngày của năm học chỉ là metadata/dải chung, `start_month/end_month` của lớp mới quyết định hoạt động thật; không tự đổi lớp.
   - `"Đặt làm hiện tại"` có confirm `"Đổi năm học hiện tại?"`; xác nhận gọi `set_current_academic_year` (transaction: is_current + `app_settings.current_academic_year_id`), App chuyển `selectedYearId` và reload lớp — không di chuyển/copy/xóa lớp hay dữ liệu nào.
   - Không có nút xóa năm học (bỏ qua ở Phase 12A để giảm rủi ro).
-- Card `"Bảo mật"` (đổi mật khẩu/khóa app) và `"Thông tin ứng dụng"`: vẫn placeholder.
+- Card `"Bảo mật"` (functional từ Phase 12B): form đổi mật khẩu với 3 field (Mật khẩu hiện tại, Mật khẩu mới, Nhập lại mật khẩu mới) + nút `"Đổi mật khẩu"`; validate frontend (bắt buộc, mới >= 6 ký tự, nhập lại khớp) và backend (`change_password` verify mật khẩu hiện tại bằng Argon2 như login, hash/salt mới lưu `app_settings` — không bao giờ lưu plaintext); sai mật khẩu hiện tại hiện `"Mật khẩu hiện tại không đúng."`; thành công hiện `"Đã đổi mật khẩu."`, xóa các field, KHÔNG logout. App lock/session timeout chưa làm.
+- Card `"Thông tin ứng dụng"`: vẫn placeholder.
 - Trạng thái: partial — mục Năm học implemented (Phase 12A).
 
 ## 16. Data và type hiện tại
@@ -908,12 +909,12 @@ State/data source:
 | Logout | Header | Quay về login, reset selected class | `screen`, `selectedClassId` | local only | Có thể clear session/app lock |
 | Select sidebar item | Sidebar | Đổi screen local | `screen`, `selectedClassId` | local only | Không cần DB trực tiếp |
 | Select academic year | HomePage | Đổi năm đang xem, lưu current year, load lớp theo năm | `selectedYearId`, `classOverviews`, `app_settings.current_academic_year_id` | SQLite | `studentCount` lấy từ memberships; `unpaidCount` lấy từ bảng payments theo tháng hiện tại |
-| Create class | CreateClassDialog | Validate bắt buộc lịch, giờ hợp lệ, không trùng giờ với lớp đã load; gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9, không còn field ghi chú; backend chưa enforce trùng lịch |
+| Create class | CreateClassDialog | Validate bắt buộc lịch, giờ hợp lệ, không trùng giờ với lớp đã load; gọi `create_class`, insert class (gồm grade) + schedules | `classes`, `class_schedules`, `classOverviews` | SQLite | Khối chọn từ select 8/9; backend enforce trùng lịch từ Phase 13 (source of truth) |
 | Select grade tab | HomePage | Lọc class cards và summary theo Khối 8/Khối 9 | UI only | none | Grade đọc từ `classes.grade` |
 | Open class card | ClassCard/HomePage | Mở ClassDetailPage | `selectedClassId`, `screen` | local only | Điều hướng theo class id |
 | Back to home | ClassDetailPage | Về Home | `selectedClassId`, `screen` | local only | Không cần DB |
 | Edit class name | ClassDetail header | Sửa tên bằng input, gọi `update_class_name` | `classes.name`, `classOverviews.name` | SQLite | Home và detail đồng bộ từ response |
-| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, validate không trùng giờ với lớp khác đã load, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance sessions đã sinh không bị rewrite; backend chưa enforce trùng lịch |
+| Edit class schedule | EditClassScheduleDialog | Chọn ngày/giờ, validate không trùng giờ với lớp khác đã load, gọi `update_class_schedule`, AttendanceTab nhận schedule mới | `class_schedules`, `classOverviews.scheduleItems` | SQLite | Attendance sessions đã sinh không bị rewrite; backend enforce trùng lịch từ Phase 13, dialog hiển thị lỗi backend |
 | Edit monthly fee | ClassDetail header | Sửa fee bằng input, gọi `update_class_monthly_fee` | `classes.monthly_fee`, `classOverviews.monthlyFee` | SQLite | Payment cũ giữ amount snapshot đã lưu |
 | Search student | StudentListTab | Lọc table local trên dữ liệu đã load từ DB | UI only | none | Query/filter backend khi data lớn |
 | Add student | StudentListTab | Thêm dòng mới inline, lưu tạo `students` + `class_memberships` | `students`, `class_memberships` | SQLite khi bấm Lưu cập nhật | Có thể thêm validate nâng cao sau |
@@ -956,14 +957,14 @@ State/data source:
 | Tạo năm học mới | SettingsPage | Dialog + `create_academic_year` (kèm tùy chọn đặt hiện tại trong transaction) | `academic_years` + `app_settings` | SQLite | Không tạo lớp tự động |
 | Sửa năm học | SettingsPage | Dialog + `update_academic_year` (chỉ metadata năm học) | `academic_years` | SQLite | Không đổi start/end month của lớp |
 | Đặt năm học hiện tại | SettingsPage | Confirm + `set_current_academic_year`, App reload năm/lớp | `academic_years` + `app_settings` | SQLite | Không đụng lớp/payments/scores/attendance |
-| Settings security cards | SettingsPage | Static only | none | none | Phase 12B đổi mật khẩu/app lock |
+| Đổi mật khẩu | SettingsPage | Form 3 field + `change_password` (verify hiện tại, hash Argon2 mới) | `app_settings` | SQLite | Phase 12B; không logout sau khi đổi, không app lock |
 
 ## 19. Current limitations / chưa có
 
 - SQLite/database đã có cho settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, attendance Phase 7C và backup/restore Phase 8.
 - Điểm danh buổi thường và buổi học bù cả lớp đã lưu SQLite cho `present`/`absent`/`makeup`; `"Chưa điểm danh"` không tạo row. Lock/unlock, cancel/restore, class-level makeup và student-level makeup đã persist.
 - AttendanceTab, ScoresTab và PaymentsTab đã dùng roster SQLite. AttendanceTab nhận roster chính thức từ `get_attendance_week`, lọc theo từng session date bằng `joinedMonth <= sessionMonth` và `(leftMonth is null OR sessionMonth < leftMonth)`.
-- Chưa có app lock/session persist sau restart dù password hash đã lưu trong DB.
+- Đổi mật khẩu đã có ở Settings (Phase 12B); chưa có app lock/session persist sau restart.
 - Chưa có React Router.
 - Đã có export Excel thật cho danh sách học sinh, học phí và bảng điểm; đã có import Excel cho danh sách học sinh và bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
 - Trang Cài đặt: mục Năm học đã functional (Phase 12A); Bảo mật/Thông tin ứng dụng còn placeholder.
@@ -975,7 +976,7 @@ State/data source:
 - Class-level makeup và student-level makeup đều đã persist bằng SQLite (Phase 7B/7C).
 - Student-level makeup: dòng `"Học sinh học bù"` ở lớp nhận đọc từ `get_attendance_week` (receivingMakeupRows); helper text ô gốc đọc từ makeupDetails.
 - Danh sách buổi nhận học bù do backend tính (`list_student_makeup_options`), không phụ thuộc mockData/availableClasses; lớp tạo trong DB hiển thị đúng.
-- Validation trùng lịch khi tạo/sửa lớp và tạo buổi học bù cả lớp hiện chạy ở frontend dựa trên danh sách lớp đã load; Rust command/database chưa có service rule hay constraint để chặn nếu bị gọi trực tiếp.
+- Từ Phase 13, backend enforce rule trùng lịch cố định (source of truth) trong `create_class`, `update_class_schedule`, `update_class_month_range`: cùng thứ + khoảng giờ giao nhau + khoảng THÁNG hoạt động của hai lớp giao nhau (dựa trên `start_month/end_month` thật, không giới hạn theo năm học hay khối — một giáo viên không thể dạy hai lớp cùng lúc), đồng thời chặn trùng với buổi học bù cả lớp đang active và chặn các buổi trùng giờ trong cùng một lớp. Frontend pre-check giữ lại làm UX helper. Dữ liệu cũ đã trùng (nếu có) không bị auto-sửa; rule chỉ áp dụng cho lần ghi mới.
 - AttendanceTab không dùng mockData/useMockAttendance làm nguồn điểm danh; reload/restart vẫn giữ dữ liệu attendance SQLite đã persist.
 - Attendance Phase 7C đã có transaction backend cho cancel/restore, class-level makeup và student-level makeup.
 
@@ -1023,7 +1024,9 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 19. Phase 10 Global tuition dashboard: đã triển khai (read-only, command `list_tuition_dashboard`).
 20. Phase 11 Global Schedule Page: đã triển khai (read-only, command `list_global_schedule_month`).
 21. Phase 12A Academic Year Management trong Settings: đã triển khai (`create_academic_year`, `update_academic_year`, `set_current_academic_year`).
-22. Phase 12B Change Password/App Lock: next planned; import học phí và export/import điểm danh chỉ làm nếu thật sự cần.
+22. Phase 12B Đổi mật khẩu trong Settings: đã triển khai (`change_password`; app lock chưa làm).
+23. Phase 13 Backend schedule overlap hardening: đã triển khai (`validate_fixed_schedule_no_overlap` trong create_class/update_class_schedule/update_class_month_range).
+24. Next: class copy/rollover, attendance export/import, payment import, release polish — chỉ làm nếu thật sự cần.
 
 ## 22. Questions to confirm before backend
 

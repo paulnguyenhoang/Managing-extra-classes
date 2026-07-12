@@ -813,7 +813,7 @@ Mục tiêu:
 Deliverables:
 
 - Login dùng local password thật.
-- Có flow set/change password sau này.
+- Flow đổi mật khẩu đã có ở Settings (Phase 12B, command `change_password`).
 - App nhớ năm học hiện tại.
 
 ### Phase 3. Academic years/classes/class schedules
@@ -833,7 +833,7 @@ Deliverables:
 - Lịch học lưu vào `class_schedules`.
 - AttendanceTab nhận schedule từ DB-backed class detail.
 - Lưu ý hiện tại: sau Phase 6, các bảng `academic_years`, `classes`, `class_schedules`, `students`, `class_memberships`, `payments`, `score_columns`, `score_values` dùng id số tự tăng; `studentCount` trong class overview đếm active memberships; `unpaidCount` đã đếm thật từ bảng `payments` theo tháng hiện tại và lifecycle.
-- Lưu ý hiện tại: UI đã có kiểm tra trùng lịch theo danh sách lớp đã load, nhưng Rust command/service chưa enforce. Khi quay lại Phase 3 hardening hoặc trước Attendance DB, cần đưa rule chống trùng lịch xuống backend.
+- Từ Phase 13, rule chống trùng lịch đã được enforce ở backend (`validate_fixed_schedule_no_overlap`) cho `create_class`, `update_class_schedule`, `update_class_month_range`; UI pre-check giữ lại làm UX helper.
 
 ### Phase 4. Students/class memberships
 
@@ -1149,11 +1149,30 @@ Trạng thái hiện tại: đã triển khai.
 - Không có delete năm học ở Phase 12A (tránh rủi ro dữ liệu); nếu làm sau này chỉ cho xóa năm 0 lớp.
 - Frontend: `academicYearApi.ts` thêm `createAcademicYear`/`updateAcademicYear`; `SettingsPage` quản lý năm học; `App.handleAcademicYearsChanged` reload danh sách năm và chuyển `selectedYearId` + reload lớp khi năm hiện tại đổi — Home/SchedulePage/TuitionDashboard đồng bộ.
 
+### Phase 12B. Đổi mật khẩu trong Settings
+
+Trạng thái hiện tại: đã triển khai.
+
+- Command `change_password(oldPassword, newPassword)` (đã có sẵn từ Phase 2, hoàn thiện ở 12B): verify mật khẩu hiện tại bằng CÙNG logic Argon2 với login; validate mật khẩu mới không trống và >= 6 ký tự (`"Mật khẩu mới phải có ít nhất 6 ký tự."`); hash + salt mới lưu `app_settings` qua `set_settings` (transaction); không log/không trả plaintext hay hash về frontend.
+- Frontend: `src/services/settingsApi.ts` (`changePassword`); card `"Bảo mật"` trong SettingsPage với 3 field password + validate + thông báo `"Đã đổi mật khẩu."`; không logout sau khi đổi; flow tạo mật khẩu lần đầu và `verify_password` giữ nguyên.
+- App lock/session timeout: chưa làm.
+
+### Phase 13. Backend schedule overlap hardening
+
+Trạng thái hiện tại: đã triển khai.
+
+- Helper `validate_fixed_schedule_no_overlap(conn, exclude_class_id, start_month, end_month, schedule_items)` trong `src-tauri/src/school/mod.rs`, chạy TRƯỚC khi ghi trong: `create_class` (exclude None), `update_class_schedule` (exclude chính lớp, dùng khoảng tháng hiện tại của lớp), `update_class_month_range` (re-validate lịch hiện có của lớp theo khoảng tháng mới). `complete_class` chỉ rút ngắn end_month nên không cần.
+- Rule trùng lớp-với-lớp: cùng weekday + khoảng giờ giao nhau (`startA < endB AND startB < endA`) + khoảng tháng hoạt động giao nhau (`A.start_month <= B.end_month AND B.start_month <= A.end_month`). So theo `start_month/end_month` THẬT của lớp — không giới hạn theo academic_year_id, không phân biệt khối, tính cả lớp completed còn khoảng tháng giao nhau; lớp is_archived bỏ qua. Tháng không giao nhau thì cùng thứ/giờ vẫn hợp lệ.
+- Rule trùng với học bù: lịch cố định mới không được trùng thứ + khoảng giờ với buổi `class_makeup` đang `active` có ngày trong khoảng tháng của lớp (mọi lớp, kể cả chính nó). Regular attendance_sessions KHÔNG dùng làm nguồn conflict (tránh false positive từ lịch sử).
+- Validate trong `validate_schedule_items`: giờ định dạng HH:MM, `end_time > start_time`, và các buổi trong CÙNG lớp không trùng giờ (`"Các buổi học trong cùng lớp không được trùng giờ."`).
+- Lỗi trả về nêu rõ lớp/thứ/giờ: `"Lịch học bị trùng với lớp [tên] vào [Thứ ...], [HH:MM] - [HH:MM]."`; với học bù: `"Lịch học bị trùng với buổi học bù của lớp [tên] vào [dd/MM/yyyy], [HH:MM] - [HH:MM]."`
+- Không có migration/constraint DB mới; dữ liệu cũ đã trùng không bị auto-sửa, không chặn khởi động app — rule chỉ áp dụng cho lần ghi mới. Frontend pre-check giữ nguyên; dialog hiển thị lỗi backend (EditClassScheduleDialog đã sửa để show message thật).
+
 ### Next planned
 
-- Phase 12B: Change Password/App Lock trong Settings.
-- Phase 13: Backend hardening cho rule chống trùng lịch (hiện mới enforce ở frontend + khi tạo class makeup).
-- Optional: class copy/rollover sang năm học mới; attendance export/import, payment import — chỉ làm nếu thật sự cần.
+- Optional: class copy/rollover sang năm học mới.
+- Optional: attendance export/import, payment import — chỉ làm nếu thật sự cần.
+- Release polish/build hardening.
 
 ## 10. Testing checklist
 
