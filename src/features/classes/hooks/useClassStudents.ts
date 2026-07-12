@@ -17,7 +17,7 @@ export function useClassStudents(classId: number) {
     } catch (error) {
       console.warn("[class-students] load failed", error);
       setStudents([]);
-      setErrorMessage("Không tải được danh sách học sinh từ database.");
+      setErrorMessage("Không tải được danh sách học sinh.");
     } finally {
       setIsLoading(false);
     }

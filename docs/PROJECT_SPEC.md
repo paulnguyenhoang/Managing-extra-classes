@@ -2,7 +2,7 @@
 
 ## 1. Mục đích tài liệu
 
-Tài liệu này ghi lại trạng thái hiện tại của ứng dụng dựa trên source code đang có trong `src/`, `package.json` và các file liên quan. Nội dung bên dưới mô tả những gì đã được triển khai thật trong frontend, cách dữ liệu mẫu và local state đang hoạt động, đồng thời tách riêng phần đề xuất cho backend/SQLite sau này.
+Tài liệu này ghi lại trạng thái hiện tại của ứng dụng dựa trên source code đang có trong `src/`, `package.json` và các file liên quan. Nội dung bên dưới mô tả những gì đã được triển khai thật trong frontend/backend SQLite local, các giới hạn còn lại và những phase tiếp theo.
 
 Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không còn dùng nữa.
 
@@ -10,9 +10,9 @@ Tài liệu này không mô tả kế hoạch cũ nếu code hiện tại không
 
 - App type: ứng dụng desktop Tauri dùng React + TypeScript.
 - Người dùng chính: giáo viên dạy Văn quản lý các lớp học thêm.
-- Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar và vài trang placeholder.
+- Trạng thái frontend: đã có skeleton chính, login bằng mật khẩu local, trang tổng quan, trang chi tiết lớp với 4 tab lõi, sidebar, trang lịch học tổng hợp, tổng hợp học phí, sao lưu dữ liệu và cài đặt.
 - Trạng thái persistence: đã có SQLite local qua Rust commands đến Phase 8: app settings/password, academic years, classes, class schedules, students, class memberships, payments, scores, class/membership month lifecycle, regular attendance, lock/unlock, cancel/restore, class-level makeup, student-level makeup và backup/restore.
-- Trạng thái mock/local state: `src/data/mockData.ts` vẫn còn dùng cho một phần dữ liệu mẫu và vài placeholder. Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm; Phase 9D đã có import danh sách học sinh; Phase 9E đã có import bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
+- Trạng thái mock/local state: `src/data/mockData.ts`, `useMockAttendance.ts`, `useMockScores.ts` vẫn còn là helper/legacy nội bộ hoặc fallback cũ. UI chính không còn quảng bá "dữ liệu mẫu" hoặc "bản thử nghiệm". Roster học sinh trong 4 tab chi tiết lớp đã lấy từ SQLite; payments, scores, điểm danh buổi thường, học bù cả lớp và học bù theo học sinh đã persist SQLite. Backup/Restore đã functional từ Phase 8. Phase 9A đã có nền export Excel và export danh sách học sinh; Phase 9B đã có export học phí; Phase 9C đã có export bảng điểm; Phase 9D đã có import danh sách học sinh; Phase 9E đã có import bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
 
 ## 3. Tech stack đang dùng trong code
 
@@ -127,12 +127,13 @@ src/
 - `src/components/ui`: shadcn/ui wrappers.
 - `src/features/home`: trang tổng quan và card lớp.
 - `src/features/classes`: trang chi tiết lớp, 4 tab lõi, hooks/utils cho điểm danh, điểm, học phí, lịch học.
-- `src/features/schedule`, `src/features/settings`: các trang sidebar dạng placeholder.
+- `src/features/schedule`: trang lịch học tổng hợp theo tháng.
+- `src/features/settings`: trang cài đặt năm học, bảo mật, thông tin lớp học và thông tin ứng dụng.
 - `src/features/tuition-dashboard`: dashboard học phí toàn app (functional từ Phase 10).
 - `src/features/backup`: trang sao lưu/khôi phục SQLite (functional từ Phase 8).
 - `src/services`: wrapper gọi Tauri commands cho dữ liệu đã nối SQLite.
 - `src/lib/excel`: helper frontend dùng ExcelJS để tạo workbook, style worksheet và đặt tên file an toàn.
-- `src/data/mockData.ts`: dữ liệu mẫu và selector/helper lấy dữ liệu.
+- `src/data/mockData.ts`: helper/fallback cũ cho một số type và dữ liệu legacy; không còn là nguồn chính cho các flow SQLite-backed.
 - `src/types`: type dữ liệu domain.
 - `src/lib`: helper format và className.
 
@@ -154,7 +155,7 @@ src/
 - Khi đang ở `class-detail`, sidebar active vẫn là `"home"`.
 - Logout reset `selectedClassId` và quay về `"login"`.
 
-Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage`, `TuitionDashboardPage` và `SchedulePage`. Trang `Cài đặt` đã có phần quản lý năm học (Phase 12A); các mục Bảo mật/Thông tin ứng dụng vẫn là placeholder.
+Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong lớp, `BackupPage`, `TuitionDashboardPage`, `SchedulePage` và `SettingsPage`. Trang `Cài đặt` đã có quản lý năm học, đổi mật khẩu, thông tin lớp học và thông tin ứng dụng gọn.
 
 ## 6. Danh sách màn hình/trang hiện có
 
@@ -171,11 +172,11 @@ Trang đã triển khai rõ nhất: `HomePage`, `ClassDetailPage`, 4 tab trong l
 | Lịch học | `SchedulePage.tsx` | Lịch tháng tổng hợp buổi học các lớp | implemented | SQLite Phase 11: command `list_global_schedule_month`, read-only |
 | Tổng hợp học phí | `TuitionDashboardPage.tsx` | Dashboard học phí toàn app theo năm học/tháng | implemented | SQLite Phase 10: command `list_tuition_dashboard`, read-only |
 | Sao lưu dữ liệu | `BackupPage.tsx` | Sao lưu/khôi phục database SQLite | implemented | SQLite Phase 8: backup API, `backup_logs`, safety backup trước restore |
-| Cài đặt | `SettingsPage.tsx` | Quản lý năm học (tạo/sửa/đặt hiện tại) | partial | Phase 12A; Bảo mật/Thông tin ứng dụng còn placeholder |
+| Cài đặt | `SettingsPage.tsx` | Quản lý năm học, đổi mật khẩu, thông tin lớp học, thông tin ứng dụng | implemented | Phase 12A/12B + Phase 14 polish |
 
 ## 7. Login flow hiện tại
 
-- UI gồm card giữa màn hình, icon sách, title đăng nhập hoặc tạo mật khẩu, input mật khẩu, nút hành động, hint `"Bản thử nghiệm dùng dữ liệu mẫu."`
+- UI gồm card giữa màn hình, icon sách, title đăng nhập hoặc tạo mật khẩu, input mật khẩu, nút hành động, hint `"Dữ liệu được lưu cục bộ trên máy tính này."`
 - Lần đầu mở app nếu chưa có mật khẩu trong `app_settings`, UI hiển thị chế độ `"Tạo mật khẩu"` với nhập lại mật khẩu.
 - Mật khẩu được lưu bằng hash + salt trong SQLite, không lưu plaintext.
 - Khi đã có mật khẩu, LoginPage gọi `verify_password`; mật khẩu sai hiển thị lỗi tiếng Việt.
@@ -193,7 +194,7 @@ Sidebar hiện có 5 item:
 | Lịch học | `schedule` | `SchedulePage` | functional |
 | Học phí | `tuition-dashboard` | `TuitionDashboardPage` | functional |
 | Sao lưu dữ liệu | `backup` | `BackupPage` | functional |
-| Cài đặt | `settings` | `SettingsPage` | partial (Năm học functional) |
+| Cài đặt | `settings` | `SettingsPage` | functional |
 
 - Item global `"Học sinh"` không còn trong sidebar.
 - Sidebar chỉ đổi màn hình bằng local state, không đổi URL.
@@ -746,7 +747,7 @@ State/data source:
 - Bảng: STT (= index + 1 sau filter/sort, không dùng database ID), Học sinh (kèm lớp ở trường/trường), Lớp, Khối, Trạng thái (màu giống PaymentsTab), Học phí tháng, Số tiền đã thu, Ngày đóng, Ghi chú, nút `"Mở lớp"` mở ClassDetailPage của lớp đó qua `onOpenClass`.
 - Sort hiển thị: khối → tên lớp → tên tiếng Việt (helper chung) → membershipId ổn định.
 - Loading/error/empty state tiếng Việt; đổi năm học reset filter lớp và kéo tháng về trong khoảng năm.
-- Trạng thái: implemented (Phase 10). SettingsPage vẫn là placeholder.
+- Trạng thái: implemented (Phase 10). SettingsPage functional cho năm học, bảo mật, thông tin lớp học và thông tin ứng dụng.
 
 ### Sao lưu dữ liệu
 
@@ -771,8 +772,8 @@ State/data source:
   - `"Đặt làm hiện tại"` có confirm `"Đổi năm học hiện tại?"`; xác nhận gọi `set_current_academic_year` (transaction: is_current + `app_settings.current_academic_year_id`), App chuyển `selectedYearId` và reload lớp — không di chuyển/copy/xóa lớp hay dữ liệu nào.
   - Không có nút xóa năm học (bỏ qua ở Phase 12A để giảm rủi ro).
 - Card `"Bảo mật"` (functional từ Phase 12B): form đổi mật khẩu với 3 field (Mật khẩu hiện tại, Mật khẩu mới, Nhập lại mật khẩu mới) + nút `"Đổi mật khẩu"`; validate frontend (bắt buộc, mới >= 6 ký tự, nhập lại khớp) và backend (`change_password` verify mật khẩu hiện tại bằng Argon2 như login, hash/salt mới lưu `app_settings` — không bao giờ lưu plaintext); sai mật khẩu hiện tại hiện `"Mật khẩu hiện tại không đúng."`; thành công hiện `"Đã đổi mật khẩu."`, xóa các field, KHÔNG logout. App lock/session timeout chưa làm.
-- Card `"Thông tin ứng dụng"`: vẫn placeholder.
-- Trạng thái: partial — mục Năm học implemented (Phase 12A).
+- Card `"Thông tin ứng dụng"`: mô tả app quản lý lớp học thêm, dữ liệu SQLite lưu trên máy này, kiểu dữ liệu `"Lưu cục bộ"` và ghi chú sao lưu/khôi phục.
+- Trạng thái: implemented cho Năm học, Bảo mật và Thông tin ứng dụng; phần thông tin lớp học là read-only tổng quan.
 
 ## 16. Data và type hiện tại
 
@@ -967,7 +968,8 @@ State/data source:
 - Đổi mật khẩu đã có ở Settings (Phase 12B); chưa có app lock/session persist sau restart.
 - Chưa có React Router.
 - Đã có export Excel thật cho danh sách học sinh, học phí và bảng điểm; đã có import Excel cho danh sách học sinh và bảng điểm. Import học phí và export/import điểm danh vẫn chưa triển khai.
-- Trang Cài đặt: mục Năm học đã functional (Phase 12A); Bảo mật/Thông tin ứng dụng còn placeholder.
+- Trang Cài đặt: mục Năm học, Bảo mật, Thông tin lớp học và Thông tin ứng dụng đã functional/polished; chưa có app lock/session timeout.
+- Phase 14 đã dọn wording `"bản thử nghiệm"`/`"dữ liệu mẫu"` khỏi UI chính; empty/loading/error state được rà lại để dùng ngôn ngữ tự nhiên hơn.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
 - Chưa có xử lý hard delete/archive học sinh hiện có.
@@ -1026,7 +1028,8 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 21. Phase 12A Academic Year Management trong Settings: đã triển khai (`create_academic_year`, `update_academic_year`, `set_current_academic_year`).
 22. Phase 12B Đổi mật khẩu trong Settings: đã triển khai (`change_password`; app lock chưa làm).
 23. Phase 13 Backend schedule overlap hardening: đã triển khai (`validate_fixed_schedule_no_overlap` trong create_class/update_class_schedule/update_class_month_range).
-24. Next: class copy/rollover, attendance export/import, payment import, release polish — chỉ làm nếu thật sự cần.
+24. Phase 14 Release polish/build hardening: đã triển khai (dọn wording bản thử nghiệm/dữ liệu mẫu khỏi UI chính, rà empty/loading/error text, thêm card Thông tin ứng dụng, kiểm tra config).
+25. Next: class copy/rollover, attendance export/import, payment import — chỉ làm nếu thật sự cần.
 
 ## 22. Questions to confirm before backend
 

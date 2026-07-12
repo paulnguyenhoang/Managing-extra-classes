@@ -223,7 +223,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </Button>
           </form>
           <p className="mt-5 text-center text-sm text-muted-foreground">
-            Bản thử nghiệm dùng dữ liệu mẫu.
+            Dữ liệu được lưu cục bộ trên máy tính này.
           </p>
         </CardContent>
       </Card>

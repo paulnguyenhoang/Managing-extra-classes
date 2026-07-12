@@ -26,7 +26,7 @@ export function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
     <aside className="w-16 shrink-0 border-r bg-white px-2 py-4 lg:w-64 lg:px-4 lg:py-6">
       <div className="mb-5 hidden rounded-lg border border-emerald-100 bg-emerald-50 p-4 lg:block">
         <p className="text-sm font-medium text-emerald-950">Sổ lớp của thầy</p>
-        <p className="mt-1 text-sm text-emerald-800">Dữ liệu mẫu cho bản thử nghiệm.</p>
+        <p className="mt-1 text-sm text-emerald-800">Dữ liệu lưu trên máy tính này.</p>
       </div>
 
       <nav className="space-y-2">

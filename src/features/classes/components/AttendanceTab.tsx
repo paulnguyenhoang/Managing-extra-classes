@@ -621,7 +621,7 @@ export function AttendanceTab({
   async function tryAddMakeupSession(input: MakeupSessionInput): Promise<string | null> {
     const originalSession = sessions.find((session) => session.id === input.makeupForSessionId);
     if (!originalSession?.dbId) {
-      return "Không tìm thấy buổi học gốc trong database.";
+      return "Không tìm thấy buổi học gốc.";
     }
 
     setActionErrorMessage(null);
@@ -779,7 +779,7 @@ export function AttendanceTab({
     setActionErrorMessage(null);
 
     if (!session.dbId) {
-      setActionErrorMessage("Không tìm thấy buổi học trong database.");
+      setActionErrorMessage("Không tìm thấy buổi học.");
       return;
     }
 
@@ -894,7 +894,7 @@ export function AttendanceTab({
       ) : null}
       {!isLoadingAttendance && !attendanceErrorMessage && students.length === 0 ? (
         <p className="rounded-lg border bg-white px-4 py-3 text-sm text-slate-600">
-          Lớp này chưa có học sinh trong database.
+          Lớp này chưa có học sinh.
         </p>
       ) : null}
       {!isLoadingAttendance &&

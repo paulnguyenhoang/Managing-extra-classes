@@ -1,6 +1,6 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
-Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8 và Phase 9A-9E đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm, import danh sách học sinh và import bảng điểm). Import học phí và export/import điểm danh vẫn là kế hoạch.
+Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8, Phase 9A-9E, Phase 10-13 và Phase 14 polish đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm, import danh sách học sinh, import bảng điểm, dashboard/lịch tổng hợp/settings và release polish). Import học phí và export/import điểm danh vẫn là kế hoạch.
 
 Nguồn tham chiếu:
 
@@ -1168,11 +1168,20 @@ Trạng thái hiện tại: đã triển khai.
 - Lỗi trả về nêu rõ lớp/thứ/giờ: `"Lịch học bị trùng với lớp [tên] vào [Thứ ...], [HH:MM] - [HH:MM]."`; với học bù: `"Lịch học bị trùng với buổi học bù của lớp [tên] vào [dd/MM/yyyy], [HH:MM] - [HH:MM]."`
 - Không có migration/constraint DB mới; dữ liệu cũ đã trùng không bị auto-sửa, không chặn khởi động app — rule chỉ áp dụng cho lần ghi mới. Frontend pre-check giữ nguyên; dialog hiển thị lỗi backend (EditClassScheduleDialog đã sửa để show message thật).
 
+### Phase 14. Release polish/build hardening
+
+Trạng thái hiện tại: đã triển khai.
+
+- Không đổi schema/migration và không reset dữ liệu.
+- UI chính đã dọn wording dễ gây cảm giác bản thử nghiệm như `"Bản thử nghiệm"` và `"Dữ liệu mẫu"`.
+- Empty/loading/error/success text được rà lại để bớt kỹ thuật và thân thiện hơn.
+- SettingsPage có card `"Thông tin ứng dụng"` ngắn gọn: app quản lý lớp học thêm, dữ liệu SQLite lưu trên máy này, lưu cục bộ và có sao lưu/khôi phục.
+- Config package/Tauri/Cargo đã được rà ở mức an toàn; không có thay đổi bắt buộc cho schema/backend.
+
 ### Next planned
 
 - Optional: class copy/rollover sang năm học mới.
 - Optional: attendance export/import, payment import — chỉ làm nếu thật sự cần.
-- Release polish/build hardening.
 
 ## 10. Testing checklist
 

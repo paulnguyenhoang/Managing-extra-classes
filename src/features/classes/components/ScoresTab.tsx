@@ -123,7 +123,7 @@ export function ScoresTab({ classId, className, classStartMonth, classEndMonth }
       console.warn("[scores] load failed", error);
       setSheet(null);
       setErrorMessage(
-        typeof error === "string" ? error : "Không tải được bảng điểm từ database.",
+        typeof error === "string" ? error : "Không tải được bảng điểm.",
       );
     }
   }, [classId, selectedMonth]);

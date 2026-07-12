@@ -93,7 +93,7 @@ function App() {
       }
     } catch (error) {
       console.warn("[school-data] load failed", error);
-      setSchoolDataError("Không tải được dữ liệu năm học và lớp học từ database.");
+      setSchoolDataError("Không tải được dữ liệu năm học và lớp học.");
     } finally {
       setHasLoadedSchoolData(true);
       setIsSchoolDataLoading(false);
@@ -260,6 +260,7 @@ function App() {
       return (
         <SettingsPage
           academicYears={academicYears}
+          classOverviews={classOverviews}
           onYearsChanged={handleAcademicYearsChanged}
         />
       );

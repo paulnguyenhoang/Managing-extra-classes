@@ -118,7 +118,7 @@ export function PaymentsTab({
     } catch (error) {
       console.warn("[payments] load failed", error);
       setRows([]);
-      setErrorMessage("Không tải được dữ liệu học phí từ database.");
+      setErrorMessage("Không tải được dữ liệu học phí.");
     }
   }, [classId, selectedMonth]);
 

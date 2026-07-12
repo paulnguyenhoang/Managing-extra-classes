@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarPlus, Pencil } from "lucide-react";
+import { CalendarPlus, Eye, EyeOff, Pencil } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,11 @@ import {
 } from "@/services/academicYearApi";
 import { changePassword } from "@/services/settingsApi";
 import type { AcademicYear } from "@/types/academic-year";
+import type { ClassOverview } from "@/types/class";
 
 type SettingsPageProps = {
   academicYears: AcademicYear[];
+  classOverviews: ClassOverview[];
   onYearsChanged: (nextCurrentYearId?: number) => Promise<void>;
 };
 
@@ -44,14 +46,17 @@ type YearFormState = {
   makeCurrent: boolean;
 };
 
-const placeholderSections = [
-  {
-    title: "Thông tin ứng dụng",
-    description: "Ứng dụng quản lý lớp học thêm, dữ liệu lưu SQLite trên máy tính này.",
-  },
-];
+type SettingsPasswordInputProps = {
+  id: string;
+  label: string;
+  value: string;
+  autoComplete: string;
+  isVisible: boolean;
+  onChange: (value: string) => void;
+  onToggleVisibility: () => void;
+};
 
-export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProps) {
+export function SettingsPage({ academicYears, classOverviews, onYearsChanged }: SettingsPageProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -61,7 +66,7 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
 
   const currentYear = academicYears.find((year) => year.isCurrent) ?? null;
   const editingYear = editForm
-    ? academicYears.find((year) => year.id === editForm.id) ?? null
+    ? (academicYears.find((year) => year.id === editForm.id) ?? null)
     : null;
 
   function openCreateDialog() {
@@ -183,10 +188,10 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
   }
 
   return (
-    <div className="min-h-full min-w-0 space-y-4 pb-4">
+    <div className="min-h-full min-w-0 space-y-3 pb-0">
       <section>
         <h2 className="text-2xl font-semibold text-slate-950 md:text-3xl">Cài đặt</h2>
-        <p className="mt-2 max-w-3xl text-muted-foreground">Quản lý thiết lập ứng dụng.</p>
+        <p className="mt-1 max-w-3xl text-muted-foreground">Quản lý thiết lập ứng dụng.</p>
       </section>
 
       {errorMessage ? (
@@ -200,14 +205,14 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
         </p>
       ) : null}
 
-      <Card className="rounded-lg border-slate-200 shadow-sm">
-        <CardHeader className="pb-2">
+      <Card className="rounded-lg border-slate-200 shadow-sm" data-size="sm">
+        <CardHeader className="pb-1">
           <CardTitle className="text-base">Năm học</CardTitle>
           <p className="text-sm text-muted-foreground">
             Tạo năm học mới và chọn năm học đang sử dụng.
           </p>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-slate-700">
               Năm học hiện tại:{" "}
@@ -295,14 +300,7 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
 
       <ChangePasswordCard />
 
-      {placeholderSections.map((section) => (
-        <Card key={section.title} className="rounded-lg border-slate-200 shadow-sm">
-          <CardContent className="p-4">
-            <h3 className="font-semibold text-slate-950">{section.title}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
-          </CardContent>
-        </Card>
-      ))}
+      <AppInfoCard />
 
       <YearFormDialog
         title="Tạo năm học mới"
@@ -361,8 +359,8 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
           <DialogHeader>
             <DialogTitle>Đổi năm học hiện tại?</DialogTitle>
             <DialogDescription>
-              Ứng dụng sẽ chuyển về năm học {pendingCurrentYear?.label}. Danh sách lớp ở trang
-              Tổng quan sẽ hiển thị theo năm học này.
+              Ứng dụng sẽ chuyển về năm học {pendingCurrentYear?.label}. Danh sách lớp ở trang Tổng
+              quan sẽ hiển thị theo năm học này.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -381,10 +379,39 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
   );
 }
 
+function AppInfoCard() {
+  return (
+    <Card className="rounded-lg border-slate-200 shadow-sm" data-size="sm">
+      <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1.6fr)_repeat(2,minmax(0,1fr))] md:items-center">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-slate-950">Thông tin ứng dụng</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Ứng dụng quản lý lớp học thêm, dữ liệu lưu SQLite trên máy tính này.
+          </p>
+        </div>
+        <AppInfoItem label="Kiểu dữ liệu" value="Lưu cục bộ" />
+        <AppInfoItem label="Sao lưu" value="Có thể sao lưu/khôi phục" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function AppInfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-slate-50 px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
 function ChangePasswordCard() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState("");
@@ -429,12 +456,12 @@ function ChangePasswordCard() {
   }
 
   return (
-    <Card className="rounded-lg border-slate-200 shadow-sm">
-      <CardHeader className="pb-2">
+    <Card className="rounded-lg border-slate-200 shadow-sm" data-size="sm">
+      <CardHeader className="pb-1">
         <CardTitle className="text-base">Bảo mật</CardTitle>
         <p className="text-sm text-muted-foreground">Đổi mật khẩu đăng nhập ứng dụng.</p>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-2.5">
         {passwordError ? (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {passwordError}
@@ -446,49 +473,78 @@ function ChangePasswordCard() {
           </p>
         ) : null}
 
-        <div className="grid gap-3 sm:max-w-md">
-          <div className="space-y-1.5">
-            <Label htmlFor="current-password">Mật khẩu hiện tại</Label>
-            <Input
-              id="current-password"
-              type="password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-              autoComplete="current-password"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-password">Mật khẩu mới</Label>
-            <Input
-              id="new-password"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="confirm-password">Nhập lại mật khẩu mới</Label>
-            <Input
-              id="confirm-password"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              autoComplete="new-password"
-            />
-          </div>
-          <div>
-            <Button
-              type="button"
-              onClick={submitChangePassword}
-              disabled={isChangingPassword}
-            >
+        <div className="grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+          <SettingsPasswordInput
+            id="current-password"
+            label="Mật khẩu hiện tại"
+            value={currentPassword}
+            autoComplete="current-password"
+            isVisible={showCurrentPassword}
+            onChange={setCurrentPassword}
+            onToggleVisibility={() => setShowCurrentPassword((current) => !current)}
+          />
+          <SettingsPasswordInput
+            id="new-password"
+            label="Mật khẩu mới"
+            value={newPassword}
+            autoComplete="new-password"
+            isVisible={showNewPassword}
+            onChange={setNewPassword}
+            onToggleVisibility={() => setShowNewPassword((current) => !current)}
+          />
+          <SettingsPasswordInput
+            id="confirm-password"
+            label="Nhập lại mật khẩu mới"
+            value={confirmPassword}
+            autoComplete="new-password"
+            isVisible={showConfirmPassword}
+            onChange={setConfirmPassword}
+            onToggleVisibility={() => setShowConfirmPassword((current) => !current)}
+          />
+          <div className="lg:pb-px">
+            <Button type="button" onClick={submitChangePassword} disabled={isChangingPassword}>
               {isChangingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
             </Button>
           </div>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SettingsPasswordInput({
+  id,
+  label,
+  value,
+  autoComplete,
+  isVisible,
+  onChange,
+  onToggleVisibility,
+}: SettingsPasswordInputProps) {
+  const VisibilityIcon = isVisible ? EyeOff : Eye;
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type={isVisible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          autoComplete={autoComplete}
+          className="pr-10"
+        />
+        <button
+          type="button"
+          onClick={onToggleVisibility}
+          className="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          aria-label={isVisible ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+        >
+          <VisibilityIcon className="size-4" />
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -93,9 +93,7 @@ export function BackupPage({ onRestored }: BackupPageProps) {
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [latestBackup, setLatestBackup] = useState<BackupResultDto | null>(null);
   const [isPickingFile, setIsPickingFile] = useState(false);
-  const [selectedRestoreFile, setSelectedRestoreFile] = useState<SelectedRestoreFile | null>(
-    null,
-  );
+  const [selectedRestoreFile, setSelectedRestoreFile] = useState<SelectedRestoreFile | null>(null);
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreSuccessMessage, setRestoreSuccessMessage] = useState("");
@@ -212,14 +210,14 @@ export function BackupPage({ onRestored }: BackupPageProps) {
 
       <Card className="rounded-lg border-slate-200 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Thông tin database</CardTitle>
+          <CardTitle className="text-base">Thông tin dữ liệu</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {databaseInfo ? (
             <>
               <InfoRow label="Đường dẫn dữ liệu" value={databaseInfo.databasePath} />
               <InfoRow
-                label="Dung lượng database"
+                label="Dung lượng dữ liệu"
                 value={formatBytes(databaseInfo.databaseSizeBytes)}
               />
               <InfoRow label="Phiên bản schema" value={databaseInfo.latestMigration} />
@@ -244,7 +242,7 @@ export function BackupPage({ onRestored }: BackupPageProps) {
               </div>
             </>
           ) : (
-            <p className="text-muted-foreground">Đang tải thông tin database...</p>
+            <p className="text-muted-foreground">Đang tải thông tin dữ liệu...</p>
           )}
         </CardContent>
       </Card>
@@ -397,14 +395,10 @@ export function BackupPage({ onRestored }: BackupPageProps) {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">Chưa có lịch sử sao lưu.</p>
+            <p className="text-sm text-muted-foreground">Chưa có lịch sử sao lưu/khôi phục.</p>
           )}
         </CardContent>
       </Card>
-
-      <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        Khi cần hỗ trợ, thầy có thể gửi file sao lưu cho developer để kiểm tra và sửa dữ liệu.
-      </p>
 
       <Dialog
         open={isRestoreConfirmOpen}
@@ -418,8 +412,8 @@ export function BackupPage({ onRestored }: BackupPageProps) {
           <DialogHeader>
             <DialogTitle>Khôi phục dữ liệu?</DialogTitle>
             <DialogDescription>
-              Thao tác này sẽ thay thế toàn bộ dữ liệu hiện tại bằng file sao lưu đã chọn. Ứng
-              dụng sẽ tạo một bản sao lưu an toàn trước khi khôi phục.
+              Thao tác này sẽ thay thế toàn bộ dữ liệu hiện tại bằng file sao lưu đã chọn. Ứng dụng
+              sẽ tạo một bản sao lưu an toàn trước khi khôi phục.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

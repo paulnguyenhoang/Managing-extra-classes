@@ -120,7 +120,7 @@ export function ClassDetailPage({
         }
 
         console.warn("[class-detail] load failed", error);
-        setHeaderError("Không tải được thông tin lớp học từ database.");
+        setHeaderError("Không tải được thông tin lớp học.");
       });
 
     return () => {
