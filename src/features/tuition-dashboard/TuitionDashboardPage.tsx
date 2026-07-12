@@ -222,9 +222,9 @@ export function TuitionDashboardPage({
 
   const summaryCards = [
     { label: "Tổng đã thu", value: formatCurrency(visibleSummary.collected), icon: WalletCards },
-    { label: "Chưa đóng", value: `${visibleSummary.unpaid} học sinh`, icon: Users },
-    { label: "Đã đóng", value: `${visibleSummary.paid} học sinh`, icon: Users },
-    { label: "Miễn giảm", value: `${visibleSummary.waived} học sinh`, icon: Users },
+    { label: "Chưa đóng", value: `${visibleSummary.unpaid} `, icon: Users },
+    { label: "Đã đóng", value: `${visibleSummary.paid} `, icon: Users },
+    { label: "Miễn giảm", value: `${visibleSummary.waived} `, icon: Users },
     { label: "Số học sinh", value: String(visibleSummary.totalStudents), icon: Users },
   ];
 

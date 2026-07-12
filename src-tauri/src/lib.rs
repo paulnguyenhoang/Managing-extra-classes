@@ -36,11 +36,6 @@ pub fn run() {
                 database_status.applied_migrations.join(", ")
             );
 
-            school::seed_academic_class_data(&database)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
-            students::seed_student_data(&database)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
-
             app.manage(database);
 
             Ok(())
