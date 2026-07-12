@@ -67,8 +67,11 @@ export function EditClassScheduleDialog({
     try {
       await onSave(draftItems);
       setOpen(false);
-    } catch {
-      setErrorMessage("Không lưu được lịch học. Thầy thử lại giúp em nhé.");
+    } catch (error) {
+      // Hiển thị lỗi trùng lịch từ backend (source of truth) thay vì message chung.
+      setErrorMessage(
+        typeof error === "string" ? error : "Không lưu được lịch học. Thầy thử lại giúp em nhé.",
+      );
     } finally {
       setIsSaving(false);
     }

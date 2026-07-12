@@ -29,6 +29,7 @@ import {
   setCurrentAcademicYear,
   updateAcademicYear,
 } from "@/services/academicYearApi";
+import { changePassword } from "@/services/settingsApi";
 import type { AcademicYear } from "@/types/academic-year";
 
 type SettingsPageProps = {
@@ -44,10 +45,6 @@ type YearFormState = {
 };
 
 const placeholderSections = [
-  {
-    title: "Bảo mật",
-    description: "Đổi mật khẩu và khóa ứng dụng sẽ được phát triển sau.",
-  },
   {
     title: "Thông tin ứng dụng",
     description: "Ứng dụng quản lý lớp học thêm, dữ liệu lưu SQLite trên máy tính này.",
@@ -296,6 +293,8 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
         </CardContent>
       </Card>
 
+      <ChangePasswordCard />
+
       {placeholderSections.map((section) => (
         <Card key={section.title} className="rounded-lg border-slate-200 shadow-sm">
           <CardContent className="p-4">
@@ -379,6 +378,117 @@ export function SettingsPage({ academicYears, onYearsChanged }: SettingsPageProp
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+
+  async function submitChangePassword() {
+    setPasswordSuccess("");
+
+    if (!currentPassword.trim()) {
+      setPasswordError("Vui lòng nhập mật khẩu hiện tại.");
+      return;
+    }
+    if (!newPassword.trim()) {
+      setPasswordError("Vui lòng nhập mật khẩu mới.");
+      return;
+    }
+    if (newPassword.trim().length < 6) {
+      setPasswordError("Mật khẩu mới phải có ít nhất 6 ký tự.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("Nhập lại mật khẩu mới chưa khớp.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    setPasswordError("");
+
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordSuccess("Đã đổi mật khẩu.");
+    } catch (error) {
+      console.warn("[settings] change password failed", error);
+      setPasswordError(
+        typeof error === "string" ? error : "Không thể đổi mật khẩu. Vui lòng thử lại.",
+      );
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
+  return (
+    <Card className="rounded-lg border-slate-200 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Bảo mật</CardTitle>
+        <p className="text-sm text-muted-foreground">Đổi mật khẩu đăng nhập ứng dụng.</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {passwordError ? (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {passwordError}
+          </p>
+        ) : null}
+        {passwordSuccess && !passwordError ? (
+          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {passwordSuccess}
+          </p>
+        ) : null}
+
+        <div className="grid gap-3 sm:max-w-md">
+          <div className="space-y-1.5">
+            <Label htmlFor="current-password">Mật khẩu hiện tại</Label>
+            <Input
+              id="current-password"
+              type="password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              autoComplete="current-password"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-password">Mật khẩu mới</Label>
+            <Input
+              id="new-password"
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm-password">Nhập lại mật khẩu mới</Label>
+            <Input
+              id="confirm-password"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <Button
+              type="button"
+              onClick={submitChangePassword}
+              disabled={isChangingPassword}
+            >
+              {isChangingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -48,7 +48,7 @@ pub fn update_password(
     new_password: &str,
 ) -> Result<(), String> {
     validate_password(old_password)?;
-    validate_password(new_password)?;
+    validate_new_password(new_password)?;
 
     if !verify_local_password(database, old_password)? {
         return Err("Mật khẩu hiện tại không đúng.".to_string());
@@ -56,6 +56,16 @@ pub fn update_password(
 
     let hashed_password = hash_password(new_password)?;
     save_password(database, &hashed_password)
+}
+
+fn validate_new_password(password: &str) -> Result<(), String> {
+    validate_password(password)?;
+
+    if password.trim().chars().count() < 6 {
+        return Err("Mật khẩu mới phải có ít nhất 6 ký tự.".to_string());
+    }
+
+    Ok(())
 }
 
 fn validate_password(password: &str) -> Result<(), String> {

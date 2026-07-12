@@ -589,6 +589,14 @@ pub fn create_class(
             &request.end_month,
         )?;
 
+        validate_fixed_schedule_no_overlap(
+            connection,
+            None,
+            &request.start_month,
+            &request.end_month,
+            &request.schedule_items,
+        )?;
+
         let name = request.name.trim().to_string();
         let note = normalize_optional_text(request.note.as_deref());
         let transaction = connection
@@ -684,6 +692,20 @@ pub fn update_class_month_range(
             &request.start_month,
             &request.end_month,
         )?;
+
+        // Mở rộng khoảng tháng có thể tạo trùng lịch mới với lớp khác — kiểm tra lại
+        // lịch cố định hiện có của lớp theo khoảng tháng mới.
+        let schedule_items = class_schedule_items(connection, request.class_id)?;
+        if !schedule_items.is_empty() {
+            validate_fixed_schedule_no_overlap(
+                connection,
+                Some(request.class_id),
+                &request.start_month,
+                &request.end_month,
+                &schedule_items,
+            )?;
+        }
+
         connection
             .execute(
                 "UPDATE classes
@@ -749,6 +771,22 @@ pub fn update_class_schedule(
 
     database.with_connection_mut(|connection| {
         ensure_class_exists(connection, request.class_id)?;
+
+        let (class_start_month, class_end_month): (String, String) = connection
+            .query_row(
+                "SELECT start_month, end_month FROM classes WHERE id = ?1",
+                params![request.class_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| format!("Không đọc được thời gian học của lớp: {error}"))?;
+        validate_fixed_schedule_no_overlap(
+            connection,
+            Some(request.class_id),
+            &class_start_month,
+            &class_end_month,
+            &request.schedule_items,
+        )?;
+
         let transaction = connection
             .transaction()
             .map_err(|error| format!("Không bắt đầu được transaction lịch học: {error}"))?;
@@ -1122,9 +1160,181 @@ fn validate_schedule_items(schedule_items: &[ClassScheduleItemDto]) -> Result<()
         if item.start_time.trim().is_empty() || item.end_time.trim().is_empty() {
             return Err("Giờ học không được để trống.".to_string());
         }
+
+        if !is_valid_time_text(&item.start_time) || !is_valid_time_text(&item.end_time) {
+            return Err("Giờ học không hợp lệ, cần định dạng HH:MM.".to_string());
+        }
+
+        if item.end_time <= item.start_time {
+            return Err("Giờ kết thúc phải sau giờ bắt đầu.".to_string());
+        }
+    }
+
+    // Các buổi trong CÙNG lớp không được trùng khoảng giờ trên cùng một thứ.
+    for (first_index, first) in schedule_items.iter().enumerate() {
+        for second in schedule_items.iter().skip(first_index + 1) {
+            if first.weekday == second.weekday
+                && times_overlap(&first.start_time, &first.end_time, &second.start_time, &second.end_time)
+            {
+                return Err("Các buổi học trong cùng lớp không được trùng giờ.".to_string());
+            }
+        }
     }
 
     Ok(())
+}
+
+fn is_valid_time_text(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 5 || bytes[2] != b':' {
+        return false;
+    }
+
+    let hours = &value[0..2];
+    let minutes = &value[3..5];
+    match (hours.parse::<u32>(), minutes.parse::<u32>()) {
+        (Ok(hours), Ok(minutes)) => hours <= 23 && minutes <= 59,
+        _ => false,
+    }
+}
+
+fn times_overlap(a_start: &str, a_end: &str, b_start: &str, b_end: &str) -> bool {
+    a_start < b_end && b_start < a_end
+}
+
+/// Rule một-giáo-viên: lịch cố định không được trùng khoảng giờ với lớp khác có
+/// khoảng tháng hoạt động giao nhau (kể cả khác khối/khác năm học), và không được
+/// trùng với buổi học bù cả lớp đang active. Backend là source of truth.
+fn validate_fixed_schedule_no_overlap(
+    connection: &Connection,
+    exclude_class_id: Option<i64>,
+    start_month: &str,
+    end_month: &str,
+    schedule_items: &[ClassScheduleItemDto],
+) -> Result<(), String> {
+    // Lịch cố định của các lớp khác có khoảng tháng giao nhau (dựa trên start/end month
+    // thật của lớp, không dựa vào academic_year_id hay status).
+    let mut statement = connection
+        .prepare(
+            "SELECT c.name, cs.weekday, cs.start_time, cs.end_time
+             FROM classes c
+             JOIN class_schedules cs ON cs.class_id = c.id
+             WHERE c.is_archived = 0
+               AND c.id != COALESCE(?1, -1)
+               AND c.start_month <= ?3
+               AND ?2 <= c.end_month",
+        )
+        .map_err(|error| format!("Không chuẩn bị được kiểm tra trùng lịch: {error}"))?;
+
+    let other_schedules = statement
+        .query_map(params![exclude_class_id, start_month, end_month], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|error| format!("Không đọc được lịch học các lớp khác: {error}"))?;
+
+    let mut conflicts = Vec::new();
+    for row in other_schedules {
+        conflicts.push(row.map_err(|error| format!("Không parse được lịch học: {error}"))?);
+    }
+
+    for item in schedule_items {
+        for (class_name, weekday, other_start, other_end) in &conflicts {
+            if item.weekday == *weekday
+                && times_overlap(&item.start_time, &item.end_time, other_start, other_end)
+            {
+                return Err(format!(
+                    "Lịch học bị trùng với lớp {class_name} vào {}, {other_start} - {other_end}.",
+                    weekday_label(*weekday)
+                ));
+            }
+        }
+    }
+
+    // Buổi học bù cả lớp đang active trong khoảng tháng của lớp (mọi lớp, kể cả chính nó).
+    let mut makeup_statement = connection
+        .prepare(
+            "SELECT c.name, a.session_date, a.start_time, a.end_time,
+                    CAST(strftime('%w', a.session_date) AS INTEGER)
+             FROM attendance_sessions a
+             JOIN classes c ON c.id = a.class_id
+             WHERE a.type = 'class_makeup'
+               AND a.status = 'active'
+               AND c.is_archived = 0
+               AND substr(a.session_date, 1, 7) >= ?1
+               AND substr(a.session_date, 1, 7) <= ?2",
+        )
+        .map_err(|error| format!("Không chuẩn bị được kiểm tra buổi học bù: {error}"))?;
+
+    let makeup_rows = makeup_statement
+        .query_map(params![start_month, end_month], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })
+        .map_err(|error| format!("Không đọc được buổi học bù: {error}"))?;
+
+    let mut makeup_sessions = Vec::new();
+    for row in makeup_rows {
+        makeup_sessions.push(row.map_err(|error| format!("Không parse được buổi học bù: {error}"))?);
+    }
+
+    for item in schedule_items {
+        for (class_name, session_date, other_start, other_end, weekday) in &makeup_sessions {
+            if item.weekday == *weekday
+                && times_overlap(&item.start_time, &item.end_time, other_start, other_end)
+            {
+                return Err(format!(
+                    "Lịch học bị trùng với buổi học bù của lớp {class_name} vào {}, {other_start} - {other_end}.",
+                    format_date_label(session_date)
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn format_date_label(date: &str) -> String {
+    let mut parts = date.splitn(3, '-');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(year), Some(month), Some(day)) => format!("{day}/{month}/{year}"),
+        _ => date.to_string(),
+    }
+}
+
+fn class_schedule_items(
+    connection: &Connection,
+    class_id: i64,
+) -> Result<Vec<ClassScheduleItemDto>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT weekday, start_time, end_time
+             FROM class_schedules
+             WHERE class_id = ?1
+             ORDER BY CASE WHEN weekday = 0 THEN 7 ELSE weekday END ASC, start_time ASC, sort_order ASC",
+        )
+        .map_err(|error| format!("Không chuẩn bị được lịch học của lớp: {error}"))?;
+
+    let rows = statement
+        .query_map(params![class_id], |row| {
+            Ok(ClassScheduleItemDto {
+                weekday: row.get(0)?,
+                start_time: row.get(1)?,
+                end_time: row.get(2)?,
+            })
+        })
+        .map_err(|error| format!("Không đọc được lịch học của lớp: {error}"))?;
+
+    collect_rows(rows, "Không parse được lịch học")
 }
 
 fn normalize_optional_text(value: Option<&str>) -> Option<String> {
