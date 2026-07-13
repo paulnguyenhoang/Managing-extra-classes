@@ -6,6 +6,7 @@ import {
   Search,
   Users,
   WalletCards,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,13 @@ import {
 } from "@/features/classes/utils/payments";
 import { getClassMonthOptionsForYear } from "@/features/classes/utils/classMonthOptions";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
-import { formatCurrency, formatDate, formatPhoneNumber, paymentStatusLabel } from "@/lib/format";
+import {
+  formatCurrency,
+  formatDate,
+  formatPhoneNumber,
+  formatVietnameseMoneyWords,
+  paymentStatusLabel,
+} from "@/lib/format";
 import { clampMonthToRange, currentMonthKey } from "@/lib/months";
 import { listTuitionDashboard } from "@/services/tuitionDashboardApi";
 import type { AcademicYear } from "@/types/academic-year";
@@ -51,6 +58,12 @@ type TuitionDashboardPageProps = {
 };
 
 type GradeFilter = "all" | "8" | "9";
+type SummaryCardItem = {
+  label: string;
+  value: string;
+  helperText?: string;
+  icon: LucideIcon;
+};
 
 const statusBadgeClasses: Record<PaymentStatus, string> = {
   paid: "bg-emerald-100 text-emerald-900 hover:bg-emerald-100",
@@ -220,8 +233,13 @@ export function TuitionDashboardPage({
   const canGoPreviousMonth = selectedMonthIndex > 0;
   const canGoNextMonth = selectedMonthIndex >= 0 && selectedMonthIndex < monthOptions.length - 1;
 
-  const summaryCards = [
-    { label: "Tổng đã thu", value: formatCurrency(visibleSummary.collected), icon: WalletCards },
+  const summaryCards: SummaryCardItem[] = [
+    {
+      label: "Tổng đã thu",
+      value: formatCurrency(visibleSummary.collected),
+      helperText: formatVietnameseMoneyWords(visibleSummary.collected),
+      icon: WalletCards,
+    },
     { label: "Chưa đóng", value: `${visibleSummary.unpaid} `, icon: Users },
     { label: "Đã đóng", value: `${visibleSummary.paid} `, icon: Users },
     { label: "Miễn giảm", value: `${visibleSummary.waived} `, icon: Users },
@@ -364,9 +382,20 @@ export function TuitionDashboardPage({
                 <CardContent className="flex min-h-24 items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
                     <p className="text-sm text-muted-foreground">{card.label}</p>
-                    <p className="mt-1 truncate text-2xl font-semibold text-slate-950">
+                    <p
+                      title={card.value}
+                      className="mt-1 truncate text-2xl font-semibold text-slate-950"
+                    >
                       {card.value}
                     </p>
+                    {card.helperText ? (
+                      <p
+                        title={card.helperText}
+                        className="mt-1 text-xs leading-snug text-muted-foreground"
+                      >
+                        {card.helperText}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="hidden size-11 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 sm:flex">
                     <Icon className="size-5" />

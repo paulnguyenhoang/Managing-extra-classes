@@ -42,7 +42,7 @@ import {
   type PaymentFilter,
 } from "@/features/classes/utils/payments";
 import { sortStudentsByVietnameseName } from "@/features/classes/utils/studentRoster";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatVietnameseMoneyWords } from "@/lib/format";
 import { clampMonthToRange, currentMonthKey, isValidMonthKey, monthsInRange } from "@/lib/months";
 import {
   listPaymentsByClassMonth,
@@ -426,7 +426,11 @@ export function PaymentsTab({
         <SummaryCard label="Đã đóng" value={summary.paid} />
         <SummaryCard label="Chưa đóng" value={summary.unpaid} />
         <SummaryCard label="Miễn giảm" value={summary.waived} />
-        <SummaryCard label="Tổng đã thu" value={formatCurrency(summary.collected)} />
+        <SummaryCard
+          label="Tổng đã thu"
+          value={formatCurrency(summary.collected)}
+          helperText={formatVietnameseMoneyWords(summary.collected)}
+        />
       </div>
 
       {errorMessage ? (
@@ -612,11 +616,28 @@ export function PaymentsTab({
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string | number }) {
+function SummaryCard({
+  label,
+  value,
+  helperText,
+}: {
+  label: string;
+  value: string | number;
+  helperText?: string;
+}) {
+  const valueText = String(value);
+
   return (
     <div className="rounded-lg border bg-white p-4">
       <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate text-2xl font-semibold text-slate-950">{value}</p>
+      <p title={valueText} className="mt-1 truncate text-2xl font-semibold text-slate-950">
+        {value}
+      </p>
+      {helperText ? (
+        <p title={helperText} className="mt-1 text-xs leading-snug text-muted-foreground">
+          {helperText}
+        </p>
+      ) : null}
     </div>
   );
 }

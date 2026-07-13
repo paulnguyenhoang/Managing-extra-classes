@@ -241,36 +241,26 @@ pub fn set_payment_waived(
             return Err("Số tiền thực thu không được lớn hơn học phí tháng của lớp.".to_string());
         }
 
-        let paid_at: Option<String> = if request.amount > 0 {
-            connection
-                .query_row("SELECT date('now', 'localtime')", [], |row| row.get(0))
-                .optional()
-                .map_err(|error| format!("Không đọc được ngày hiện tại: {error}"))?
-        } else {
-            None
-        };
-
-        connection
-            .execute(
-                "INSERT INTO payments
-                 (membership_id, class_id, student_id, month, status, amount, paid_at, note, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, 'waived', ?5, ?6, ?7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                 ON CONFLICT(membership_id, month) DO UPDATE SET
-                   status = 'waived',
-                   amount = excluded.amount,
-                   paid_at = excluded.paid_at,
-                   note = excluded.note,
-                   updated_at = CURRENT_TIMESTAMP",
-                params![
-                    request.membership_id,
-                    request.class_id,
-                    request.student_id,
-                    request.month,
-                    request.amount,
-                    paid_at,
-                    note
-                ],
-            )
+    connection
+        .execute(
+            "INSERT INTO payments
+             (membership_id, class_id, student_id, month, status, amount, paid_at, note, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'waived', ?5, date('now', 'localtime'), ?6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(membership_id, month) DO UPDATE SET
+               status = 'waived',
+               amount = excluded.amount,
+               paid_at = date('now', 'localtime'),
+               note = excluded.note,
+               updated_at = CURRENT_TIMESTAMP",
+            params![
+                request.membership_id,
+                request.class_id,
+                request.student_id,
+                request.month,
+                request.amount,
+                note
+            ],
+        )
             .map_err(|error| format!("Không lưu được miễn giảm học phí: {error}"))?;
 
         Ok(())
