@@ -36,6 +36,7 @@ pub struct AttendanceReceivingMakeupRowDto {
     parent_phone: String,
     receiving_attendance_status: Option<String>,
     note: Option<String>,
+    series_id: Option<i64>,
 }
 
 /// Thông tin học bù của học sinh chính thức (lớp gốc) để hiển thị helper text.
@@ -52,6 +53,7 @@ pub struct AttendanceMakeupDetailDto {
     receiving_start_time: String,
     receiving_end_time: String,
     receiving_attendance_status: Option<String>,
+    series_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -79,6 +81,7 @@ pub struct StudentMakeupOptionsDto {
     original_session_id: i64,
     original_session_date: String,
     session_index_in_week: i64,
+    has_following_series: bool,
     options: Vec<StudentMakeupOptionDto>,
 }
 
@@ -89,6 +92,7 @@ pub struct CreateStudentMakeupRecordRequest {
     original_membership_id: i64,
     original_session_id: i64,
     receiving_session_id: i64,
+    recurrence_scope: String,
     note: Option<String>,
 }
 
@@ -97,6 +101,7 @@ pub struct CreateStudentMakeupRecordRequest {
 pub struct RemoveStudentMakeupRecordRequest {
     original_session_id: i64,
     original_membership_id: i64,
+    removal_scope: String,
 }
 
 #[derive(Deserialize)]
@@ -446,6 +451,22 @@ pub fn create_class_makeup_session(
             .map_err(|error| format!("Không tạo được buổi học bù: {error}"))?;
         let makeup_session_id = transaction.last_insert_rowid();
 
+        // Học sinh từ lớp khác đang đến học bù ở buổi gốc cũng đi theo cả lớp
+        // sang buổi bù mới. Giữ nguyên liên kết nguồn và series (nếu có), chỉ
+        // chuyển đích nhận; trạng thái điểm danh ở buổi mới bắt đầu lại từ trống.
+        transaction
+            .execute(
+                "UPDATE student_makeup_records
+                 SET receiving_session_id = ?1,
+                     receiving_attendance_status = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE receiving_session_id = ?2",
+                params![makeup_session_id, request.original_session_id],
+            )
+            .map_err(|error| {
+                format!("Không chuyển được học sinh học bù sang buổi bù cả lớp: {error}")
+            })?;
+
         transaction
             .execute(
                 "UPDATE attendance_sessions
@@ -488,28 +509,20 @@ pub fn remove_class_makeup_session(
                 params![makeup_session_id],
             )
             .map_err(|error| format!("Không xóa được điểm danh của buổi học bù: {error}"))?;
-        // Buổi nhận không còn tồn tại: xóa các liên kết học bù trỏ về nó và trả ô gốc
-        // của học sinh liên quan về Chưa điểm danh.
+        // Hủy buổi bù cả lớp thì các học sinh từ lớp khác quay lại buổi nhận gốc
+        // vừa được mở lại; không làm mất lịch học bù cá nhân của các em.
         transaction
             .execute(
-                "DELETE FROM attendance_records
-                 WHERE status = 'makeup'
-                   AND (session_id, membership_id) IN (
-                     SELECT original_session_id, original_membership_id
-                     FROM student_makeup_records
-                     WHERE receiving_session_id = ?1
-                   )",
-                params![makeup_session_id],
+                "UPDATE student_makeup_records
+                 SET receiving_session_id = ?1,
+                     receiving_attendance_status = NULL,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE receiving_session_id = ?2",
+                params![original_session_id, makeup_session_id],
             )
             .map_err(|error| {
-                format!("Không dọn được trạng thái học bù của buổi gốc liên quan: {error}")
+                format!("Không chuyển lại được học sinh học bù về buổi gốc: {error}")
             })?;
-        transaction
-            .execute(
-                "DELETE FROM student_makeup_records WHERE receiving_session_id = ?1",
-                params![makeup_session_id],
-            )
-            .map_err(|error| format!("Không xóa được liên kết học bù trỏ tới buổi này: {error}"))?;
         transaction
             .execute(
                 "DELETE FROM attendance_sessions WHERE id = ?1",
@@ -648,6 +661,11 @@ pub fn list_student_makeup_options(
         let week_start = week_start_of_date(connection, &original.session_date)?;
         let original_session_order =
             session_order_for_date(connection, class_id, &original.session_date)?;
+        let has_following_series = has_future_student_makeup_series(
+            connection,
+            membership_id,
+            &original.session_date,
+        )?;
 
         // Các lớp nhận tiềm năng: khác lớp, cùng năm học, cùng khối, đang hoạt động.
         let candidate_classes = {
@@ -770,6 +788,7 @@ pub fn list_student_makeup_options(
             original_session_id,
             original_session_date: original.session_date.clone(),
             session_index_in_week: original_session_order,
+            has_following_series,
             options,
         })
     })
@@ -780,6 +799,10 @@ pub fn create_student_makeup_record(
     database: tauri::State<'_, AppDatabase>,
     request: CreateStudentMakeupRecordRequest,
 ) -> Result<(), String> {
+    if request.recurrence_scope != "single" && request.recurrence_scope != "following" {
+        return Err("Phạm vi học bù không hợp lệ.".to_string());
+    }
+
     database.with_connection_mut(|connection| {
         let transaction = connection
             .transaction()
@@ -851,72 +874,131 @@ pub fn create_student_makeup_record(
             );
         }
 
-        // Giữ trạng thái ở lớp nhận nếu đổi lại đúng buổi nhận cũ; đổi buổi khác thì reset.
-        let previous: Option<(i64, Option<String>)> = transaction
-            .query_row(
-                "SELECT receiving_session_id, receiving_attendance_status
-                 FROM student_makeup_records
-                 WHERE student_id = ?1 AND original_session_id = ?2",
-                params![request.student_id, request.original_session_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|error| format!("Không đọc được liên kết học bù cũ: {error}"))?;
-        let preserved_status = match &previous {
-            Some((previous_receiving_id, status))
-                if *previous_receiving_id == request.receiving_session_id =>
-            {
-                status.clone()
+        if request.recurrence_scope == "single" {
+            save_student_makeup_occurrence(
+                &transaction,
+                request.student_id,
+                request.original_membership_id,
+                &original,
+                &receiving,
+                original_session_order,
+                None,
+                request.note.as_deref(),
+            )?;
+        } else {
+            if has_future_student_makeup_series(
+                &transaction,
+                request.original_membership_id,
+                &original.session_date,
+            )? {
+                return Err(
+                    "Học sinh đã có lịch học bù cố định cho các tuần tiếp theo. Chỉ có thể thêm riêng buổi này."
+                        .to_string(),
+                );
             }
-            _ => None,
-        };
 
-        transaction
-            .execute(
-                "INSERT INTO attendance_records
-                 (session_id, membership_id, student_id, status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 'makeup', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                 ON CONFLICT(session_id, membership_id) DO UPDATE SET
-                   student_id = excluded.student_id,
-                   status = 'makeup',
-                   updated_at = CURRENT_TIMESTAMP",
-                params![
-                    request.original_session_id,
-                    request.original_membership_id,
-                    request.student_id
-                ],
-            )
-            .map_err(|error| format!("Không lưu được trạng thái học bù ở buổi gốc: {error}"))?;
+            transaction
+                .execute(
+                    "INSERT INTO student_makeup_series
+                     (student_id, original_membership_id, original_class_id, receiving_class_id,
+                      start_original_session_id, start_receiving_session_id, recurrence)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'weekly')",
+                    params![
+                        request.student_id,
+                        request.original_membership_id,
+                        original.class_id,
+                        receiving.class_id,
+                        original.id,
+                        receiving.id
+                    ],
+                )
+                .map_err(|error| format!("Không tạo được chuỗi học bù: {error}"))?;
+            let series_id = transaction.last_insert_rowid();
+            let original_range = load_class_range(&transaction, original.class_id)?;
+            let receiving_range = load_class_range(&transaction, receiving.class_id)?;
+            let left_month: Option<String> = transaction
+                .query_row(
+                    "SELECT left_month FROM class_memberships WHERE id = ?1",
+                    params![request.original_membership_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("Không đọc được thời gian học của học sinh: {error}"))?;
+            let original_offset =
+                weekday_to_week_offset(weekday_from_date(&transaction, &original.session_date)?)?;
+            let receiving_offset =
+                weekday_to_week_offset(weekday_from_date(&transaction, &receiving.session_date)?)?;
+            let mut recurring_week = week_start_of_date(&transaction, &original.session_date)?;
 
-        transaction
-            .execute(
-                "INSERT INTO student_makeup_records
-                 (student_id, original_membership_id, original_class_id, original_session_id,
-                  receiving_class_id, receiving_session_id, session_index_in_week,
-                  receiving_attendance_status, note, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                 ON CONFLICT(student_id, original_session_id) DO UPDATE SET
-                   original_membership_id = excluded.original_membership_id,
-                   original_class_id = excluded.original_class_id,
-                   receiving_class_id = excluded.receiving_class_id,
-                   receiving_session_id = excluded.receiving_session_id,
-                   session_index_in_week = excluded.session_index_in_week,
-                   receiving_attendance_status = excluded.receiving_attendance_status,
-                   note = excluded.note,
-                   updated_at = CURRENT_TIMESTAMP",
-                params![
-                    request.student_id,
-                    request.original_membership_id,
+            // Một năm học thông thường ngắn hơn 80 tuần; giới hạn này cũng bảo vệ DB
+            // nếu dữ liệu tháng của lớp bị sai ngoài ý muốn.
+            for occurrence_index in 0..80 {
+                let original_date = sqlite_date(&transaction, &recurring_week, original_offset)?;
+                let receiving_date = sqlite_date(&transaction, &recurring_week, receiving_offset)?;
+                let original_month = month_from_date(&original_date)?;
+                let receiving_month = month_from_date(&receiving_date)?;
+                if original_month > original_range.end_month
+                    || receiving_month > receiving_range.end_month
+                    || left_month
+                        .as_ref()
+                        .is_some_and(|month| original_month.as_str() >= month.as_str())
+                {
+                    break;
+                }
+
+                materialize_regular_sessions(
+                    &transaction,
                     original.class_id,
-                    request.original_session_id,
+                    &recurring_week,
+                    &original_range,
+                    true,
+                )?;
+                materialize_regular_sessions(
+                    &transaction,
                     receiving.class_id,
-                    request.receiving_session_id,
-                    original_session_order,
-                    preserved_status,
-                    normalize_optional_text(request.note.as_deref())
-                ],
-            )
-            .map_err(|error| format!("Không lưu được liên kết học bù: {error}"))?;
+                    &recurring_week,
+                    &receiving_range,
+                    true,
+                )?;
+
+                let pair = if occurrence_index == 0 {
+                    Some((original.clone(), receiving.clone()))
+                } else {
+                    let next_original = load_active_regular_session_on_date(
+                        &transaction,
+                        original.class_id,
+                        &original_date,
+                    )?;
+                    let next_receiving = load_active_regular_session_on_date(
+                        &transaction,
+                        receiving.class_id,
+                        &receiving_date,
+                    )?;
+                    next_original.zip(next_receiving)
+                };
+
+                if let Some((occurrence_original, occurrence_receiving)) = pair {
+                    if !is_official_member_in_month(
+                        &transaction,
+                        occurrence_receiving.class_id,
+                        request.student_id,
+                        &receiving_month,
+                    )? {
+                        save_student_makeup_occurrence(
+                            &transaction,
+                            request.student_id,
+                            request.original_membership_id,
+                            &occurrence_original,
+                            &occurrence_receiving,
+                            original_session_order,
+                            Some(series_id),
+                            request.note.as_deref(),
+                        )?;
+                    }
+                }
+
+                recurring_week = sqlite_date(&transaction, &recurring_week, 7)?;
+            }
+        }
 
         transaction
             .commit()
@@ -924,36 +1006,211 @@ pub fn create_student_makeup_record(
     })
 }
 
+fn has_future_student_makeup_series(
+    connection: &Connection,
+    original_membership_id: i64,
+    after_date: &str,
+) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1
+               FROM student_makeup_records smr
+               JOIN attendance_sessions sessions ON sessions.id = smr.original_session_id
+               WHERE smr.original_membership_id = ?1
+                 AND smr.series_id IS NOT NULL
+                 AND sessions.session_date > ?2
+             )",
+            params![original_membership_id, after_date],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|exists| exists != 0)
+        .map_err(|error| format!("Không kiểm tra được lịch học bù cố định hiện có: {error}"))
+}
+
+fn load_active_regular_session_on_date(
+    connection: &Connection,
+    class_id: i64,
+    session_date: &str,
+) -> Result<Option<AttendanceSessionDto>, String> {
+    connection
+        .query_row(
+            "SELECT id, class_id, session_date, start_time, end_time, session_index_in_week,
+                    type, status, is_locked, makeup_for_session_id
+             FROM attendance_sessions
+             WHERE class_id = ?1 AND session_date = ?2 AND type = 'regular' AND status = 'active'
+             ORDER BY session_index_in_week LIMIT 1",
+            params![class_id, session_date],
+            map_session_dto,
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được buổi học trong chuỗi học bù: {error}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_student_makeup_occurrence(
+    connection: &Connection,
+    student_id: i64,
+    original_membership_id: i64,
+    original: &AttendanceSessionDto,
+    receiving: &AttendanceSessionDto,
+    session_index_in_week: i64,
+    series_id: Option<i64>,
+    note: Option<&str>,
+) -> Result<(), String> {
+    let previous: Option<(i64, Option<String>)> = connection
+        .query_row(
+            "SELECT receiving_session_id, receiving_attendance_status
+             FROM student_makeup_records
+             WHERE student_id = ?1 AND original_session_id = ?2",
+            params![student_id, original.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("Không đọc được liên kết học bù cũ: {error}"))?;
+    let preserved_status = match previous {
+        Some((previous_receiving_id, status)) if previous_receiving_id == receiving.id => status,
+        _ => None,
+    };
+
+    connection
+        .execute(
+            "INSERT INTO attendance_records
+             (session_id, membership_id, student_id, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'makeup', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(session_id, membership_id) DO UPDATE SET
+               student_id = excluded.student_id,
+               status = 'makeup',
+               updated_at = CURRENT_TIMESTAMP",
+            params![original.id, original_membership_id, student_id],
+        )
+        .map_err(|error| format!("Không lưu được trạng thái học bù ở buổi gốc: {error}"))?;
+
+    connection
+        .execute(
+            "INSERT INTO student_makeup_records
+             (student_id, original_membership_id, original_class_id, original_session_id,
+              receiving_class_id, receiving_session_id, session_index_in_week,
+              receiving_attendance_status, note, series_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(student_id, original_session_id) DO UPDATE SET
+               original_membership_id = excluded.original_membership_id,
+               original_class_id = excluded.original_class_id,
+               receiving_class_id = excluded.receiving_class_id,
+               receiving_session_id = excluded.receiving_session_id,
+               session_index_in_week = excluded.session_index_in_week,
+               receiving_attendance_status = excluded.receiving_attendance_status,
+               note = excluded.note,
+               series_id = excluded.series_id,
+               updated_at = CURRENT_TIMESTAMP",
+            params![
+                student_id,
+                original_membership_id,
+                original.class_id,
+                original.id,
+                receiving.class_id,
+                receiving.id,
+                session_index_in_week,
+                preserved_status,
+                normalize_optional_text(note),
+                series_id
+            ],
+        )
+        .map_err(|error| format!("Không lưu được liên kết học bù: {error}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn remove_student_makeup_record(
     database: tauri::State<'_, AppDatabase>,
     request: RemoveStudentMakeupRecordRequest,
 ) -> Result<(), String> {
+    if request.removal_scope != "single" && request.removal_scope != "following" {
+        return Err("Phạm vi hủy học bù không hợp lệ.".to_string());
+    }
+
     database.with_connection_mut(|connection| {
         let transaction = connection
             .transaction()
             .map_err(|error| format!("Không bắt đầu được transaction hủy học bù: {error}"))?;
 
-        let deleted = transaction
-            .execute(
-                "DELETE FROM student_makeup_records
-                 WHERE original_session_id = ?1 AND original_membership_id = ?2",
+        let occurrence: Option<(Option<i64>, String)> = transaction
+            .query_row(
+                "SELECT smr.series_id, sessions.session_date
+                 FROM student_makeup_records smr
+                 JOIN attendance_sessions sessions ON sessions.id = smr.original_session_id
+                 WHERE smr.original_session_id = ?1 AND smr.original_membership_id = ?2",
                 params![request.original_session_id, request.original_membership_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .map_err(|error| format!("Không xóa được liên kết học bù: {error}"))?;
+            .optional()
+            .map_err(|error| format!("Không đọc được liên kết học bù cần hủy: {error}"))?;
+        let (series_id, cutoff_date) = occurrence
+            .ok_or_else(|| "Không tìm thấy liên kết học bù của học sinh này.".to_string())?;
+
+        let deleted = if request.removal_scope == "following" {
+            let series_id = series_id.ok_or_else(|| {
+                "Buổi học bù đơn lẻ chỉ có thể được hủy riêng buổi này.".to_string()
+            })?;
+
+            transaction
+                .execute(
+                    "DELETE FROM attendance_records
+                     WHERE membership_id = ?1 AND status = 'makeup'
+                       AND session_id IN (
+                         SELECT smr.original_session_id
+                         FROM student_makeup_records smr
+                         JOIN attendance_sessions sessions ON sessions.id = smr.original_session_id
+                         WHERE smr.series_id = ?2 AND sessions.session_date >= ?3
+                       )",
+                    params![request.original_membership_id, series_id, cutoff_date],
+                )
+                .map_err(|error| format!("Không dọn được điểm danh trong chuỗi học bù: {error}"))?;
+            let deleted = transaction
+                .execute(
+                    "DELETE FROM student_makeup_records
+                     WHERE series_id = ?1
+                       AND original_session_id IN (
+                         SELECT id FROM attendance_sessions WHERE session_date >= ?2
+                       )",
+                    params![series_id, cutoff_date],
+                )
+                .map_err(|error| format!("Không hủy được các buổi trong chuỗi học bù: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE student_makeup_series
+                     SET ended_before_date = ?1, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?2",
+                    params![cutoff_date, series_id],
+                )
+                .map_err(|error| format!("Không cập nhật được chuỗi học bù: {error}"))?;
+            deleted
+        } else {
+            transaction
+                .execute(
+                    "DELETE FROM student_makeup_records
+                     WHERE original_session_id = ?1 AND original_membership_id = ?2",
+                    params![request.original_session_id, request.original_membership_id],
+                )
+                .map_err(|error| format!("Không xóa được liên kết học bù: {error}"))?
+        };
 
         if deleted == 0 {
             return Err("Không tìm thấy liên kết học bù của học sinh này.".to_string());
         }
 
-        // Ô gốc trở về Chưa điểm danh.
-        transaction
-            .execute(
-                "DELETE FROM attendance_records
-                 WHERE session_id = ?1 AND membership_id = ?2 AND status = 'makeup'",
-                params![request.original_session_id, request.original_membership_id],
-            )
-            .map_err(|error| format!("Không dọn được trạng thái học bù ở buổi gốc: {error}"))?;
+        if request.removal_scope == "single" {
+            // Ô gốc trở về Chưa điểm danh.
+            transaction
+                .execute(
+                    "DELETE FROM attendance_records
+                     WHERE session_id = ?1 AND membership_id = ?2 AND status = 'makeup'",
+                    params![request.original_session_id, request.original_membership_id],
+                )
+                .map_err(|error| format!("Không dọn được trạng thái học bù ở buổi gốc: {error}"))?;
+        }
 
         transaction
             .commit()
@@ -1063,7 +1320,8 @@ fn list_receiving_makeup_rows(
            s.school,
            s.parent_phone,
            smr.receiving_attendance_status,
-           smr.note
+           smr.note,
+           smr.series_id
          FROM student_makeup_records smr
          JOIN students s ON s.id = smr.student_id
          JOIN classes oc ON oc.id = smr.original_class_id
@@ -1095,6 +1353,7 @@ fn list_receiving_makeup_rows(
                 parent_phone: row.get(13)?,
                 receiving_attendance_status: row.get(14)?,
                 note: row.get(15)?,
+                series_id: row.get(16)?,
             })
         })
         .map_err(|error| format!("Không đọc được danh sách học sinh học bù: {error}"))?;
@@ -1127,7 +1386,8 @@ fn list_makeup_details(
            rs.session_date,
            rs.start_time,
            rs.end_time,
-           smr.receiving_attendance_status
+           smr.receiving_attendance_status,
+           smr.series_id
          FROM student_makeup_records smr
          JOIN classes rc ON rc.id = smr.receiving_class_id
          JOIN attendance_sessions rs ON rs.id = smr.receiving_session_id
@@ -1151,6 +1411,7 @@ fn list_makeup_details(
                 receiving_start_time: row.get(7)?,
                 receiving_end_time: row.get(8)?,
                 receiving_attendance_status: row.get(9)?,
+                series_id: row.get(10)?,
             })
         })
         .map_err(|error| format!("Không đọc được chi tiết học bù: {error}"))?;

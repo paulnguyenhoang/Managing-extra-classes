@@ -68,6 +68,7 @@ export type AttendanceReceivingMakeupRowDto = {
   parentPhone: string;
   receivingAttendanceStatus: PersistedAttendanceStatus | null;
   note: string | null;
+  seriesId: number | null;
 };
 
 export type AttendanceMakeupDetailDto = {
@@ -81,6 +82,7 @@ export type AttendanceMakeupDetailDto = {
   receivingStartTime: string;
   receivingEndTime: string;
   receivingAttendanceStatus: PersistedAttendanceStatus | null;
+  seriesId: number | null;
 };
 
 export type AttendanceWeekDto = {
@@ -121,6 +123,7 @@ export type StudentMakeupOptionsDto = {
   originalSessionId: number;
   originalSessionDate: string;
   sessionIndexInWeek: number;
+  hasFollowingSeries: boolean;
   options: StudentMakeupOptionDto[];
 };
 
@@ -136,13 +139,19 @@ export type CreateStudentMakeupRecordInput = {
   originalMembershipId: number;
   originalSessionId: number;
   receivingSessionId: number;
+  recurrenceScope: StudentMakeupRecurrenceScope;
   note?: string;
 };
 
 export type RemoveStudentMakeupRecordInput = {
   originalSessionId: number;
   originalMembershipId: number;
+  removalScope: StudentMakeupRemovalScope;
 };
+
+export type StudentMakeupRecurrenceScope = "single" | "following";
+
+export type StudentMakeupRemovalScope = "single" | "following";
 
 export type SetReceivingMakeupStatusInput = {
   makeupRecordId: number;

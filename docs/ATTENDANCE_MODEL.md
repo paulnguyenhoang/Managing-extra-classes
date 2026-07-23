@@ -1,5 +1,24 @@
 # Attendance Model - Mô hình điểm danh MVP
 
+## Học bù cố định theo học sinh (Phase 7D)
+
+Khi chọn một buổi nhận học bù, người dùng chọn thêm phạm vi theo mô hình event lặp:
+
+- `Chỉ buổi này`: giữ hành vi cũ, tạo một `student_makeup_records` không có `series_id`.
+- `Buổi này và các tuần tiếp theo`: tạo `student_makeup_series`, sau đó sinh các occurrence hằng tuần từ tuần đang chọn. Chuỗi dừng khi lớp gốc, lớp nhận hoặc membership của học sinh hết hiệu lực.
+
+Mỗi occurrence vẫn là một `student_makeup_records` và một trạng thái `makeup` ở `attendance_records`, vì vậy màn điểm danh theo tuần và dữ liệu cũ tiếp tục dùng chung một mô hình đọc. `series_id` chỉ dùng để nhận biết các occurrence cùng chuỗi.
+
+Khi hủy, bản ghi đơn lẻ giữ hành vi cũ. Occurrence thuộc chuỗi bắt buộc người dùng chọn `Chỉ buổi này` hoặc `Buổi này và các buổi tiếp theo` trước khi nút xác nhận được bật. Phạm vi thứ hai xóa các liên kết và trạng thái `makeup` có ngày từ occurrence đó trở đi, đồng thời ghi `ended_before_date` cho chuỗi.
+
+Khi occurrence đang ở trạng thái `makeup`, bấm bất kỳ nút `Học`, `Nghỉ` hoặc `Học bù` đều phải qua dialog phạm vi vì cả ba thao tác đều gỡ liên kết hiện tại. Nếu bấm `Học`/`Nghỉ`, trạng thái đó chỉ được áp dụng cho occurrence đang chọn sau khi gỡ liên kết.
+
+Nếu một occurrence đã được hủy riêng nhưng chuỗi vẫn còn occurrence ở các tuần sau, khi thêm lại học bù tại tuần trống chỉ được chọn `Chỉ buổi này`. Backend cũng từ chối `following` trong trường hợp này để ngăn hai chuỗi học bù chồng lên nhau.
+
+Nếu một buổi thường đang nhận học sinh học bù từ lớp khác rồi được chuyển thành nghỉ để học bù cả lớp, các liên kết học bù đến buổi thường đó được chuyển sang buổi bù cả lớp. Vì vậy danh sách buổi bù cả lớp gồm cả học sinh chính thức và học sinh đang đến học bù. Nếu hủy buổi bù cả lớp, các liên kết này được chuyển trở lại buổi thường vừa được khôi phục.
+
+Các buổi học cũ trước migration 012 có `series_id = NULL` và luôn được hiểu là đơn lẻ.
+
 Tài liệu này mô tả mô hình điểm danh MVP. SQLite đã triển khai đủ Phase 7A-7C: buổi thường, nghỉ/khôi phục, học bù cả lớp và học bù theo từng học sinh (`student_makeup_records`).
 
 Ứng dụng quản lý lớp học thêm cho giáo viên dạy Văn, nên mô hình điểm danh cần đơn giản, dễ thao tác trong lúc dạy, và đủ rõ để lưu dữ liệu lâu dài.

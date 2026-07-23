@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { AlertTriangle, CalendarPlus, Check, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DateInput } from "@/components/common/DateInput";
 import {
   Dialog,
   DialogClose,
@@ -89,6 +90,11 @@ export function AddMakeupSessionDialog({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!form.date) {
+      setErrorMessage("Vui lòng chọn ngày học bù.");
+      return;
+    }
+
     if (!isValidTimeRange(form.startTime, form.endTime)) {
       setErrorMessage("Giờ kết thúc phải sau giờ bắt đầu.");
       return;
@@ -143,13 +149,12 @@ export function AddMakeupSessionDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="makeup-date">Ngày học bù</Label>
-              <Input
+              <DateInput
                 id="makeup-date"
-                type="date"
                 min={toDateKey(addDays(new Date(), 1))}
                 required
                 value={form.date}
-                onChange={(event) => updateField("date", event.target.value)}
+                onValueChange={(value) => updateField("date", value)}
               />
             </div>
             <div className="space-y-2">

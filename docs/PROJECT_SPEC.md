@@ -1,5 +1,7 @@
 # PROJECT_SPEC.md
 
+> Cập nhật Phase 7D: học bù cá nhân hỗ trợ cả buổi đơn lẻ và lịch cố định hằng tuần. Sau khi chọn lớp/buổi nhận, UI hỏi phạm vi áp dụng. Khi hủy một occurrence thuộc chuỗi, UI bắt buộc chọn hủy riêng buổi đó hoặc hủy từ buổi đó trở đi. Khi buổi nhận được dời sang học bù cả lớp, các học sinh đang đến học bù cũng được chuyển sang buổi bù mới và được chuyển lại nếu buổi bù cả lớp bị hủy. SQLite migration 012 bổ sung `student_makeup_series` và `student_makeup_records.series_id`; dữ liệu cũ giữ nguyên hành vi đơn lẻ.
+
 ## 1. Mục đích tài liệu
 
 Tài liệu này ghi lại trạng thái hiện tại của ứng dụng dựa trên source code đang có trong `src/`, `package.json` và các file liên quan. Nội dung bên dưới mô tả những gì đã được triển khai thật trong frontend/backend SQLite local, các giới hạn còn lại và những phase tiếp theo.

@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DateInput } from "@/components/common/DateInput";
 import { Label } from "@/components/ui/label";
 import {
   Table,
@@ -603,20 +604,18 @@ function YearFormDialog({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="year-starts">Ngày bắt đầu</Label>
-                <Input
+                <DateInput
                   id="year-starts"
-                  type="date"
                   value={form.startsAt}
-                  onChange={(event) => onChange({ ...form, startsAt: event.target.value })}
+                  onValueChange={(value) => onChange({ ...form, startsAt: value })}
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="year-ends">Ngày kết thúc</Label>
-                <Input
+                <DateInput
                   id="year-ends"
-                  type="date"
                   value={form.endsAt}
-                  onChange={(event) => onChange({ ...form, endsAt: event.target.value })}
+                  onValueChange={(value) => onChange({ ...form, endsAt: value })}
                 />
               </div>
             </div>

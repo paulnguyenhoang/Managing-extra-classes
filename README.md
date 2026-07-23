@@ -14,7 +14,7 @@
 - Đăng nhập bằng mật khẩu cục bộ.
 - Quản lý năm học, lớp học, lịch học và học phí tháng.
 - Quản lý danh sách học sinh theo từng lớp.
-- Điểm danh theo tuần, gồm buổi học thường, nghỉ cả lớp, học bù cả lớp và học bù theo học sinh.
+- Điểm danh theo tuần, gồm buổi học thường, nghỉ cả lớp, học bù cả lớp và học bù theo học sinh (đơn lẻ hoặc cố định hằng tuần).
 - Nhập điểm theo tháng với các cột bài kiểm tra linh hoạt.
 - Theo dõi học phí theo tháng với trạng thái `Chưa đóng`, `Đã đóng`, `Miễn giảm`.
 - Lịch học tổng hợp theo tháng.

@@ -1,5 +1,13 @@
 # Backend Plan - Kế hoạch SQLite/backend
 
+## Phase 7D - Chuỗi học bù cá nhân (đã triển khai)
+
+- Migration `012_student_makeup_series.sql` thêm bảng metadata chuỗi và khóa ngoại nullable trên từng occurrence.
+- `create_student_makeup_record` nhận `recurrenceScope: single | following` và tạo occurrence hằng tuần trong một transaction.
+- `remove_student_makeup_record` nhận `removalScope: single | following`; phạm vi `following` chỉ hợp lệ với occurrence có `series_id`.
+- Phạm vi sinh chuỗi là giao của thời gian lớp gốc, lớp nhận và membership học sinh; tối đa 80 tuần để bảo vệ trước dữ liệu tháng bất thường.
+- Các buổi nhận đã nghỉ hoặc tuần mà học sinh đã là thành viên chính thức của lớp nhận không tạo occurrence.
+
 Tài liệu này lập kế hoạch triển khai SQLite/backend cho ứng dụng Tauri desktop quản lý lớp học thêm. Trạng thái hiện tại: Phase 1-6, Phase 7A-7C, Phase 8, Phase 9A-9E, Phase 10-13 và Phase 14 polish đã được triển khai trong app code (settings/password, academic years/classes/schedules, students/memberships, payments, class/membership month lifecycle, scores, attendance đầy đủ gồm học bù cả lớp/theo học sinh, backup/restore SQLite, nền export Excel, export danh sách học sinh/học phí/bảng điểm, import danh sách học sinh, import bảng điểm, dashboard/lịch tổng hợp/settings và release polish). Import học phí và export/import điểm danh vẫn là kế hoạch.
 
 Nguồn tham chiếu:

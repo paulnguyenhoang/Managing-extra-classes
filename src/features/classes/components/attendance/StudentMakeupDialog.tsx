@@ -1,4 +1,5 @@
-import { Check } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, CalendarDays, Check, Repeat2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,10 +18,12 @@ import {
   type WeeklySession,
 } from "@/features/classes/utils/attendance";
 import type { ClassStudentRosterItem } from "@/types/student";
+import type { StudentMakeupRecurrenceScope } from "@/types/attendance";
 
 export type PendingStudentMakeup = {
   student: ClassStudentRosterItem;
   session: WeeklySession;
+  hasFollowingSeries: boolean;
   options: StudentMakeupSessionOption[];
 };
 
@@ -31,7 +34,7 @@ type StudentMakeupDialogProps = {
   selectedSessionId: string;
   onOpenChange: (open: boolean) => void;
   onSelectSession: (sessionId: string) => void;
-  onConfirm: () => void;
+  onConfirm: (scope: StudentMakeupRecurrenceScope) => void;
 };
 
 export function StudentMakeupDialog({
@@ -43,11 +46,26 @@ export function StudentMakeupDialog({
   onSelectSession,
   onConfirm,
 }: StudentMakeupDialogProps) {
+  const [step, setStep] = useState<"session" | "recurrence">("session");
+  const [recurrenceScope, setRecurrenceScope] =
+    useState<StudentMakeupRecurrenceScope>("single");
+
+  useEffect(() => {
+    setStep("session");
+    setRecurrenceScope("single");
+  }, [pendingMakeup]);
+
+  const selectedOption = pendingMakeup?.options.find(
+    (option) => option.sessionId === selectedSessionId,
+  );
+
   return (
     <Dialog open={Boolean(pendingMakeup)} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] overflow-hidden sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Chọn lớp học bù</DialogTitle>
+          <DialogTitle>
+            {step === "session" ? "Chọn lớp học bù" : "Chọn phạm vi áp dụng"}
+          </DialogTitle>
         </DialogHeader>
         {pendingMakeup ? (
           <div className="min-w-0 space-y-4">
@@ -66,7 +84,7 @@ export function StudentMakeupDialog({
               />
             </div>
 
-            {pendingMakeup.options.length > 0 ? (
+            {step === "session" && pendingMakeup.options.length > 0 ? (
               <div className="max-h-56 min-w-0 space-y-2 overflow-y-auto pr-1">
                 {pendingMakeup.options.map((option) => {
                   const isSelected = option.sessionId === selectedSessionId;
@@ -100,25 +118,107 @@ export function StudentMakeupDialog({
                   );
                 })}
               </div>
-            ) : (
+            ) : step === "session" ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 Không có buổi học bù phù hợp.
               </p>
-            )}
+            ) : selectedOption ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">
+                  Lịch đã chọn: <span className="font-medium text-slate-950">{selectedOption.className}</span>,{" "}
+                  {weekdayLabel(selectedOption.date)} lúc {selectedOption.startTime}.
+                </p>
+                <ScopeOption
+                  icon={<CalendarDays className="size-5" />}
+                  title="Chỉ buổi này"
+                  description="Chỉ áp dụng cho buổi gốc đang chọn."
+                  selected={recurrenceScope === "single"}
+                  onClick={() => setRecurrenceScope("single")}
+                />
+                <ScopeOption
+                  icon={<Repeat2 className="size-5" />}
+                  title="Buổi này và các tuần tiếp theo"
+                  description="Lặp hằng tuần theo hai lịch học đã chọn, đến khi lớp hoặc thời gian học của học sinh kết thúc."
+                  selected={recurrenceScope === "following"}
+                  onClick={() => setRecurrenceScope("following")}
+                  disabled={pendingMakeup.hasFollowingSeries}
+                />
+                {pendingMakeup.hasFollowingSeries ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    Học sinh đã có lịch bù cố định cho các tuần sau. Tuần này chỉ có thể thêm
+                    một buổi riêng lẻ để tránh tạo hai chuỗi trùng nhau.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="outline">
-              Hủy
+          {step === "recurrence" ? (
+            <Button type="button" variant="outline" onClick={() => setStep("session")}>
+              <ArrowLeft className="size-4" />
+              Quay lại
             </Button>
-          </DialogClose>
-          <Button type="button" onClick={onConfirm} disabled={!selectedSessionId}>
-            Xác nhận
-          </Button>
+          ) : (
+            <DialogClose asChild>
+              <Button type="button" variant="outline">Hủy</Button>
+            </DialogClose>
+          )}
+          {step === "session" ? (
+            <Button
+              type="button"
+              onClick={() => setStep("recurrence")}
+              disabled={!selectedSessionId}
+            >
+              Tiếp tục
+            </Button>
+          ) : (
+            <Button type="button" onClick={() => onConfirm(recurrenceScope)}>
+              Xác nhận
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ScopeOption({
+  icon,
+  title,
+  description,
+  selected,
+  onClick,
+  disabled = false,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  selected: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        disabled
+          ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-55"
+          : selected
+          ? "border-emerald-300 bg-emerald-50"
+          : "border-slate-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/60",
+      ].join(" ")}
+    >
+      <span className="mt-0.5 text-emerald-700">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium text-slate-950">{title}</span>
+        <span className="mt-0.5 block text-sm text-slate-600">{description}</span>
+      </span>
+      {selected ? <Check className="mt-0.5 size-4 shrink-0 text-emerald-700" /> : null}
+    </button>
   );
 }
 

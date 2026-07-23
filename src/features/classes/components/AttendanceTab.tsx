@@ -71,6 +71,9 @@ import type {
   AttendanceReceivingMakeupRowDto,
   AttendanceStatus,
   AttendanceWeekDto,
+  PersistedAttendanceStatus,
+  StudentMakeupRecurrenceScope,
+  StudentMakeupRemovalScope,
 } from "@/types/attendance";
 import type { ClassOverview, ClassScheduleItem } from "@/types/class";
 import type { ClassStudentRosterItem } from "@/types/student";
@@ -401,7 +404,11 @@ export function AttendanceTab({
   const [pendingRemoveStudentMakeup, setPendingRemoveStudentMakeup] = useState<{
     student: ClassStudentRosterItem;
     session: WeeklySession;
+    detail: AttendanceMakeupDetailDto;
+    replacementStatus: PersistedAttendanceStatus | null;
   } | null>(null);
+  const [studentMakeupRemovalScope, setStudentMakeupRemovalScope] =
+    useState<StudentMakeupRemovalScope | null>(null);
   const [attendanceWeek, setAttendanceWeek] = useState<AttendanceWeekDto | null>(null);
   const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
   const [attendanceErrorMessage, setAttendanceErrorMessage] = useState<string | null>(null);
@@ -651,6 +658,26 @@ export function AttendanceTab({
 
     const currentStatus = getAttendanceCellStatus(student, session);
 
+    // Cả ba nút đều có thể phá liên kết học bù đang có. Luôn hỏi phạm vi
+    // trước, rồi mới áp dụng Học/Nghỉ cho occurrence hiện tại nếu người dùng
+    // đã bấm một trong hai trạng thái đó.
+    if (currentStatus === "makeup") {
+      const detail = getMakeupDetail(student, session);
+      if (!detail) {
+        setActionErrorMessage("Không tìm thấy thông tin học bù cần hủy.");
+        return;
+      }
+      setStudentMakeupRemovalScope(detail.seriesId ? null : "single");
+      setPendingRemoveStudentMakeup({
+        student,
+        session,
+        detail,
+        replacementStatus:
+          nextStatus === "present" || nextStatus === "absent" ? nextStatus : null,
+      });
+      return;
+    }
+
     if (nextStatus === "makeup") {
       // Mở dialog chọn buổi nhận học bù; chưa đổi trạng thái cho đến khi xác nhận.
       setActionErrorMessage(null);
@@ -671,17 +698,16 @@ export function AttendanceTab({
           endTime: option.endTime,
         }));
 
-        setPendingStudentMakeup({ student, session, options });
+        setPendingStudentMakeup({
+          student,
+          session,
+          hasFollowingSeries: result.hasFollowingSeries,
+          options,
+        });
         setSelectedStudentMakeupSessionId(options[0]?.sessionId ?? "");
       } catch (error) {
         setActionErrorMessage(getErrorMessage(error, "Không tải được danh sách buổi học bù."));
       }
-      return;
-    }
-
-    // Bấm lại nút Học bù đang chọn: xác nhận trước khi hủy liên kết học bù.
-    if (currentStatus === "makeup" && nextStatus === undefined) {
-      setPendingRemoveStudentMakeup({ student, session });
       return;
     }
 
@@ -701,7 +727,7 @@ export function AttendanceTab({
     }
   }
 
-  async function confirmStudentMakeup() {
+  async function confirmStudentMakeup(recurrenceScope: StudentMakeupRecurrenceScope) {
     if (!pendingStudentMakeup?.session.dbId) {
       return;
     }
@@ -722,6 +748,7 @@ export function AttendanceTab({
         originalMembershipId: pendingStudentMakeup.student.membershipId,
         originalSessionId: pendingStudentMakeup.session.dbId,
         receivingSessionId: Number(selectedOption.sessionId),
+        recurrenceScope,
       });
       await refreshAttendanceWeek();
       setPendingStudentMakeup(null);
@@ -732,7 +759,7 @@ export function AttendanceTab({
   }
 
   async function confirmRemoveStudentMakeup() {
-    if (!pendingRemoveStudentMakeup?.session.dbId) {
+    if (!pendingRemoveStudentMakeup?.session.dbId || !studentMakeupRemovalScope) {
       return;
     }
 
@@ -742,7 +769,16 @@ export function AttendanceTab({
       await removeStudentMakeupRecord({
         originalSessionId: pendingRemoveStudentMakeup.session.dbId,
         originalMembershipId: pendingRemoveStudentMakeup.student.membershipId,
+        removalScope: studentMakeupRemovalScope,
       });
+      if (pendingRemoveStudentMakeup.replacementStatus) {
+        await saveAttendanceStatus({
+          sessionId: pendingRemoveStudentMakeup.session.dbId,
+          membershipId: pendingRemoveStudentMakeup.student.membershipId,
+          studentId: pendingRemoveStudentMakeup.student.studentId,
+          status: pendingRemoveStudentMakeup.replacementStatus,
+        });
+      }
       await refreshAttendanceWeek();
       setPendingRemoveStudentMakeup(null);
     } catch (error) {
@@ -945,7 +981,7 @@ export function AttendanceTab({
                     const makeupDetail = makeupDetailDto
                       ? `Học bù tại ${makeupDetailDto.receivingClassName} - ${formatDayMonth(
                           parseLocalDate(makeupDetailDto.receivingSessionDate),
-                        )}`
+                        )}${makeupDetailDto.seriesId ? " · Hằng tuần" : ""}`
                       : "";
                     const receivingStatusNote = makeupDetailDto?.receivingAttendanceStatus
                       ? `Lớp nhận: ${attendanceStatusLabel(
@@ -1018,6 +1054,7 @@ export function AttendanceTab({
                         <div className="text-xs font-normal text-slate-500">
                           Từ {row.originalClassName} -{" "}
                           {formatDayMonth(parseLocalDate(row.originalSessionDate))}
+                          {row.seriesId ? " · Hằng tuần" : ""}
                         </div>
                       </TableCell>
                       {sessions.map((session) => {
@@ -1145,7 +1182,7 @@ export function AttendanceTab({
           }
         }}
         onSelectSession={setSelectedStudentMakeupSessionId}
-        onConfirm={() => void confirmStudentMakeup()}
+        onConfirm={(scope) => void confirmStudentMakeup(scope)}
       />
 
       <Dialog
@@ -1153,30 +1190,91 @@ export function AttendanceTab({
         onOpenChange={(open) => {
           if (!open) {
             setPendingRemoveStudentMakeup(null);
+            setStudentMakeupRemovalScope(null);
           }
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Hủy học bù cho học sinh này?</DialogTitle>
+            <DialogTitle>
+              {pendingRemoveStudentMakeup?.detail.seriesId
+                ? "Hủy lịch học bù cố định?"
+                : "Hủy học bù cho học sinh này?"}
+            </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {pendingRemoveStudentMakeup
-              ? `Hủy học bù của ${pendingRemoveStudentMakeup.student.fullName} cho buổi ${weekdayLabel(
+              ? `${pendingRemoveStudentMakeup.detail.seriesId ? "Chọn phạm vi hủy lịch học bù của" : "Hủy học bù của"} ${pendingRemoveStudentMakeup.student.fullName} cho buổi ${weekdayLabel(
                   pendingRemoveStudentMakeup.session.date,
                 )} ${formatDayMonth(
                   pendingRemoveStudentMakeup.session.date,
-                )}? Trạng thái buổi gốc sẽ trở về Chưa điểm danh và dòng học bù ở lớp nhận sẽ bị gỡ.`
+                )}${pendingRemoveStudentMakeup.detail.seriesId ? "." : "? Trạng thái buổi gốc sẽ trở về Chưa điểm danh và dòng học bù ở lớp nhận sẽ bị gỡ."}`
               : ""}
           </p>
+          {pendingRemoveStudentMakeup?.detail.seriesId ? (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setStudentMakeupRemovalScope("single")}
+                className={[
+                  "w-full rounded-lg border p-3 text-left transition-colors",
+                  studentMakeupRemovalScope === "single"
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-200 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                <span className="block font-medium text-slate-950">Chỉ buổi này</span>
+                <span className="mt-0.5 block text-sm text-slate-600">
+                  Các tuần sau trong chuỗi vẫn được giữ nguyên.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStudentMakeupRemovalScope("following")}
+                className={[
+                  "w-full rounded-lg border p-3 text-left transition-colors",
+                  studentMakeupRemovalScope === "following"
+                    ? "border-red-300 bg-red-50"
+                    : "border-slate-200 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                <span className="block font-medium text-slate-950">
+                  Buổi này và các buổi tiếp theo
+                </span>
+                <span className="mt-0.5 block text-sm text-slate-600">
+                  Hủy toàn bộ lịch bù cố định kể từ tuần đang chọn.
+                </span>
+              </button>
+            </div>
+          ) : null}
+          {pendingRemoveStudentMakeup?.replacementStatus ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              Sau khi gỡ lịch học bù, riêng buổi đang chọn sẽ được đánh dấu{" "}
+              <span className="font-medium text-slate-950">
+                {attendanceStatusLabel(pendingRemoveStudentMakeup.replacementStatus)}
+              </span>
+              .
+            </p>
+          ) : null}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
                 Không
               </Button>
             </DialogClose>
-            <Button type="button" onClick={() => void confirmRemoveStudentMakeup()}>
-              Xác nhận hủy
+            <Button
+              type="button"
+              variant={studentMakeupRemovalScope === "following" ? "destructive" : "default"}
+              disabled={!studentMakeupRemovalScope}
+              onClick={() => void confirmRemoveStudentMakeup()}
+            >
+              {pendingRemoveStudentMakeup?.replacementStatus
+                ? `${studentMakeupRemovalScope === "following" ? "Gỡ lịch từ đây" : "Gỡ buổi này"}, đánh dấu ${attendanceStatusLabel(
+                    pendingRemoveStudentMakeup.replacementStatus,
+                  )}`
+                : studentMakeupRemovalScope === "following"
+                  ? "Hủy từ buổi này"
+                  : "Hủy buổi này"}
             </Button>
           </DialogFooter>
         </DialogContent>
