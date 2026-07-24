@@ -16,11 +16,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    },
-    "ignoreDeprecations": "5.0"
+    }
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

@@ -113,7 +113,7 @@ Khi cần hỗ trợ, có thể gửi file sao lưu cho developer để kiểm t
 
 - App hiện là single-user local desktop app.
 - Không có cloud sync/server trong MVP.
-- Không hard-delete học sinh trong luồng sử dụng thông thường.
+- Học sinh đã nghỉ và đã hoàn tất toàn bộ học phí có thể được xóa khỏi danh sách lớp bằng lưu trữ mềm; lịch sử điểm danh, điểm số và học phí không bị xóa.
 - STT hiện trên UI được tính theo thứ tự hiển thị, không dùng database id.
 - Các quy tắc UI riêng cho dự án nằm trong `src/CODEX_UI_RULES.md`.
 

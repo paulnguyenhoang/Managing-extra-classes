@@ -39,6 +39,12 @@ export function reactivateStudentMembership(membershipId: number) {
   });
 }
 
+export function archiveStudentMembership(membershipId: number) {
+  return invoke<void>("archive_student_membership", {
+    request: { membershipId },
+  });
+}
+
 export function importStudentsForClass(input: ImportStudentsInput) {
   return invoke<ImportStudentsSummary>("import_students_for_class", { request: input });
 }

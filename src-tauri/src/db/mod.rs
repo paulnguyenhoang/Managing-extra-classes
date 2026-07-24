@@ -77,6 +77,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "012_student_makeup_series",
         sql: include_str!("../../migrations/012_student_makeup_series.sql"),
     },
+    Migration {
+        version: 13,
+        name: "013_archive_class_membership",
+        sql: include_str!("../../migrations/013_archive_class_membership.sql"),
+    },
 ];
 
 pub fn latest_defined_migration() -> (i64, &'static str) {

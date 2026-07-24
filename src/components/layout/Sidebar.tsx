@@ -2,6 +2,8 @@ import {
   CalendarCheck,
   GraduationCap,
   HardDriveDownload,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   WalletCards,
 } from "lucide-react";
@@ -18,16 +20,41 @@ export type SidebarScreen = (typeof navigationItems)[number]["id"];
 
 type SidebarProps = {
   activeScreen: SidebarScreen;
+  isCollapsed: boolean;
   onNavigate: (screen: SidebarScreen) => void;
+  onToggle: () => void;
 };
 
-export function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
+export function Sidebar({ activeScreen, isCollapsed, onNavigate, onToggle }: SidebarProps) {
   return (
-    <aside className="w-16 shrink-0 border-r bg-white px-2 py-4 lg:w-64 lg:px-4 lg:py-6">
-      <div className="mb-5 hidden rounded-lg border border-emerald-100 bg-emerald-50 p-4 lg:block">
-        <p className="text-sm font-medium text-emerald-950">Sổ lớp của thầy</p>
-        <p className="mt-1 text-sm text-emerald-800">Dữ liệu lưu trên máy tính này.</p>
+    <aside
+      className={[
+        "shrink-0 border-r bg-white px-2 py-4 transition-[width] duration-200",
+        isCollapsed ? "w-16" : "w-64 px-4",
+      ].join(" ")}
+    >
+      <div className={isCollapsed ? "mb-4 flex justify-center" : "mb-4 flex justify-end"}>
+        <button
+          type="button"
+          title={isCollapsed ? "Mở thanh điều hướng" : "Thu gọn thanh điều hướng"}
+          aria-label={isCollapsed ? "Mở thanh điều hướng" : "Thu gọn thanh điều hướng"}
+          onClick={onToggle}
+          className="flex size-9 items-center justify-center rounded-lg border text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+        >
+          {isCollapsed ? (
+            <PanelLeftOpen className="size-4" />
+          ) : (
+            <PanelLeftClose className="size-4" />
+          )}
+        </button>
       </div>
+
+      {!isCollapsed ? (
+        <div className="mb-5 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+          <p className="text-sm font-medium text-emerald-950">Sổ lớp của thầy</p>
+          <p className="mt-1 text-sm text-emerald-800">Dữ liệu lưu trên máy tính này.</p>
+        </div>
+      ) : null}
 
       <nav className="space-y-2">
         {navigationItems.map((item) => {
@@ -41,14 +68,15 @@ export function Sidebar({ activeScreen, onNavigate }: SidebarProps) {
               title={item.label}
               onClick={() => onNavigate(item.id)}
               className={[
-                "flex h-11 w-full items-center justify-center gap-3 rounded-lg text-left text-sm font-medium lg:justify-start lg:px-3",
+                "flex h-11 w-full items-center gap-3 rounded-lg text-left text-sm font-medium",
+                isCollapsed ? "justify-center" : "justify-start px-3",
                 isActive
                   ? "bg-slate-900 text-white"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-950",
               ].join(" ")}
             >
               <Icon className="size-4" />
-              <span className="hidden lg:inline">{item.label}</span>
+              {!isCollapsed ? <span>{item.label}</span> : null}
             </button>
           );
         })}

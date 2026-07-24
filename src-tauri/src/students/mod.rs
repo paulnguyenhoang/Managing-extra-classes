@@ -47,6 +47,12 @@ pub struct ReactivateStudentMembershipRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ArchiveStudentMembershipRequest {
+    membership_id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateStudentRequest {
     student_id: i64,
     full_name: String,
@@ -101,7 +107,7 @@ pub fn count_active_students_by_class(
         .query_row(
             "SELECT COUNT(*)
              FROM class_memberships
-             WHERE class_id = ?1 AND status = 'active'",
+             WHERE class_id = ?1 AND status = 'active' AND COALESCE(is_archived, 0) = 0",
             params![class_id],
             |row| row.get(0),
         )
@@ -297,6 +303,113 @@ pub fn pause_student_membership(
 
         Ok(())
     })
+}
+
+#[tauri::command]
+pub fn archive_student_membership(
+    database: tauri::State<'_, AppDatabase>,
+    request: ArchiveStudentMembershipRequest,
+) -> Result<(), String> {
+    database.with_connection_mut(|connection| {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("Không bắt đầu được transaction xóa học sinh: {error}"))?;
+
+        let membership: Option<(String, Option<String>, String, String)> = transaction
+            .query_row(
+                "SELECT cm.status, cm.left_month, cm.joined_month, c.end_month
+                 FROM class_memberships cm
+                 JOIN classes c ON c.id = cm.class_id
+                 JOIN students s ON s.id = cm.student_id
+                 WHERE cm.id = ?1
+                   AND COALESCE(cm.is_archived, 0) = 0
+                   AND s.is_archived = 0",
+                params![request.membership_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|error| format!("Không đọc được học sinh cần xóa: {error}"))?;
+        let (status, left_month, joined_month, class_end_month) = membership
+            .ok_or_else(|| "Không tìm thấy học sinh trong danh sách lớp.".to_string())?;
+
+        if status != "paused" {
+            return Err("Chỉ có thể xóa học sinh đã nghỉ học.".to_string());
+        }
+        let left_month = left_month
+            .ok_or_else(|| "Học sinh đã nghỉ nhưng chưa có tháng bắt đầu nghỉ.".to_string())?;
+        let unpaid_months = unpaid_months_before_leaving(
+            &transaction,
+            request.membership_id,
+            &joined_month,
+            &left_month,
+            &class_end_month,
+        )?;
+
+        if !unpaid_months.is_empty() {
+            let labels = unpaid_months
+                .iter()
+                .map(|month| crate::months::format_month_label(month))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "Chưa thể xóa học sinh vì còn nợ học phí: {labels}."
+            ));
+        }
+
+        transaction
+            .execute(
+                "UPDATE class_memberships
+                 SET is_archived = 1,
+                     archived_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?1",
+                params![request.membership_id],
+            )
+            .map_err(|error| format!("Không xóa được học sinh khỏi danh sách: {error}"))?;
+
+        transaction
+            .commit()
+            .map_err(|error| format!("Không commit được thao tác xóa học sinh: {error}"))
+    })
+}
+
+fn unpaid_months_before_leaving(
+    connection: &Connection,
+    membership_id: i64,
+    joined_month: &str,
+    left_month: &str,
+    class_end_month: &str,
+) -> Result<Vec<String>, String> {
+    let last_month = crate::months::add_months(left_month, -1)?;
+    let last_month = if last_month.as_str() > class_end_month {
+        class_end_month.to_string()
+    } else {
+        last_month
+    };
+
+    if last_month.as_str() < joined_month {
+        return Ok(Vec::new());
+    }
+
+    let months = crate::months::months_in_range(joined_month, &last_month)?;
+    let mut unpaid_months = Vec::new();
+
+    for month in months {
+        let settled = connection
+            .query_row(
+                "SELECT 1 FROM payments
+                 WHERE membership_id = ?1 AND month = ?2 AND status IN ('paid', 'waived')",
+                params![membership_id, month],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|error| format!("Không kiểm tra được học phí tháng {month}: {error}"))?;
+        if settled.is_none() {
+            unpaid_months.push(month);
+        }
+    }
+
+    Ok(unpaid_months)
 }
 
 #[tauri::command]
@@ -548,7 +661,9 @@ fn list_students_by_class_value(
                s.note
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
-             WHERE cm.class_id = ?1 AND s.is_archived = 0
+             WHERE cm.class_id = ?1
+               AND s.is_archived = 0
+               AND COALESCE(cm.is_archived, 0) = 0
              ORDER BY s.full_name COLLATE NOCASE ASC, cm.id ASC",
         )
         .map_err(|error| format!("Không chuẩn bị được truy vấn học sinh: {error}"))?;
@@ -580,7 +695,9 @@ fn get_student_list_item(
                s.note
              FROM class_memberships cm
              JOIN students s ON s.id = cm.student_id
-             WHERE cm.id = ?1 AND s.is_archived = 0",
+             WHERE cm.id = ?1
+               AND s.is_archived = 0
+               AND COALESCE(cm.is_archived, 0) = 0",
             params![membership_id],
             map_student_list_item,
         )

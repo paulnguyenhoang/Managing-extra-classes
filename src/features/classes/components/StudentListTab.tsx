@@ -3,6 +3,14 @@ import { Check, Download, Pencil, Plus, Search, Trash2, Upload } from "lucide-re
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -43,6 +51,7 @@ import {
 import { pickExcelImportFile } from "@/services/excelImportApi";
 import { getUnpaidMonthsForMembership } from "@/services/paymentApi";
 import {
+  archiveStudentMembership,
   createStudentForClass,
   importStudentsForClass,
   pauseStudentMembership,
@@ -101,7 +110,10 @@ export function StudentListTab({
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [pendingPauseStudent, setPendingPauseStudent] = useState<StudentListItem | null>(null);
-  const [debtByMembershipId, setDebtByMembershipId] = useState<Record<string, number>>({});
+  const [pendingArchiveStudent, setPendingArchiveStudent] = useState<StudentListItem | null>(null);
+  const [debtByMembershipId, setDebtByMembershipId] = useState<
+    Record<string, number | null>
+  >({});
   const hasValidRange =
     isValidMonthKey(classStartMonth) &&
     isValidMonthKey(classEndMonth) &&
@@ -168,12 +180,12 @@ export function StudentListTab({
           return [String(student.membershipId), months.length] as const;
         } catch (error) {
           console.warn("[students] debt check failed", error);
-          return [String(student.membershipId), 0] as const;
+          return [String(student.membershipId), null] as const;
         }
       }),
     ).then((entries) => {
       if (!cancelled) {
-        setDebtByMembershipId(Object.fromEntries(entries.filter(([, count]) => count > 0)));
+        setDebtByMembershipId(Object.fromEntries(entries));
       }
     });
 
@@ -439,6 +451,33 @@ export function StudentListTab({
     await onStudentsChanged?.();
   }
 
+  async function confirmArchiveStudent() {
+    if (!pendingArchiveStudent) {
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const studentName = pendingArchiveStudent.fullName;
+      await archiveStudentMembership(Number(pendingArchiveStudent.membershipId));
+      setPendingArchiveStudent(null);
+      await refresh();
+      await onStudentsChanged?.();
+      setSuccessMessage(`Đã xóa ${studentName} khỏi danh sách lớp.`);
+    } catch (error) {
+      console.warn("[students] archive failed", error);
+      setPendingArchiveStudent(null);
+      setErrorMessage(
+        typeof error === "string" ? error : "Không xóa được học sinh khỏi danh sách.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -515,18 +554,19 @@ export function StudentListTab({
         </p>
       )}
 
-      <div className="min-w-0 rounded-lg border bg-white">
-        <Table className="min-w-[1180px]">
+      <div className="min-w-0 rounded-lg border bg-white [&_[data-slot=table-container]]:overflow-x-hidden">
+        <Table className="w-full table-fixed">
           <TableHeader>
             <TableRow className="bg-slate-50">
-              <TableHead className="w-20">STT</TableHead>
-              <TableHead>Họ tên</TableHead>
-              <TableHead>Lớp ở trường</TableHead>
-              <TableHead>Trường</TableHead>
-              <TableHead>SĐT phụ huynh</TableHead>
-              <TableHead>Bắt đầu học</TableHead>
-              <TableHead>Trạng thái</TableHead>
-              <TableHead>Ghi chú</TableHead>
+              <TableHead className="w-12">STT</TableHead>
+              <TableHead className="w-[14%] whitespace-normal">Họ tên</TableHead>
+              <TableHead className="w-[8%]">Lớp</TableHead>
+              <TableHead className="w-[12%]">Trường</TableHead>
+              <TableHead className="w-[11%] whitespace-normal">SĐT phụ huynh</TableHead>
+              <TableHead className="w-[9%] whitespace-normal">Bắt đầu học</TableHead>
+              <TableHead className="w-[20%]">Trạng thái</TableHead>
+              <TableHead className="w-[14%]">Ghi chú</TableHead>
+              <TableHead className="w-24 text-right">Thao tác</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -534,11 +574,11 @@ export function StudentListTab({
               const studentRowId = String(student.id);
               const isNewStudent = newStudentIds.includes(studentRowId);
               const canEditRow = isEditing || isNewStudent;
-              const debtMonths = debtByMembershipId[String(student.membershipId)] ?? 0;
+              const debtMonths = debtByMembershipId[String(student.membershipId)];
 
               return (
                 <TableRow key={student.id}>
-                  <TableCell>
+                  <TableCell className="overflow-hidden">
                     <div className="flex items-center gap-2">
                       <span>{index + 1}</span>
                       {isNewStudent && (
@@ -582,13 +622,13 @@ export function StudentListTab({
                       updateStudentField(studentRowId, "parentPhone", normalizePhoneNumber(value))
                     }
                   />
-                  <TableCell>
+                  <TableCell className="whitespace-normal">
                     {isNewStudent ? (
                       <Select
                         value={student.joinedMonth}
                         onValueChange={(value) => updateStudentJoinedMonth(studentRowId, value)}
                       >
-                        <SelectTrigger className="h-8 min-w-32 bg-white">
+                        <SelectTrigger className="h-8 w-full min-w-0 bg-white">
                           <SelectValue placeholder="Tháng bắt đầu" />
                         </SelectTrigger>
                         <SelectContent>
@@ -605,7 +645,7 @@ export function StudentListTab({
                       </span>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-normal">
                     <div className="flex flex-wrap items-center gap-1.5">
                       {canEditRow && !isNewStudent ? (
                         <Select
@@ -614,7 +654,7 @@ export function StudentListTab({
                             handleStatusChange(student, value as StudentStatus)
                           }
                         >
-                          <SelectTrigger className="h-8 min-w-32 bg-white">
+                          <SelectTrigger className="h-8 w-full min-w-0 bg-white">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -630,10 +670,20 @@ export function StudentListTab({
                           Nghỉ từ {formatMonthLabel(student.leftMonth)}
                         </span>
                       ) : null}
-                      {debtMonths > 0 ? (
+                      {typeof debtMonths === "number" && debtMonths > 0 ? (
                         <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">
                           Còn nợ {debtMonths} tháng
                         </Badge>
+                      ) : student.status === "paused" && debtMonths === 0 ? (
+                        <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
+                          Đã đủ học phí
+                        </Badge>
+                      ) : student.status === "paused" && debtMonths === null ? (
+                        <Badge className="bg-red-100 text-red-800 hover:bg-red-100">
+                          Chưa kiểm tra được học phí
+                        </Badge>
+                      ) : student.status === "paused" ? (
+                        <span className="text-xs text-slate-500">Đang kiểm tra học phí...</span>
                       ) : null}
                     </div>
                   </TableCell>
@@ -644,6 +694,32 @@ export function StudentListTab({
                     placeholder="Ghi chú"
                     onChange={(value) => updateStudentField(studentRowId, "note", value)}
                   />
+                  <TableCell className="text-right">
+                    {student.status === "paused" && !isNewStudent ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="gap-1 border-red-200 px-2 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={isEditing || isSaving || debtMonths !== 0}
+                        title={
+                          debtMonths === 0
+                            ? "Xóa học sinh khỏi danh sách lớp"
+                            : debtMonths === null
+                              ? "Không thể kiểm tra học phí"
+                              : debtMonths === undefined
+                                ? "Đang kiểm tra học phí"
+                                : `Học sinh còn nợ ${debtMonths} tháng học phí`
+                        }
+                        onClick={() => setPendingArchiveStudent(student)}
+                      >
+                        <Trash2 className="size-3.5" />
+                        Xóa
+                      </Button>
+                    ) : (
+                      <span className="text-slate-300">-</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               );
             })}
@@ -679,6 +755,48 @@ export function StudentListTab({
         }}
         onConfirm={confirmPauseStudent}
       />
+
+      <Dialog
+        open={Boolean(pendingArchiveStudent)}
+        onOpenChange={(open) => {
+          if (!open && !isSaving) {
+            setPendingArchiveStudent(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xóa học sinh khỏi danh sách?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-slate-600">
+            <p>
+              Xóa <span className="font-medium text-slate-950">{pendingArchiveStudent?.fullName}</span>{" "}
+              khỏi danh sách lớp này?
+            </p>
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">
+              Học sinh đã nghỉ và đã hoàn tất học phí các tháng đã học.
+            </p>
+            <p>
+              Lịch sử điểm danh, điểm số và học phí vẫn được giữ lại để tra cứu khi cần.
+            </p>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={isSaving}>
+                Giữ lại
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isSaving}
+              onClick={() => void confirmArchiveStudent()}
+            >
+              {isSaving ? "Đang xóa..." : "Xóa khỏi danh sách"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -713,13 +831,13 @@ function EditableCell({
   onChange: (value: string) => void;
 }) {
   return (
-    <TableCell className={className}>
+    <TableCell className={`overflow-hidden whitespace-normal break-words ${className ?? ""}`}>
       {isEditing ? (
         <Input
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className="h-8 min-w-36 bg-white"
+          className="h-8 w-full min-w-0 bg-white"
         />
       ) : (
         value || "-"
@@ -740,14 +858,14 @@ function EditablePhoneCell({
   onChange: (value: string) => void;
 }) {
   return (
-    <TableCell>
+    <TableCell className="overflow-hidden whitespace-normal break-words">
       {isEditing ? (
         <Input
           value={formatPhoneNumber(value)}
           placeholder={placeholder}
           inputMode="numeric"
           onChange={(event) => onChange(event.target.value)}
-          className="h-8 min-w-36 bg-white"
+          className="h-8 w-full min-w-0 bg-white"
         />
       ) : (
         formatPhoneNumber(value) || "-"

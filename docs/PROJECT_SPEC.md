@@ -201,6 +201,7 @@ Sidebar hiện có 5 item:
 - Item global `"Học sinh"` không còn trong sidebar.
 - Sidebar chỉ đổi màn hình bằng local state, không đổi URL.
 - Khi click item trong sidebar lúc đang ở chi tiết lớp, app thoát khỏi chi tiết lớp vì `selectedClassId` bị reset.
+- Sidebar luôn bắt đầu ở trạng thái thu gọn `64px` khi mở ứng dụng và có nút mở rộng thành `256px` trong phiên sử dụng hiện tại.
 
 ## 9. Home/Tổng quan hiện tại
 
@@ -296,12 +297,15 @@ Table columns:
 
 - STT
 - Họ tên
-- Lớp ở trường
+- Lớp
 - Trường
 - SĐT phụ huynh
 - Bắt đầu học (joinedMonth, hiển thị MM/YYYY)
 - Trạng thái (kèm "Nghỉ từ MM/YYYY" và badge "Còn nợ X tháng" nếu có)
 - Ghi chú
+- Thao tác
+
+Table dùng layout cố định theo chiều rộng vùng nội dung, cho phép nội dung dài xuống dòng và không tạo thanh cuộn ngang. Cột `Thao tác` luôn nằm trong khung hình; thu gọn sidebar sẽ cấp thêm chiều rộng cho bảng.
 
 Search/filter:
 
@@ -345,8 +349,9 @@ Cho học sinh nghỉ / học lại (Phase 5.5):
 
 Delete/archive/mark inactive:
 
-- Không có xóa học sinh hiện có.
-- Không có archive/hard delete học sinh hiện có.
+- Học sinh đang học không có thao tác xóa. Học sinh đã nghỉ được tự động kiểm tra các tháng học phí phải thu từ `joinedMonth` đến tháng trước `leftMonth` (giới hạn theo tháng kết thúc lớp): `paid` và `waived` được xem là đã hoàn tất; thiếu payment row hoặc `unpaid` được xem là còn nợ.
+- Khi còn nợ, UI hiển thị badge `"Còn nợ X tháng"` và vô hiệu hóa nút `"Xóa"`. Khi không còn nợ, UI hiển thị `"Đã đủ học phí"` và cho mở dialog xác nhận. Nếu kiểm tra học phí lỗi hoặc đang tải thì nút xóa cũng bị khóa để tránh xóa nhầm.
+- Xác nhận `"Xóa khỏi danh sách"` gọi `archive_student_membership`. Đây là archive mềm ở `class_memberships` (`is_archived`, `archived_at`), không hard delete `students`, payment, score hay attendance. Học sinh biến mất khỏi roster và số học sinh đang học của lớp, nhưng toàn bộ dữ liệu lịch sử vẫn còn trong SQLite/backup.
 - Trạng thái học sinh có 2 giá trị trong type:
   - `active`: hiển thị `"Đang học"`
   - `paused`: hiển thị `"Đã nghỉ"` trong tab này
@@ -974,7 +979,7 @@ State/data source:
 - Phase 14 đã dọn wording `"bản thử nghiệm"`/`"dữ liệu mẫu"` khỏi UI chính; empty/loading/error state được rà lại để dùng ngôn ngữ tự nhiên hơn.
 - StudentListTab đã đồng bộ `studentCount` active membership với Home/ClassDetail sau khi lưu; các tab điểm danh/điểm/học phí hiện đọc cùng DB roster, trong đó điểm danh buổi thường/điểm/học phí đã lưu records theo từng domain.
 - Chưa có phân quyền hoặc nhiều người dùng.
-- Chưa có xử lý hard delete/archive học sinh hiện có.
+- Đã có archive mềm membership cho học sinh đã nghỉ và đã hoàn tất học phí; không hard delete dữ liệu học sinh hay lịch sử nghiệp vụ.
 - Chưa có lưu lịch sử học phí theo tháng.
 - Attendance MVP không có `"Có phép"` và không có `"Đi muộn"`; nếu muốn dùng lại cần xác nhận model mới.
 - Class-level makeup và student-level makeup đều đã persist bằng SQLite (Phase 7B/7C).
@@ -995,7 +1000,7 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 | `classes` | Implemented Phase 3 + 5.5: lưu tên lớp, khối, học phí tháng, phòng, ghi chú, năm học, `start_month`, `end_month`, `status` |
 | `class_schedules` | Implemented Phase 3: Header lớp sửa ngày trong tuần, giờ bắt đầu/kết thúc; AttendanceTab sinh session theo lịch; UI hiện kiểm tra trùng giờ với lớp đã load |
 | `students` | Implemented Phase 4: lưu thông tin học sinh, không hard delete trong flow hiện tại |
-| `class_memberships` | Implemented Phase 4 + 5.5: quan hệ học sinh-lớp, status active/paused, `joined_month`, `left_month` exclusive thuộc membership |
+| `class_memberships` | Implemented Phase 4 + 5.5 + migration 013: quan hệ học sinh-lớp, status active/paused, `joined_month`, `left_month` exclusive và archive mềm bằng `is_archived`/`archived_at` |
 | `attendance_sessions` | Implemented Phase 7B: regular sinh lười từ schedule; class_makeup liên kết buổi gốc; lưu type/status/lock và cancel/restore |
 | `attendance_records` | Implemented Phase 7C cho học sinh chính thức ở regular/class_makeup: lưu `present`/`absent`/`makeup`; không có row nghĩa là empty. `makeup` theo học sinh được ghi qua `create_student_makeup_record` |
 | `student_makeup_records` | Implemented Phase 7C: lưu flow học bù theo học sinh, gồm buổi/lớp gốc, lớp/session nhận học bù, thứ tự buổi trong tuần và `receiving_attendance_status` |
@@ -1035,7 +1040,7 @@ Phần lõi đã implemented ở SQLite đến Phase 8 (gồm backup/restore). P
 
 ## 22. Questions to confirm before backend
 
-- Đã xác nhận: xóa học sinh không hard delete trong normal use; UI hiện tại chỉ cho xóa dòng mới chưa lưu.
+- Đã xác nhận: xóa học sinh đã nghỉ khỏi danh sách là archive mềm membership và chỉ được phép khi các tháng phải thu đều đã đóng/miễn giảm; dòng mới chưa lưu vẫn có thể xóa trực tiếp trên UI.
 - Đã xác nhận: một học sinh có thể thuộc nhiều lớp qua `class_memberships`.
 - Đã xác nhận: trạng thái `"Đã nghỉ"` là trạng thái theo từng lớp, lưu ở `class_memberships`.
 - Tạo học sinh inline hiện validate bắt buộc họ tên; có cần bắt buộc thêm SĐT không?

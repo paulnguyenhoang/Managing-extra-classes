@@ -40,7 +40,7 @@ Mục tiêu backend cho MVP:
 
 Nguyên tắc dữ liệu đã chốt:
 
-- Không hard-delete học sinh trong sử dụng bình thường.
+- Không hard-delete học sinh trong sử dụng bình thường; học sinh đã nghỉ và hoàn tất học phí chỉ được archive mềm khỏi danh sách lớp.
 - Một học sinh có thể thuộc nhiều lớp.
 - Trạng thái học sinh được lưu theo quan hệ học sinh-lớp, không lưu global trên `students`.
 - Attendance statuses là enum một giá trị duy nhất cho mỗi ô học sinh/buổi:
@@ -372,7 +372,7 @@ ON class_memberships (class_id, student_id);
 Notes:
 
 - Nếu học sinh đã nghỉ lớp, update membership `status = 'paused'`.
-- Không xóa membership trong normal flow để giữ lịch sử học phí, điểm, điểm danh.
+- Không hard-delete membership trong normal flow. Migration `013_archive_class_membership.sql` bổ sung `is_archived` và `archived_at`; archive mềm giữ nguyên liên kết học phí, điểm và điểm danh.
 - `joined_month`/`left_month` được thêm bằng migration `006_class_month_lifecycle`.
 - `left_month` là exclusive boundary: tháng đầu tiên học sinh không còn học lớp đó.
 - Reactivate membership set `status = active`, `left_month = NULL`.
@@ -864,7 +864,7 @@ Deliverables:
 Chưa làm trong Phase 4:
 
 - Gán một học sinh đã có vào lớp khác từ UI.
-- Archive/hard delete học sinh hiện có.
+- Archive mềm học sinh đã nghỉ đã triển khai: chỉ cho phép khi mọi tháng từ `joined_month` đến tháng trước `left_month` (clamp theo `classes.end_month`) có payment `paid` hoặc `waived`; thiếu row/`unpaid` đều chặn thao tác.
 - Persistence cho Attendance.
 
 ### P0 trước Phase 5. Chuẩn hóa roster cho tab chi tiết lớp

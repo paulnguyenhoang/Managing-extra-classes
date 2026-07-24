@@ -66,6 +66,7 @@ pub fn run() {
             students::update_class_membership_status,
             students::pause_student_membership,
             students::reactivate_student_membership,
+            students::archive_student_membership,
             students::import_students_for_class,
             payments::list_payments_by_class_month,
             payments::set_payment_paid,
